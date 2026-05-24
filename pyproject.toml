@@ -1,24 +1,22 @@
-[project]
-name = "catan-engine"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
-]
-requires-python = ">=3.12"
-dependencies = [
-    "torch>=2.7.1",
-]
-
-[project.scripts]
-catan-engine = "catan_engine:main"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [dependency-groups]
 dev = [
+    "expecttest>=0.2.1",
+    "hypothesis>=6.131.0",
+    "mypy>=2.1.0",
+    "pre-commit>=4.2.0",
     "pytest>=8.4.0",
+    "ruff>=0.15.14",
 ]
+
+[tool.mypy]
+mypy_path = ["packages/catan-engine/src", "packages/catan-render/src"]
+strict = true
+disallow_any_explicit = false
+disallow_any_generics = false
+
+[[tool.mypy.overrides]]
+module = ["jax.*", "jaxlib.*"]
+ignore_missing_imports = true

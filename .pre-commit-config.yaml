@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest packages/catan-engine/tests/
+        language: system
+        pass_filenames: false
+        always_run: true

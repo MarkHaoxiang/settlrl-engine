@@ -1,0 +1,22 @@
+[project]
+name = "catan-render"
+version = "0.1.0"
+description = "Catan rendering library"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "catan-engine",
+    "fastapi[standard]>=0.115.0",
+]
+
+[project.scripts]
+catan-render = "catan_render:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+catan-engine = { workspace = true }

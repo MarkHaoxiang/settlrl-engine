@@ -1,0 +1,27 @@
+[project]
+name = "catan-engine"
+version = "0.1.0"
+description = "Catan game engine"
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "jax[cpu]>=0.4.0",
+]
+
+[project.scripts]
+catan-engine = "catan_engine:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+disallow_any_explicit = false
+disallow_any_generics = false
