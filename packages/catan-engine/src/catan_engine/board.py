@@ -1,11 +1,28 @@
+from typing import NamedTuple
+
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, UInt8
 
 from catan_engine.port import Port
 from catan_engine.tile import Tile
 
 N_TILES = 19
 N_VERTICES = 54
+N_EDGES = 72  # V - E + F = 2, F = N_TILES + 1 outer face
+N_PORTS = 9
+
+TileResourceArray = UInt8[Array, f"batch tiles={N_TILES}"]
+TileNumberArray = UInt8[Array, f"batch tiles={N_TILES}"]
+PortAllocationArray = UInt8[Array, f"batch ports={N_PORTS}"]
+
+
+class BoardStatic(NamedTuple):
+    """Immutable board geometry: tile resources, number tokens, and port types."""
+
+    tile_resource: jax.Array
+    tile_number: jax.Array
+    port_allocation: jax.Array
 
 
 def _generate_mappings() -> tuple[jax.Array, jax.Array]:
@@ -50,19 +67,17 @@ def _generate_mappings() -> tuple[jax.Array, jax.Array]:
 
 _tile_vertex_map, _port_vertices_map = _generate_mappings()
 assert _tile_vertex_map.shape == (N_TILES, 6)
-assert _port_vertices_map.shape == (9, 2)
+assert _port_vertices_map.shape == (N_PORTS, 2)
 
 
 def make_board(
     batch_size: int = 1,
     key: jax.Array | None = None,
-) -> dict[str, jax.Array]:
+) -> BoardStatic:
     B = batch_size
     key = key if key is not None else jax.random.key(0)
     key, k1, k2, k3 = jax.random.split(key, 4)
 
-    # Create board tiles
-    # Generate tile numbers
     tile_number = jnp.array(
         [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12],
         dtype=jnp.uint8,
@@ -75,7 +90,7 @@ def make_board(
     tile_number = jnp.concatenate(  # Concatenate desert tile with no number
         [tile_number, jnp.zeros((B, 1), dtype=jnp.uint8)], axis=1
     )
-    # Assign resources to tiles
+
     tile_resource = jnp.zeros((B, N_TILES), dtype=jnp.uint8)
     tile_resource = tile_resource.at[:, :4].set(Tile.SHEEP.value)
     tile_resource = tile_resource.at[:, 4:8].set(Tile.WHEAT.value)
@@ -88,7 +103,6 @@ def make_board(
     tile_resource = tile_resource[batch_idx, allocation_idxs]
     tile_number = tile_number[batch_idx, allocation_idxs]
 
-    # Generate ports
     port_allocation = jnp.array(
         [
             Port.SHEEP.value,
@@ -105,11 +119,11 @@ def make_board(
     )
     port_allocation = jnp.tile(port_allocation, (B, 1))
     keys = jax.random.split(k3, B)
-    allocation_idxs = jnp.stack([jax.random.permutation(k, 9) for k in keys])
+    allocation_idxs = jnp.stack([jax.random.permutation(k, N_PORTS) for k in keys])
     port_allocation = port_allocation[batch_idx, allocation_idxs]
 
-    return {
-        "tile_resource": tile_resource,
-        "tile_number": tile_number,
-        "port_allocation": port_allocation,
-    }
+    return BoardStatic(
+        tile_resource=tile_resource,
+        tile_number=tile_number,
+        port_allocation=port_allocation,
+    )

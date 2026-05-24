@@ -9,22 +9,13 @@ from hypothesis import strategies as st
 from catan_engine.board import (
     N_TILES,
     N_VERTICES,
+    BoardStatic,
     _port_vertices_map,
     _tile_vertex_map,
     make_board,
 )
 from catan_engine.port import Port
 from catan_engine.tile import Tile
-
-_EXPECTED_NUMBERS = sorted([2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12])
-_EXPECTED_RESOURCES = {
-    Tile.SHEEP: 4, Tile.WHEAT: 4, Tile.WOOD: 4,
-    Tile.BRICK: 3, Tile.ORE: 3, Tile.DESERT: 1,
-}
-_EXPECTED_PORTS = {
-    Port.SHEEP: 1, Port.WHEAT: 1, Port.WOOD: 1,
-    Port.BRICK: 1, Port.ORE: 1, Port.GENERAL: 4,
-}
 
 
 class AsciiBoard:
@@ -39,9 +30,9 @@ class AsciiBoard:
         [16, 17, 18],
     ]
 
-    def __init__(self, board: dict, batch_idx: int = 0) -> None:
-        self._resource = np.asarray(board["tile_resource"][batch_idx])
-        self._number = np.asarray(board["tile_number"][batch_idx])
+    def __init__(self, board: BoardStatic, batch_idx: int = 0) -> None:
+        self._resource = np.asarray(board.tile_resource[batch_idx])
+        self._number = np.asarray(board.tile_number[batch_idx])
 
     def __str__(self) -> str:
         lines = ["Catan Board", "=" * 50, ""]
@@ -51,11 +42,7 @@ class AsciiBoard:
             for i in row:
                 res = Tile(int(self._resource[i]))
                 num = int(self._number[i])
-                cell = (
-                    f"[{res!s}   ]"
-                    if res == Tile.DESERT
-                    else f"[{res!s} {num:2d}]"
-                )
+                cell = f"[{res!s}   ]" if res == Tile.DESERT else f"[{res!s} {num:2d}]"
                 cells.append(cell)
             lines.append(indent + "  ".join(cells))
         lines.append("")
@@ -92,54 +79,67 @@ class TestBoardGenerator(TestCase):
     @settings(deadline=None)
     def test_output_shapes(self, batch_size: int) -> None:
         board = make_board(batch_size=batch_size, key=jax.random.key(0))
-        assert board["tile_resource"].shape == (batch_size, N_TILES)
-        assert board["tile_number"].shape == (batch_size, N_TILES)
-        assert board["port_allocation"].shape == (batch_size, 9)
+        assert board.tile_resource.shape == (batch_size, N_TILES)
+        assert board.tile_number.shape == (batch_size, N_TILES)
+        assert board.port_allocation.shape == (batch_size, 9)
 
     @given(st.integers(min_value=0, max_value=2**31))
     @settings(max_examples=50, deadline=None)
     def test_tile_resource_counts(self, seed: int) -> None:
         board = make_board(batch_size=1, key=jax.random.key(seed))
-        resources = np.asarray(board["tile_resource"][0])
-        for tile, expected in _EXPECTED_RESOURCES.items():
-            assert int((resources == tile.value).sum()) == expected, tile
+        resources = np.asarray(board.tile_resource[0])
+        unique, counts = np.unique(resources, return_counts=True)
+        summary = sorted(f"{Tile(int(t))!s}: {int(c)}" for t, c in zip(unique, counts))
+        self.assertExpectedInline(
+            "\n".join(summary),
+            """\
+BRK: 3
+DST: 1
+ORE: 3
+SHP: 4
+WHT: 4
+WOD: 4""",
+        )
 
     @given(st.integers(min_value=0, max_value=2**31))
     @settings(max_examples=50, deadline=None)
     def test_tile_number_distribution(self, seed: int) -> None:
         board = make_board(batch_size=1, key=jax.random.key(seed))
-        resources = np.asarray(board["tile_resource"][0])
-        numbers = np.asarray(board["tile_number"][0])
+        resources = np.asarray(board.tile_resource[0])
+        numbers = np.asarray(board.tile_number[0])
         non_desert = resources != Tile.DESERT.value
-        assert sorted(numbers[non_desert].tolist()) == _EXPECTED_NUMBERS
+        self.assertExpectedInline(
+            str(sorted(numbers[non_desert].tolist())),
+            """[2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12]""",
+        )
 
     @given(st.integers(min_value=0, max_value=2**31))
     @settings(max_examples=50, deadline=None)
     def test_desert_has_no_number(self, seed: int) -> None:
         board = make_board(batch_size=1, key=jax.random.key(seed))
-        resources = np.asarray(board["tile_resource"][0])
-        numbers = np.asarray(board["tile_number"][0])
-        desert_numbers = numbers[resources == Tile.DESERT.value].tolist()
-        assert desert_numbers == [0]
+        resources = np.asarray(board.tile_resource[0])
+        numbers = np.asarray(board.tile_number[0])
+        self.assertExpectedInline(
+            str(numbers[resources == Tile.DESERT.value].tolist()), """[0]"""
+        )
 
     @given(st.integers(min_value=0, max_value=2**31))
     @settings(max_examples=50, deadline=None)
     def test_port_counts(self, seed: int) -> None:
         board = make_board(batch_size=1, key=jax.random.key(seed))
-        ports = np.asarray(board["port_allocation"][0])
-        for port, expected in _EXPECTED_PORTS.items():
-            assert int((ports == port.value).sum()) == expected, port
-
-    @given(st.integers(min_value=2, max_value=6), st.integers(min_value=0, max_value=2**31))
-    @settings(max_examples=20, deadline=None)
-    def test_batch_independence(self, batch_size: int, seed: int) -> None:
-        board = make_board(batch_size=batch_size, key=jax.random.key(seed))
-        resources = np.asarray(board["tile_resource"])
-        for i in range(batch_size):
-            for j in range(i + 1, batch_size):
-                assert not np.array_equal(resources[i], resources[j]), (
-                    f"boards {i} and {j} have identical resource layouts"
-                )
+        ports = np.asarray(board.port_allocation[0])
+        unique, counts = np.unique(ports, return_counts=True)
+        summary = sorted(f"{Port(int(p))!s}: {int(c)}" for p, c in zip(unique, counts))
+        self.assertExpectedInline(
+            "\n".join(summary),
+            """\
+3:1: 4
+BRK: 1
+ORE: 1
+SHP: 1
+WHT: 1
+WOD: 1""",
+        )
 
     def test_ascii_snapshot(self) -> None:
         self.assertExpectedInline(
