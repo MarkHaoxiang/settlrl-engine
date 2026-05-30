@@ -1,70 +1,100 @@
 """Tests for the vectorized BuildCity action."""
 
+from typing import Callable
+
 import jax.numpy as jnp
 import numpy as np
-from expecttest import TestCase
+from expecttest import assert_expected_inline
 
-from catan_engine.action_vec import ActionResult
-from catan_engine.action_vec import BuildCity
-from catan_engine.board import (
-    Board,
-    give,
-    make_board,
-    place_settlement,
-    set_phase,
-    to_main,
-)
+from catan_engine.action import ActionResult, BuildCity
+from catan_engine.board import Board, give, set_phase
 from catan_engine.state import GamePhase
 from tests.actions.fixtures import fmt
 
 
-def _city_fixture() -> tuple[Board, int]:
-    """MAIN board where player 0 owns a settlement at vertex 0 with one city's worth."""
-    board = to_main(make_board())
-    board = place_settlement(board, 0, 0)
-    board = give(board, 0, [0, 2, 0, 0, 3])  # one city's worth: 2 wheat + 3 ore
-    return board, 0
-
-
-class TestBuildCity(TestCase):
-    def test_success(self) -> None:
-        board, vertex = _city_fixture()
-        state, result = BuildCity()(board, jnp.array([vertex]))
-        self.assertExpectedInline(
-            fmt(
-                result,
-                kind=int(state.vertex_type[0, vertex]),
-                vp=int(state.victory_points[0, 0]),
-                wheat=int(state.player_resources[0, 0, 1]),
-                ore=int(state.player_resources[0, 0, 4]),
-            ),
-            """\
+def test_success(city_board: tuple[Board, int], render: Callable[..., str]) -> None:
+    board, vertex = city_board
+    state, result = BuildCity()(board, jnp.array([vertex]))
+    assert_expected_inline(
+        fmt(
+            result,
+            kind=int(state.vertex_type[0, vertex]),
+            vp=int(state.victory_points[0, 0]),
+            wheat=int(state.player_resources[0, 0, 1]),
+            ore=int(state.player_resources[0, 0, 4]),
+        ),
+        """\
 result=OK
 kind=2
 vp=2
 wheat=0
 ore=0""",
-        )
+    )
+    assert_expected_inline(render(board[0], state), """\
 
-    def test_invalid_wrong_phase(self) -> None:
-        board, vertex = _city_fixture()
-        board = set_phase(board, GamePhase.ROLL)
-        before = np.asarray(board[1].vertex_type)
-        state, result = BuildCity()(board, jnp.array([vertex]))
-        assert int(result[0]) == ActionResult.INVALID.value
-        assert np.array_equal(np.asarray(state.vertex_type), before)
 
-    def test_invalid_no_own_settlement(self) -> None:
-        # A distant empty vertex holds no settlement of the player's.
-        board, _ = _city_fixture()
-        lonely = 40
-        before = np.asarray(board[1].vertex_type)
-        state, result = BuildCity()(board, jnp.array([lonely]))
-        assert int(result[0]) == ActionResult.INVALID.value
-        assert np.array_equal(np.asarray(state.vertex_type), before)
 
-    def test_invalid_cannot_afford(self) -> None:
-        board, vertex = _city_fixture()
-        board = give(board, 0, [0, 0, 0, 0, 0])
-        _, result = BuildCity()(board, jnp.array([vertex]))
-        assert int(result[0]) == ActionResult.INVALID.value
+          ORE             3:1
+               /o\\     /o\\     /o\\
+              /   \\   /   \\   /   \\
+            o/     \\o/     \\o/     \\o
+            |  SHP  |  ORE  |  BRK  |
+            |   5   |   6   |  10   |
+            |       |       |  <R>  |
+           /o\\     /o\\     /o\\     /o\\   3:1
+          /   \\   /   \\   /   \\   /   \\
+        o/     \\o/     \\o/     \\A/     \\o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\\     /o\\     /o\\     /o\\     /o\\
+      /   \\   /   \\   /   \\   /   \\   /   \\
+    o/     \\o/     \\o/     \\o/     \\o/     \\o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\\     /o\\     /o\\     /o\\     /o\\     /o
+      \\   /   \\   /   \\   /   \\   /   \\   /
+       \\o/     \\o/     \\o/     \\o/     \\o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\\     /o\\     /o\\     /o\\     /o
+          \\   /   \\   /   \\   /   \\   /
+           \\o/     \\o/     \\o/     \\o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\\     /o\\     /o\\     /o
+              \\   /   \\   /   \\   /
+               \\o/     \\o/     \\o/
+          SHP             WHT
+
+
+""")
+
+
+def test_invalid_wrong_phase(city_board: tuple[Board, int]) -> None:
+    board, vertex = city_board
+    board = set_phase(board, GamePhase.ROLL)
+    before = np.asarray(board[1].vertex_type)
+    state, result = BuildCity()(board, jnp.array([vertex]))
+    assert int(result[0]) == ActionResult.INVALID.value
+    assert np.array_equal(np.asarray(state.vertex_type), before)
+
+
+def test_invalid_no_own_settlement(city_board: tuple[Board, int]) -> None:
+    # A distant empty vertex holds no settlement of the player's.
+    board, _ = city_board
+    lonely = 40
+    before = np.asarray(board[1].vertex_type)
+    state, result = BuildCity()(board, jnp.array([lonely]))
+    assert int(result[0]) == ActionResult.INVALID.value
+    assert np.array_equal(np.asarray(state.vertex_type), before)
+
+
+def test_invalid_cannot_afford(city_board: tuple[Board, int]) -> None:
+    board, vertex = city_board
+    board = give(board, 0, [0, 0, 0, 0, 0])
+    _, result = BuildCity()(board, jnp.array([vertex]))
+    assert int(result[0]) == ActionResult.INVALID.value

@@ -2,7 +2,7 @@
 
 Exposes the engine's batched transition as a single ``(action_type, params)``
 interface over all 15 actions. ``step`` and ``available`` are ``jit(vmap(...))``
-over the single-game dispatchers in ``action_vec``, so they run a whole batch of
+over the single-game dispatchers in ``action``, so they run a whole batch of
 games at once:
 
 - ``action_type``: ``(batch,)`` int array of ``ActionType`` codes.
@@ -15,7 +15,7 @@ games at once:
 applying anything (useful for action masking).
 
 The ``ActionType`` / ``ActionParams`` packing convention is documented on those
-types in ``catan_engine.action_vec``.
+types in ``catan_engine.action``.
 """
 
 from __future__ import annotations
@@ -24,11 +24,14 @@ from typing import cast
 
 import jax
 
-from catan_engine.action_vec import (
+from catan_engine.action import (
     ActionParams,
     ActionResult,
     ActionType,
+    ActionTypeArray,
+    Mask,
     N_ACTION_TYPES,
+    ResultCode,
     action_available,
     apply_action,
 )
@@ -49,13 +52,15 @@ _available = jax.jit(jax.vmap(action_available, in_axes=(0, 0, 0, 0)))
 
 
 def step(
-    board: Board, action_type: jax.Array, params: ActionParams
-) -> tuple[BoardState, jax.Array]:
+    board: Board, action_type: ActionTypeArray, params: ActionParams
+) -> tuple[BoardState, ResultCode]:
     """Apply one (batched) action per game; return (new state, ActionResult codes)."""
     new_state, result = _step(board[0], board[1], action_type, params)
     return new_state, result
 
 
-def available(board: Board, action_type: jax.Array, params: ActionParams) -> jax.Array:
+def available(
+    board: Board, action_type: ActionTypeArray, params: ActionParams
+) -> Mask:
     """``(batch,)`` legality mask for the chosen action per game (no state change)."""
-    return cast(jax.Array, _available(board[0], board[1], action_type, params))
+    return cast(Mask, _available(board[0], board[1], action_type, params))

@@ -4,8 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from catan_engine import env
-from catan_engine.action_vec import ActionParams, ActionResult, ActionType, BuildRoad
-from catan_engine.board import replicate, set_phase, to_main
+from catan_engine.action import ActionParams, ActionResult, ActionType, BuildRoad
+from catan_engine.board import make_board, replicate, set_phase
 from catan_engine.resources import N_RESOURCES
 from catan_engine.state import GamePhase
 from tests.actions.fixtures import road_fixture
@@ -13,7 +13,7 @@ from tests.actions.fixtures import road_fixture
 
 def _params(index: list[int], target: list[int], batch: int) -> ActionParams:
     return ActionParams(
-        index=jnp.asarray(index, dtype=jnp.int32),
+        idx=jnp.asarray(index, dtype=jnp.int32),
         target=jnp.asarray(target, dtype=jnp.int32),
         resources=jnp.zeros((batch, N_RESOURCES), dtype=jnp.int32),
     )
@@ -69,7 +69,7 @@ class TestEnvStep:
 
     def test_roll_dice_via_dispatch(self) -> None:
         # Parameterless action dispatches and transitions ROLL -> MAIN (no 7 here).
-        board = set_phase(to_main(road_fixture()[0]), GamePhase.ROLL)
+        board = set_phase(make_board(seed=0), GamePhase.ROLL)  # has_rolled = 0
         atype = jnp.asarray([ActionType.ROLL_DICE], dtype=jnp.int32)
         state, result = env.step(board, atype, _params([0], [0], batch=1))
         assert int(result[0]) == ActionResult.SUCCESS.value

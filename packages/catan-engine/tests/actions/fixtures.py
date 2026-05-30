@@ -11,8 +11,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from catan_engine.action_vec import ActionResult
-from catan_engine.action_vec import BuildRoad
+from catan_engine.action import ActionResult
+from catan_engine.action import BuildRoad
 from catan_engine.board import (
     Board,
     give,
@@ -23,7 +23,7 @@ from catan_engine.board import (
     to_main,
 )
 from catan_engine.layout import NO_INDEX, N_EDGES
-from catan_engine.rules_vec import EDGE_V, V_NBR
+from catan_engine.geometry import EDGE_V, V_NBR
 
 _EDGE_V = np.asarray(EDGE_V)
 _V_NBR = np.asarray(V_NBR)

@@ -1,13 +1,15 @@
 """Vectorized (JAX-native) Catan actions -- the engine's action layer.
 
 Each action's core is a pure transition on a **single, unbatched game** written
-in traceable JAX (see ``catan_engine.rules_vec``). The public ``is_available`` /
-``__call__`` are ``jax.jit(jax.vmap(...))`` over those cores, so they operate on
-a whole batch at once: ``params`` are batched arrays and the outcome is a
-``(batch,)`` array of ``ActionResult`` codes.
+in traceable JAX, composed from the focused rule modules (``economy``,
+``placement``, ``awards``, ``trade``, ``dice``, ``robber``, ``setup``,
+``development``, ``geometry``). The public ``is_available`` / ``__call__`` are
+``jax.jit(jax.vmap(...))`` over those cores, so they operate on a whole batch at
+once: ``params`` are batched arrays and the outcome is a ``(batch,)`` array of
+``ActionResult`` codes.
 
 Application is branchless: the candidate next state is always computed, then
-selected against the current state with ``rules_vec.tree_select`` using the
+selected against the current state with ``state.tree_select`` using the
 ``is_available`` mask. Illegal games are returned unchanged with ``INVALID``.
 
 Player convention (see state.py): players are 0-indexed; ``vertex_owner`` /
@@ -24,8 +26,19 @@ from typing import Generic, NamedTuple, TypeVar, cast
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Bool, Int
 
-from catan_engine import rules_vec as rv
+from catan_engine import (
+    awards,
+    development,
+    dice,
+    economy,
+    geometry,
+    placement,
+    robber,
+    setup,
+    trade,
+)
 from catan_engine.board import Board
 from catan_engine.dev_cards import DevCard
 from catan_engine.layout import BoardLayout, N_EDGES, N_TILES, N_VERTICES
@@ -36,9 +49,26 @@ from catan_engine.state import (
     VICTORY_POINTS_TO_WIN,
     BoardState,
     GamePhase,
+    tree_select,
 )
 
 ParamsT = TypeVar("ParamsT")
+
+# ---------------------------------------------------------------------------
+# jaxtyping aliases for the action layer.
+#
+# Following the BoardState convention (state.py), every array carries a leading
+# variable `batch` axis; `jax.vmap` over the single-game cores in this module
+# strips it, and all other axes are fixed game constants. `is_available` yields
+# a per-game `Mask`; applying an action yields `(BoardState, ResultCode)`.
+# ---------------------------------------------------------------------------
+Mask = Bool[Array, "batch"]  # per-game legality / win flag
+ResultCode = Int[Array, "batch"]  # ActionResult codes
+ActionTypeArray = Int[Array, "batch"]  # ActionType codes (unified dispatch)
+IndexParam = Int[Array, "batch"]  # vertex / edge / tile / resource / player / victim
+ResourceParam = Int[Array, f"batch resources={N_RESOURCES}"]  # per-resource counts
+TwoIndexParams = tuple[IndexParam, IndexParam]  # e.g. (tile, victim), (give, receive)
+DiscardParams = tuple[IndexParam, ResourceParam]  # (player, per-resource discard counts)
 
 
 class ActionResult(IntEnum):
@@ -58,7 +88,7 @@ GAME_COMPLETE = jnp.int32(ActionResult.GAME_COMPLETE.value)
 
 
 class VecAction(ABC, Generic[ParamsT]):
-    """Batched analogue of ``action.Action``: methods return JAX arrays.
+    """Base class for the batched actions: methods return JAX arrays.
 
     ``is_available`` returns a ``(batch,)`` bool mask; ``__call__`` returns the
     new batched ``BoardState`` and a ``(batch,)`` int array of ActionResult
@@ -66,15 +96,25 @@ class VecAction(ABC, Generic[ParamsT]):
     """
 
     @abstractmethod
-    def is_available(self, board: Board, params: ParamsT) -> jax.Array: ...
+    def is_available(self, board: Board, params: ParamsT) -> Mask: ...
 
     @abstractmethod
-    def __call__(self, board: Board, params: ParamsT) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: ParamsT) -> tuple[BoardState, ResultCode]:
         ...
 
 
-def _outcome(available: jax.Array, won: jax.Array) -> jax.Array:
+def _outcome(available: Mask, won: Mask) -> ResultCode:
     return jnp.where(available, jnp.where(won, GAME_COMPLETE, SUCCESS), INVALID)
+
+
+def _main_after_roll(state: BoardState) -> jax.Array:
+    """MAIN phase with the dice already rolled: the build / bank-trade window."""
+    return (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
+
+
+def _main_no_dev_played(state: BoardState) -> jax.Array:
+    """MAIN phase with no development card played yet this turn."""
+    return (state.phase == GamePhase.MAIN) & (state.dev_played == 0)
 
 
 # ===========================================================================
@@ -83,22 +123,22 @@ def _outcome(available: jax.Array, won: jax.Array) -> jax.Array:
 
 
 def _build_road_avail(
-    layout: BoardLayout, state: BoardState, edge: jax.Array
-) -> jax.Array:
+    layout: BoardLayout, state: BoardState, edge: IndexParam
+) -> Mask:
     in_range = (edge >= 0) & (edge < N_EDGES)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
-    main = (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
-    has_road = rv.roads_left(state.edge_road, player) > 0
-    placeable = rv.road_placeable(state.edge_road, state.vertex_owner, player, e)
+    main = _main_after_roll(state)
+    has_road = economy.roads_left(state.edge_road, player) > 0
+    placeable = placement.road_placeable(state.edge_road, state.vertex_owner, player, e)
     free = state.free_roads > 0
-    afford = rv.can_afford(state.player_resources[player], rv.ROAD_COST_ARR)
+    afford = economy.can_afford(state.player_resources[player], economy.ROAD_COST_ARR)
     return in_range & main & has_road & placeable & (free | afford)
 
 
 def _build_road_apply(
-    layout: BoardLayout, state: BoardState, edge: jax.Array
-) -> tuple[BoardState, jax.Array]:
+    layout: BoardLayout, state: BoardState, edge: IndexParam
+) -> tuple[BoardState, ResultCode]:
     available = _build_road_avail(layout, state, edge)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
@@ -106,31 +146,31 @@ def _build_road_apply(
     new_free = jnp.where(use_free, state.free_roads.astype(jnp.int32) - 1, 0).astype(
         jnp.uint8
     )
-    paid = rv.pay(state.player_resources, player, rv.ROAD_COST_ARR)
+    paid = economy.pay(state.player_resources, player, economy.ROAD_COST_ARR)
     new_res = jnp.where(use_free, state.player_resources, paid)
     cand = state._replace(
         edge_road=state.edge_road.at[e].set((player + 1).astype(jnp.uint8)),
         free_roads=jnp.where(use_free, new_free, state.free_roads),
         player_resources=new_res,
     )
-    cand = rv.recompute_longest_road(cand)
-    won = rv.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return rv.tree_select(available, cand, state), _outcome(available, won)
+    cand = awards.recompute_longest_road(cand)
+    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), _outcome(available, won)
 
 
 _build_road_avail_b = jax.jit(jax.vmap(_build_road_avail))
 _build_road_apply_b = jax.jit(jax.vmap(_build_road_apply))
 
 
-class BuildRoad(VecAction[jax.Array]):
+class BuildRoad(VecAction[IndexParam]):
     """Build a road (params: edge indices, shape (batch,)). Free if free_roads > 0."""
 
-    def is_available(self, board: Board, params: jax.Array) -> jax.Array:
-        return cast(jax.Array, _build_road_avail_b(board[0], board[1], params))
+    def is_available(self, board: Board, params: IndexParam) -> Mask:
+        return cast(Mask, _build_road_avail_b(board[0], board[1], params))
 
-    def __call__(self, board: Board, params: jax.Array) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _build_road_apply_b(board[0], board[1], params),
         )
 
@@ -141,54 +181,54 @@ class BuildRoad(VecAction[jax.Array]):
 
 
 def _build_settlement_avail(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array
-) -> jax.Array:
+    layout: BoardLayout, state: BoardState, vertex: IndexParam
+) -> Mask:
     in_range = (vertex >= 0) & (vertex < N_VERTICES)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
-    main = (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
+    main = _main_after_roll(state)
     under_max = (
-        rv.count_settlements(state.vertex_owner, state.vertex_type, player)
+        economy.count_settlements(state.vertex_owner, state.vertex_type, player)
         < MAX_SETTLEMENTS
     )
-    afford = rv.can_afford(state.player_resources[player], rv.SETTLEMENT_COST_ARR)
-    dist = rv.distance_rule_ok(state.vertex_owner, v)
-    conn = rv.settlement_connected(state.edge_road, player, v)
+    afford = economy.can_afford(state.player_resources[player], economy.SETTLEMENT_COST_ARR)
+    dist = placement.distance_rule_ok(state.vertex_owner, v)
+    conn = placement.settlement_connected(state.edge_road, player, v)
     return in_range & main & under_max & afford & dist & conn
 
 
 def _build_settlement_apply(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array
-) -> tuple[BoardState, jax.Array]:
+    layout: BoardLayout, state: BoardState, vertex: IndexParam
+) -> tuple[BoardState, ResultCode]:
     available = _build_settlement_avail(layout, state, vertex)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
-        player_resources=rv.pay(
-            state.player_resources, player, rv.SETTLEMENT_COST_ARR
+        player_resources=economy.pay(
+            state.player_resources, player, economy.SETTLEMENT_COST_ARR
         ),
         vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
         vertex_type=state.vertex_type.at[v].set(1),
         victory_points=state.victory_points.at[player].add(1),
     )
-    cand = rv.recompute_longest_road(cand)
-    won = rv.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return rv.tree_select(available, cand, state), _outcome(available, won)
+    cand = awards.recompute_longest_road(cand)
+    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), _outcome(available, won)
 
 
 _build_settlement_avail_b = jax.jit(jax.vmap(_build_settlement_avail))
 _build_settlement_apply_b = jax.jit(jax.vmap(_build_settlement_apply))
 
 
-class BuildSettlement(VecAction[jax.Array]):
+class BuildSettlement(VecAction[IndexParam]):
     """Build a settlement (params: vertex indices, shape (batch,))."""
 
-    def is_available(self, board: Board, params: jax.Array) -> jax.Array:
-        return cast(jax.Array, _build_settlement_avail_b(board[0], board[1], params))
+    def is_available(self, board: Board, params: IndexParam) -> Mask:
+        return cast(Mask, _build_settlement_avail_b(board[0], board[1], params))
 
-    def __call__(self, board: Board, params: jax.Array) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _build_settlement_apply_b(board[0], board[1], params),
         )
 
@@ -198,15 +238,15 @@ class BuildSettlement(VecAction[jax.Array]):
 # ===========================================================================
 
 
-def _roll_avail(layout: BoardLayout, state: BoardState, params: None) -> jax.Array:
+def _roll_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
     return (state.phase == GamePhase.ROLL) & (state.has_rolled == 0)
 
 
 def _roll_apply(
     layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, jax.Array]:
+) -> tuple[BoardState, ResultCode]:
     available = _roll_avail(layout, state, params)
-    key, roll = rv.roll_dice(state.key)
+    key, roll = dice.roll_dice(state.key)
     is_seven = roll == 7
 
     hand = state.player_resources.astype(jnp.int32).sum(axis=1)  # (P,)
@@ -216,7 +256,7 @@ def _roll_apply(
     phase_seven = jnp.where(any_discard, GamePhase.DISCARD, GamePhase.MOVE_ROBBER)
     new_phase = jnp.where(is_seven, phase_seven, GamePhase.MAIN).astype(jnp.uint8)
 
-    distributed = rv.distribute_resources(layout, state, roll)
+    distributed = dice.distribute_resources(layout, state, roll)
     new_res = jnp.where(is_seven, state.player_resources, distributed.player_resources)
 
     cand = state._replace(
@@ -227,7 +267,7 @@ def _roll_apply(
         pending_discard=pending,
         player_resources=new_res,
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -239,14 +279,14 @@ _roll_apply_b = jax.jit(jax.vmap(_roll_apply, in_axes=(0, 0, None)))
 class RollDice(VecAction[None]):
     """Roll the dice (params: None). Distributes resources or triggers a 7."""
 
-    def is_available(self, board: Board, params: None = None) -> jax.Array:
-        return cast(jax.Array, _roll_avail_b(board[0], board[1], None))
+    def is_available(self, board: Board, params: None = None) -> Mask:
+        return cast(Mask, _roll_avail_b(board[0], board[1], None))
 
     def __call__(
         self, board: Board, params: None = None
-    ) -> tuple[BoardState, jax.Array]:
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]", _roll_apply_b(board[0], board[1], None)
+            "tuple[BoardState, ResultCode]", _roll_apply_b(board[0], board[1], None)
         )
 
 
@@ -256,50 +296,50 @@ class RollDice(VecAction[None]):
 
 
 def _build_city_avail(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array
-) -> jax.Array:
+    layout: BoardLayout, state: BoardState, vertex: IndexParam
+) -> Mask:
     in_range = (vertex >= 0) & (vertex < N_VERTICES)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
-    main = (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
+    main = _main_after_roll(state)
     under_max = (
-        rv.count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
+        economy.count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
     )
     owns_settlement = (state.vertex_owner[v] == (player + 1).astype(jnp.uint8)) & (
         state.vertex_type[v] == 1
     )
-    afford = rv.can_afford(state.player_resources[player], rv.CITY_COST_ARR)
+    afford = economy.can_afford(state.player_resources[player], economy.CITY_COST_ARR)
     return in_range & main & under_max & owns_settlement & afford
 
 
 def _build_city_apply(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array
-) -> tuple[BoardState, jax.Array]:
+    layout: BoardLayout, state: BoardState, vertex: IndexParam
+) -> tuple[BoardState, ResultCode]:
     available = _build_city_avail(layout, state, vertex)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
-        player_resources=rv.pay(state.player_resources, player, rv.CITY_COST_ARR),
+        player_resources=economy.pay(state.player_resources, player, economy.CITY_COST_ARR),
         vertex_type=state.vertex_type.at[v].set(2),
         victory_points=state.victory_points.at[player].add(1),
     )
-    won = rv.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return rv.tree_select(available, cand, state), _outcome(available, won)
+    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), _outcome(available, won)
 
 
 _build_city_avail_b = jax.jit(jax.vmap(_build_city_avail))
 _build_city_apply_b = jax.jit(jax.vmap(_build_city_apply))
 
 
-class BuildCity(VecAction[jax.Array]):
+class BuildCity(VecAction[IndexParam]):
     """Upgrade an own settlement to a city (params: vertex indices, shape (batch,))."""
 
-    def is_available(self, board: Board, params: jax.Array) -> jax.Array:
-        return cast(jax.Array, _build_city_avail_b(board[0], board[1], params))
+    def is_available(self, board: Board, params: IndexParam) -> Mask:
+        return cast(Mask, _build_city_avail_b(board[0], board[1], params))
 
-    def __call__(self, board: Board, params: jax.Array) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _build_city_apply_b(board[0], board[1], params),
         )
 
@@ -309,34 +349,34 @@ class BuildCity(VecAction[jax.Array]):
 # ===========================================================================
 
 
-def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> jax.Array:
+def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
     player = state.current_player.astype(jnp.int32)
-    main = (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
+    main = _main_after_roll(state)
     deck_nonempty = state.dev_deck.astype(jnp.int32).sum() > 0
-    afford = rv.can_afford(state.player_resources[player], rv.DEV_CARD_COST_ARR)
+    afford = economy.can_afford(state.player_resources[player], economy.DEV_CARD_COST_ARR)
     return main & deck_nonempty & afford
 
 
 def _buy_dev_apply(
     layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, jax.Array]:
+) -> tuple[BoardState, ResultCode]:
     available = _buy_dev_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
-    key, card = rv.draw_dev_card(state.key, state.dev_deck)
+    key, card = development.draw_dev_card(state.key, state.dev_deck)
     new_deck = state.dev_deck.astype(jnp.int32).at[card].add(-1)
     new_hand = state.dev_hand.astype(jnp.int32).at[player, card].add(1)
     new_bought = state.dev_bought.astype(jnp.int32).at[card].add(1)
     cand = state._replace(
-        player_resources=rv.pay(
-            state.player_resources, player, rv.DEV_CARD_COST_ARR
+        player_resources=economy.pay(
+            state.player_resources, player, economy.DEV_CARD_COST_ARR
         ),
-        dev_deck=jnp.clip(new_deck, 0, 255).astype(jnp.uint8),
-        dev_hand=jnp.clip(new_hand, 0, 255).astype(jnp.uint8),
-        dev_bought=jnp.clip(new_bought, 0, 255).astype(jnp.uint8),
+        dev_deck=economy.to_u8(new_deck),
+        dev_hand=economy.to_u8(new_hand),
+        dev_bought=economy.to_u8(new_bought),
         key=key,
     )
-    won = rv.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return rv.tree_select(available, cand, state), _outcome(available, won)
+    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), _outcome(available, won)
 
 
 _buy_dev_avail_b = jax.jit(jax.vmap(_buy_dev_avail, in_axes=(0, 0, None)))
@@ -346,14 +386,14 @@ _buy_dev_apply_b = jax.jit(jax.vmap(_buy_dev_apply, in_axes=(0, 0, None)))
 class BuyDevelopmentCard(VecAction[None]):
     """Buy a development card (params: None). Draws from ``state.dev_deck``."""
 
-    def is_available(self, board: Board, params: None = None) -> jax.Array:
-        return cast(jax.Array, _buy_dev_avail_b(board[0], board[1], None))
+    def is_available(self, board: Board, params: None = None) -> Mask:
+        return cast(Mask, _buy_dev_avail_b(board[0], board[1], None))
 
     def __call__(
         self, board: Board, params: None = None
-    ) -> tuple[BoardState, jax.Array]:
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]", _buy_dev_apply_b(board[0], board[1], None)
+            "tuple[BoardState, ResultCode]", _buy_dev_apply_b(board[0], board[1], None)
         )
 
 
@@ -362,13 +402,13 @@ class BuyDevelopmentCard(VecAction[None]):
 # ===========================================================================
 
 
-def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> jax.Array:
-    return (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
+def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
+    return _main_after_roll(state)
 
 
 def _end_turn_apply(
     layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, jax.Array]:
+) -> tuple[BoardState, ResultCode]:
     available = _end_turn_avail(layout, state, params)
     nxt = (state.current_player.astype(jnp.int32) + 1) % N_PLAYERS
     cand = state._replace(
@@ -378,10 +418,9 @@ def _end_turn_apply(
         dev_bought=jnp.zeros_like(state.dev_bought),
         free_roads=jnp.uint8(0),
         current_player=nxt.astype(state.current_player.dtype),
-        turn_number=state.turn_number + 1,
         phase=jnp.uint8(GamePhase.ROLL),
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -393,14 +432,14 @@ _end_turn_apply_b = jax.jit(jax.vmap(_end_turn_apply, in_axes=(0, 0, None)))
 class EndTurn(VecAction[None]):
     """End the current player's turn (params: None). Advances to the next player."""
 
-    def is_available(self, board: Board, params: None = None) -> jax.Array:
-        return cast(jax.Array, _end_turn_avail_b(board[0], board[1], None))
+    def is_available(self, board: Board, params: None = None) -> Mask:
+        return cast(Mask, _end_turn_avail_b(board[0], board[1], None))
 
     def __call__(
         self, board: Board, params: None = None
-    ) -> tuple[BoardState, jax.Array]:
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]", _end_turn_apply_b(board[0], board[1], None)
+            "tuple[BoardState, ResultCode]", _end_turn_apply_b(board[0], board[1], None)
         )
 
 
@@ -412,40 +451,40 @@ class EndTurn(VecAction[None]):
 def _maritime_avail(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> jax.Array:
+    params: TwoIndexParams,
+) -> Mask:
     give, receive = params
     player = state.current_player.astype(jnp.int32)
     g = jnp.clip(give, 0, N_RESOURCES - 1)
     r = jnp.clip(receive, 0, N_RESOURCES - 1)
-    main = (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
+    main = _main_after_roll(state)
     give_ok = (give >= 0) & (give < N_RESOURCES)
     recv_ok = (receive >= 0) & (receive < N_RESOURCES)
     distinct = give != receive
-    ratio = rv.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
+    ratio = trade.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
     has_give = state.player_resources[player, g].astype(jnp.int32) >= ratio
-    bank_ok = rv.bank_stock(state.player_resources, r) >= 1
+    bank_ok = economy.bank_stock(state.player_resources, r) >= 1
     return main & give_ok & recv_ok & distinct & has_give & bank_ok
 
 
 def _maritime_apply(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> tuple[BoardState, jax.Array]:
+    params: TwoIndexParams,
+) -> tuple[BoardState, ResultCode]:
     give, receive = params
     available = _maritime_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     g = jnp.clip(give, 0, N_RESOURCES - 1)
     r = jnp.clip(receive, 0, N_RESOURCES - 1)
-    ratio = rv.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
+    ratio = trade.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
     res = state.player_resources.astype(jnp.int32)
     res = res.at[player, g].add(-ratio)
     res = res.at[player, r].add(1)
     cand = state._replace(
-        player_resources=jnp.clip(res, 0, 255).astype(jnp.uint8)
+        player_resources=economy.to_u8(res)
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -454,19 +493,19 @@ _maritime_avail_b = jax.jit(jax.vmap(_maritime_avail))
 _maritime_apply_b = jax.jit(jax.vmap(_maritime_apply))
 
 
-class MaritimeTrade(VecAction["tuple[jax.Array, jax.Array]"]):
+class MaritimeTrade(VecAction["TwoIndexParams"]):
     """Trade with the bank at the best available ratio (params: (give, receive))."""
 
     def is_available(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> jax.Array:
-        return cast(jax.Array, _maritime_avail_b(board[0], board[1], params))
+        self, board: Board, params: TwoIndexParams
+    ) -> Mask:
+        return cast(Mask, _maritime_avail_b(board[0], board[1], params))
 
     def __call__(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> tuple[BoardState, jax.Array]:
+        self, board: Board, params: TwoIndexParams
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _maritime_apply_b(board[0], board[1], params),
         )
 
@@ -477,18 +516,18 @@ class MaritimeTrade(VecAction["tuple[jax.Array, jax.Array]"]):
 
 
 def _monopoly_avail(
-    layout: BoardLayout, state: BoardState, resource: jax.Array
-) -> jax.Array:
+    layout: BoardLayout, state: BoardState, resource: IndexParam
+) -> Mask:
     player = state.current_player.astype(jnp.int32)
-    main = (state.phase == GamePhase.MAIN) & (state.dev_played == 0)
+    main = _main_no_dev_played(state)
     in_range = (resource >= 0) & (resource < N_RESOURCES)
-    has_card = rv.playable_dev(state, player, DevCard.MONOPOLY)
+    has_card = development.playable_dev(state, player, DevCard.MONOPOLY)
     return main & in_range & has_card
 
 
 def _monopoly_apply(
-    layout: BoardLayout, state: BoardState, resource: jax.Array
-) -> tuple[BoardState, jax.Array]:
+    layout: BoardLayout, state: BoardState, resource: IndexParam
+) -> tuple[BoardState, ResultCode]:
     available = _monopoly_avail(layout, state, resource)
     player = state.current_player.astype(jnp.int32)
     r = jnp.clip(resource, 0, N_RESOURCES - 1)
@@ -499,10 +538,10 @@ def _monopoly_apply(
     new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.MONOPOLY].add(-1)
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=jnp.clip(new_hand, 0, 255).astype(jnp.uint8),
-        player_resources=jnp.clip(res, 0, 255).astype(jnp.uint8),
+        dev_hand=economy.to_u8(new_hand),
+        player_resources=economy.to_u8(res),
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -511,18 +550,18 @@ _monopoly_avail_b = jax.jit(jax.vmap(_monopoly_avail))
 _monopoly_apply_b = jax.jit(jax.vmap(_monopoly_apply))
 
 
-class PlayMonopoly(VecAction[jax.Array]):
+class PlayMonopoly(VecAction[IndexParam]):
     """Play Monopoly (params: resource indices, shape (batch,)).
 
     Takes all of one resource from every other player.
     """
 
-    def is_available(self, board: Board, params: jax.Array) -> jax.Array:
-        return cast(jax.Array, _monopoly_avail_b(board[0], board[1], params))
+    def is_available(self, board: Board, params: IndexParam) -> Mask:
+        return cast(Mask, _monopoly_avail_b(board[0], board[1], params))
 
-    def __call__(self, board: Board, params: jax.Array) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _monopoly_apply_b(board[0], board[1], params),
         )
 
@@ -535,28 +574,28 @@ class PlayMonopoly(VecAction[jax.Array]):
 def _yop_avail(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> jax.Array:
+    params: TwoIndexParams,
+) -> Mask:
     resource_a, resource_b = params
     player = state.current_player.astype(jnp.int32)
     ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
     cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
-    main = (state.phase == GamePhase.MAIN) & (state.dev_played == 0)
-    has_card = rv.playable_dev(state, player, DevCard.YEAR_OF_PLENTY)
+    main = _main_no_dev_played(state)
+    has_card = development.playable_dev(state, player, DevCard.YEAR_OF_PLENTY)
     a_ok = (resource_a >= 0) & (resource_a < N_RESOURCES)
     b_ok = (resource_b >= 0) & (resource_b < N_RESOURCES)
     same = resource_a == resource_b
     need_a = 1 + same.astype(jnp.int32)
-    bank_a = rv.bank_stock(state.player_resources, ca) >= need_a
-    bank_b = same | (rv.bank_stock(state.player_resources, cb) >= 1)
+    bank_a = economy.bank_stock(state.player_resources, ca) >= need_a
+    bank_b = same | (economy.bank_stock(state.player_resources, cb) >= 1)
     return main & has_card & a_ok & b_ok & bank_a & bank_b
 
 
 def _yop_apply(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> tuple[BoardState, jax.Array]:
+    params: TwoIndexParams,
+) -> tuple[BoardState, ResultCode]:
     resource_a, resource_b = params
     available = _yop_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
@@ -570,10 +609,10 @@ def _yop_apply(
     res = res.at[player, cb].add(1)
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=jnp.clip(new_hand, 0, 255).astype(jnp.uint8),
-        player_resources=jnp.clip(res, 0, 255).astype(jnp.uint8),
+        dev_hand=economy.to_u8(new_hand),
+        player_resources=economy.to_u8(res),
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -582,22 +621,22 @@ _yop_avail_b = jax.jit(jax.vmap(_yop_avail))
 _yop_apply_b = jax.jit(jax.vmap(_yop_apply))
 
 
-class PlayYearOfPlenty(VecAction["tuple[jax.Array, jax.Array]"]):
+class PlayYearOfPlenty(VecAction["TwoIndexParams"]):
     """Play Year of Plenty (params: (resource_a, resource_b)).
 
     Takes two resource cards from the bank; ``a == b`` draws two of one kind.
     """
 
     def is_available(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> jax.Array:
-        return cast(jax.Array, _yop_avail_b(board[0], board[1], params))
+        self, board: Board, params: TwoIndexParams
+    ) -> Mask:
+        return cast(Mask, _yop_avail_b(board[0], board[1], params))
 
     def __call__(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> tuple[BoardState, jax.Array]:
+        self, board: Board, params: TwoIndexParams
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _yop_apply_b(board[0], board[1], params),
         )
 
@@ -609,29 +648,29 @@ class PlayYearOfPlenty(VecAction["tuple[jax.Array, jax.Array]"]):
 
 def _road_building_avail(
     layout: BoardLayout, state: BoardState, params: None
-) -> jax.Array:
+) -> Mask:
     player = state.current_player.astype(jnp.int32)
-    main = (state.phase == GamePhase.MAIN) & (state.dev_played == 0)
-    has_card = rv.playable_dev(state, player, DevCard.ROAD_BUILDING)
+    main = _main_no_dev_played(state)
+    has_card = development.playable_dev(state, player, DevCard.ROAD_BUILDING)
     return main & has_card
 
 
 def _road_building_apply(
     layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, jax.Array]:
+) -> tuple[BoardState, ResultCode]:
     available = _road_building_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
-    grant = jnp.minimum(2, rv.roads_left(state.edge_road, player))
+    grant = jnp.minimum(2, economy.roads_left(state.edge_road, player))
     new_hand = (
         state.dev_hand.astype(jnp.int32).at[player, DevCard.ROAD_BUILDING].add(-1)
     )
     new_free = state.free_roads.astype(jnp.int32) + grant
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=jnp.clip(new_hand, 0, 255).astype(jnp.uint8),
-        free_roads=jnp.clip(new_free, 0, 255).astype(jnp.uint8),
+        dev_hand=economy.to_u8(new_hand),
+        free_roads=economy.to_u8(new_free),
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -643,14 +682,14 @@ _road_building_apply_b = jax.jit(jax.vmap(_road_building_apply, in_axes=(0, 0, N
 class PlayRoadBuilding(VecAction[None]):
     """Play Road Building (params: None). Grants up to 2 free roads."""
 
-    def is_available(self, board: Board, params: None = None) -> jax.Array:
-        return cast(jax.Array, _road_building_avail_b(board[0], board[1], None))
+    def is_available(self, board: Board, params: None = None) -> Mask:
+        return cast(Mask, _road_building_avail_b(board[0], board[1], None))
 
     def __call__(
         self, board: Board, params: None = None
-    ) -> tuple[BoardState, jax.Array]:
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _road_building_apply_b(board[0], board[1], None),
         )
 
@@ -663,18 +702,18 @@ class PlayRoadBuilding(VecAction[None]):
 def _knight_avail(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> jax.Array:
+    params: TwoIndexParams,
+) -> Mask:
     tile, victim = params
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
     vc = jnp.clip(victim, 0, N_PLAYERS - 1)
     phase_ok = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
     not_played = state.dev_played == 0
-    has_card = rv.playable_dev(state, player, DevCard.KNIGHT)
+    has_card = development.playable_dev(state, player, DevCard.KNIGHT)
     tile_in_range = (tile >= 0) & (tile < N_TILES)
     tile_moves = tile != state.robber
-    mask = rv.robber_victim_mask(state, t, player)
+    mask = robber.robber_victim_mask(state, t, player)
     victims_exist = jnp.any(mask)
     valid_victim = jnp.where(
         victims_exist,
@@ -694,8 +733,8 @@ def _knight_avail(
 def _knight_apply(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> tuple[BoardState, jax.Array]:
+    params: TwoIndexParams,
+) -> tuple[BoardState, ResultCode]:
     tile, victim = params
     available = _knight_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
@@ -705,23 +744,23 @@ def _knight_apply(
     new_knights = state.knights_played.astype(jnp.int32).at[player].add(1)
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=jnp.clip(new_hand, 0, 255).astype(jnp.uint8),
-        knights_played=jnp.clip(new_knights, 0, 255).astype(jnp.uint8),
+        dev_hand=economy.to_u8(new_hand),
+        knights_played=economy.to_u8(new_knights),
         robber=t.astype(state.robber.dtype),
     )
-    cand = rv.recompute_largest_army(cand)
-    stolen = rv.steal(cand, player, vc)
+    cand = awards.recompute_largest_army(cand)
+    stolen = robber.steal(cand, player, vc)
     do_steal = victim >= 0
-    cand = rv.tree_select(do_steal, stolen, cand)
-    won = rv.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return rv.tree_select(available, cand, state), _outcome(available, won)
+    cand = tree_select(do_steal, stolen, cand)
+    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), _outcome(available, won)
 
 
 _knight_avail_b = jax.jit(jax.vmap(_knight_avail))
 _knight_apply_b = jax.jit(jax.vmap(_knight_apply))
 
 
-class PlayKnight(VecAction["tuple[jax.Array, jax.Array]"]):
+class PlayKnight(VecAction["TwoIndexParams"]):
     """Play a Knight (params: (tile, victim)).
 
     Moves the robber to ``tile`` and steals from ``victim`` (``victim == -1``
@@ -729,15 +768,15 @@ class PlayKnight(VecAction["tuple[jax.Array, jax.Array]"]):
     """
 
     def is_available(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> jax.Array:
-        return cast(jax.Array, _knight_avail_b(board[0], board[1], params))
+        self, board: Board, params: TwoIndexParams
+    ) -> Mask:
+        return cast(Mask, _knight_avail_b(board[0], board[1], params))
 
     def __call__(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> tuple[BoardState, jax.Array]:
+        self, board: Board, params: TwoIndexParams
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _knight_apply_b(board[0], board[1], params),
         )
 
@@ -750,8 +789,8 @@ class PlayKnight(VecAction["tuple[jax.Array, jax.Array]"]):
 def _move_robber_avail(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> jax.Array:
+    params: TwoIndexParams,
+) -> Mask:
     tile, victim = params
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
@@ -759,7 +798,7 @@ def _move_robber_avail(
     phase_ok = state.phase == GamePhase.MOVE_ROBBER
     tile_in_range = (tile >= 0) & (tile < N_TILES)
     tile_moves = tile != state.robber
-    mask = rv.robber_victim_mask(state, t, player)
+    mask = robber.robber_victim_mask(state, t, player)
     victims_exist = jnp.any(mask)
     valid_victim = jnp.where(
         victims_exist,
@@ -772,8 +811,8 @@ def _move_robber_avail(
 def _move_robber_apply(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> tuple[BoardState, jax.Array]:
+    params: TwoIndexParams,
+) -> tuple[BoardState, ResultCode]:
     tile, victim = params
     available = _move_robber_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
@@ -787,10 +826,10 @@ def _move_robber_apply(
         robber=t.astype(state.robber.dtype),
         phase=new_phase,
     )
-    stolen = rv.steal(cand, player, vc)
+    stolen = robber.steal(cand, player, vc)
     do_steal = victim >= 0
-    cand = rv.tree_select(do_steal, stolen, cand)
-    return rv.tree_select(available, cand, state), jnp.where(
+    cand = tree_select(do_steal, stolen, cand)
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -799,7 +838,7 @@ _move_robber_avail_b = jax.jit(jax.vmap(_move_robber_avail))
 _move_robber_apply_b = jax.jit(jax.vmap(_move_robber_apply))
 
 
-class MoveRobber(VecAction["tuple[jax.Array, jax.Array]"]):
+class MoveRobber(VecAction["TwoIndexParams"]):
     """Move the robber and steal (params: (tile, victim)).
 
     Moves the robber to ``tile`` and steals from ``victim`` (``victim == -1``
@@ -808,15 +847,15 @@ class MoveRobber(VecAction["tuple[jax.Array, jax.Array]"]):
     """
 
     def is_available(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> jax.Array:
-        return cast(jax.Array, _move_robber_avail_b(board[0], board[1], params))
+        self, board: Board, params: TwoIndexParams
+    ) -> Mask:
+        return cast(Mask, _move_robber_avail_b(board[0], board[1], params))
 
     def __call__(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> tuple[BoardState, jax.Array]:
+        self, board: Board, params: TwoIndexParams
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _move_robber_apply_b(board[0], board[1], params),
         )
 
@@ -829,8 +868,8 @@ class MoveRobber(VecAction["tuple[jax.Array, jax.Array]"]):
 def _discard_avail(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> jax.Array:
+    params: DiscardParams,
+) -> Mask:
     player, resources = params
     p = jnp.clip(player, 0, N_PLAYERS - 1)
     req = resources.astype(jnp.int32)  # (N_RESOURCES,)
@@ -848,8 +887,8 @@ def _discard_avail(
 def _discard_apply(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[jax.Array, jax.Array],
-) -> tuple[BoardState, jax.Array]:
+    params: DiscardParams,
+) -> tuple[BoardState, ResultCode]:
     player, resources = params
     available = _discard_avail(layout, state, params)
     p = jnp.clip(player, 0, N_PLAYERS - 1)
@@ -869,7 +908,7 @@ def _discard_apply(
         pending_discard=updated_pending,
         phase=new_phase,
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -878,7 +917,7 @@ _discard_avail_b = jax.jit(jax.vmap(_discard_avail))
 _discard_apply_b = jax.jit(jax.vmap(_discard_apply))
 
 
-class Discard(VecAction["tuple[jax.Array, jax.Array]"]):
+class Discard(VecAction["DiscardParams"]):
     """Discard half your hand after a 7 (params: (player, resources)).
 
     ``player`` is a ``(batch,)`` int array; ``resources`` is a
@@ -888,15 +927,15 @@ class Discard(VecAction["tuple[jax.Array, jax.Array]"]):
     """
 
     def is_available(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> jax.Array:
-        return cast(jax.Array, _discard_avail_b(board[0], board[1], params))
+        self, board: Board, params: DiscardParams
+    ) -> Mask:
+        return cast(Mask, _discard_avail_b(board[0], board[1], params))
 
     def __call__(
-        self, board: Board, params: tuple[jax.Array, jax.Array]
-    ) -> tuple[BoardState, jax.Array]:
+        self, board: Board, params: DiscardParams
+    ) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _discard_apply_b(board[0], board[1], params),
         )
 
@@ -907,18 +946,18 @@ class Discard(VecAction["tuple[jax.Array, jax.Array]"]):
 
 
 def _setup_settlement_avail(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array
-) -> jax.Array:
+    layout: BoardLayout, state: BoardState, vertex: IndexParam
+) -> Mask:
     in_range = (vertex >= 0) & (vertex < N_VERTICES)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     phase_ok = state.phase == GamePhase.SETUP_SETTLEMENT
-    dist = rv.distance_rule_ok(state.vertex_owner, v)
+    dist = placement.distance_rule_ok(state.vertex_owner, v)
     return in_range & phase_ok & dist
 
 
 def _setup_settlement_apply(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array
-) -> tuple[BoardState, jax.Array]:
+    layout: BoardLayout, state: BoardState, vertex: IndexParam
+) -> tuple[BoardState, ResultCode]:
     available = _setup_settlement_avail(layout, state, vertex)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
@@ -928,12 +967,12 @@ def _setup_settlement_apply(
         victory_points=state.victory_points.at[player].add(1),
     )
     # The second settlement (placed in the reverse pass) grants resources.
-    granted = rv.grant_setup_resources(layout, placed, v, player)
-    placed = rv.tree_select(
+    granted = setup.grant_setup_resources(layout, placed, v, player)
+    placed = tree_select(
         state.setup_index.astype(jnp.int32) >= N_PLAYERS, granted, placed
     )
     cand = placed._replace(phase=jnp.uint8(GamePhase.SETUP_ROAD))
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -942,7 +981,7 @@ _setup_settlement_avail_b = jax.jit(jax.vmap(_setup_settlement_avail))
 _setup_settlement_apply_b = jax.jit(jax.vmap(_setup_settlement_apply))
 
 
-class SetupSettlement(VecAction[jax.Array]):
+class SetupSettlement(VecAction[IndexParam]):
     """Place a free starting settlement (params: vertex indices, shape (batch,)).
 
     The second settlement (placed in the reverse setup pass, when
@@ -950,12 +989,12 @@ class SetupSettlement(VecAction[jax.Array]):
     advances to SETUP_ROAD; never wins, so it returns SUCCESS / INVALID.
     """
 
-    def is_available(self, board: Board, params: jax.Array) -> jax.Array:
-        return cast(jax.Array, _setup_settlement_avail_b(board[0], board[1], params))
+    def is_available(self, board: Board, params: IndexParam) -> Mask:
+        return cast(Mask, _setup_settlement_avail_b(board[0], board[1], params))
 
-    def __call__(self, board: Board, params: jax.Array) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _setup_settlement_apply_b(board[0], board[1], params),
         )
 
@@ -966,8 +1005,8 @@ class SetupSettlement(VecAction[jax.Array]):
 
 
 def _setup_road_avail(
-    layout: BoardLayout, state: BoardState, edge: jax.Array
-) -> jax.Array:
+    layout: BoardLayout, state: BoardState, edge: IndexParam
+) -> Mask:
     in_range = (edge >= 0) & (edge < N_EDGES)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
@@ -977,27 +1016,27 @@ def _setup_road_avail(
 
     def endpoint_ok(v: jax.Array) -> jax.Array:
         owns_here = state.vertex_owner[v] == target
-        e2 = rv.V_EDGES[v]  # (MAX_VERTEX_DEGREE,)
-        valid = e2 != rv.NO_IDX
+        e2 = geometry.V_EDGES[v]  # (MAX_VERTEX_DEGREE,)
+        valid = e2 != geometry.NO_IDX
         roads = state.edge_road[jnp.where(valid, e2, 0)]
         has_own_road = jnp.any(valid & (roads == target))
         return owns_here & ~has_own_road
 
-    touches = endpoint_ok(rv.EDGE_V[e, 0]) | endpoint_ok(rv.EDGE_V[e, 1])
+    touches = endpoint_ok(geometry.EDGE_V[e, 0]) | endpoint_ok(geometry.EDGE_V[e, 1])
     return in_range & phase_ok & empty & touches
 
 
 def _setup_road_apply(
-    layout: BoardLayout, state: BoardState, edge: jax.Array
-) -> tuple[BoardState, jax.Array]:
+    layout: BoardLayout, state: BoardState, edge: IndexParam
+) -> tuple[BoardState, ResultCode]:
     available = _setup_road_avail(layout, state, edge)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
     new_index = state.setup_index.astype(jnp.int32) + 1
-    setup_continues = new_index < rv.N_SETUP
+    setup_continues = new_index < setup.N_SETUP
     next_player = jnp.where(
         setup_continues,
-        rv.SETUP_ORDER_ARR[jnp.clip(new_index, 0, rv.N_SETUP - 1)],
+        setup.SETUP_ORDER_ARR[jnp.clip(new_index, 0, setup.N_SETUP - 1)],
         0,
     )
     next_phase = jnp.where(
@@ -1009,7 +1048,7 @@ def _setup_road_apply(
         phase=next_phase.astype(state.phase.dtype),
         current_player=next_player.astype(state.current_player.dtype),
     )
-    return rv.tree_select(available, cand, state), jnp.where(
+    return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
 
@@ -1018,7 +1057,7 @@ _setup_road_avail_b = jax.jit(jax.vmap(_setup_road_avail))
 _setup_road_apply_b = jax.jit(jax.vmap(_setup_road_apply))
 
 
-class SetupRoad(VecAction[jax.Array]):
+class SetupRoad(VecAction[IndexParam]):
     """Place the road next to the just-placed setup settlement (params: edge).
 
     The edge must be empty and touch a setup settlement the player owns that has
@@ -1027,12 +1066,12 @@ class SetupRoad(VecAction[jax.Array]):
     returns SUCCESS / INVALID.
     """
 
-    def is_available(self, board: Board, params: jax.Array) -> jax.Array:
-        return cast(jax.Array, _setup_road_avail_b(board[0], board[1], params))
+    def is_available(self, board: Board, params: IndexParam) -> Mask:
+        return cast(Mask, _setup_road_avail_b(board[0], board[1], params))
 
-    def __call__(self, board: Board, params: jax.Array) -> tuple[BoardState, jax.Array]:
+    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
         return cast(
-            "tuple[BoardState, jax.Array]",
+            "tuple[BoardState, ResultCode]",
             _setup_road_apply_b(board[0], board[1], params),
         )
 
@@ -1089,59 +1128,59 @@ class ActionParams(NamedTuple):
     reserves the ``index`` attribute.)
     """
 
-    idx: jax.Array  # int32 primary index / player
-    target: jax.Array  # int32 secondary index (victim / receive / resource_b)
-    resources: jax.Array  # int32 (N_RESOURCES,) — Discard only
+    idx: IndexParam  # primary index / player
+    target: IndexParam  # secondary index (victim / receive / resource_b)
+    resources: ResourceParam  # per-resource counts — Discard only
 
 
 # Branch adapters in ActionType order: each maps the packed ActionParams onto the
 # single-game core's native param shape.
 _APPLY_BRANCHES = (
-    lambda l, s, p: _setup_settlement_apply(l, s, p.idx),
-    lambda l, s, p: _setup_road_apply(l, s, p.idx),
-    lambda l, s, p: _roll_apply(l, s, None),
-    lambda l, s, p: _discard_apply(l, s, (p.idx, p.resources)),
-    lambda l, s, p: _move_robber_apply(l, s, (p.idx, p.target)),
-    lambda l, s, p: _build_road_apply(l, s, p.idx),
-    lambda l, s, p: _build_settlement_apply(l, s, p.idx),
-    lambda l, s, p: _build_city_apply(l, s, p.idx),
-    lambda l, s, p: _buy_dev_apply(l, s, None),
-    lambda l, s, p: _knight_apply(l, s, (p.idx, p.target)),
-    lambda l, s, p: _road_building_apply(l, s, None),
-    lambda l, s, p: _yop_apply(l, s, (p.idx, p.target)),
-    lambda l, s, p: _monopoly_apply(l, s, p.idx),
-    lambda l, s, p: _maritime_apply(l, s, (p.idx, p.target)),
-    lambda l, s, p: _end_turn_apply(l, s, None),
+    lambda lay, st, pp: _setup_settlement_apply(lay, st, pp.idx),
+    lambda lay, st, pp: _setup_road_apply(lay, st, pp.idx),
+    lambda lay, st, pp: _roll_apply(lay, st, None),
+    lambda lay, st, pp: _discard_apply(lay, st, (pp.idx, pp.resources)),
+    lambda lay, st, pp: _move_robber_apply(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _build_road_apply(lay, st, pp.idx),
+    lambda lay, st, pp: _build_settlement_apply(lay, st, pp.idx),
+    lambda lay, st, pp: _build_city_apply(lay, st, pp.idx),
+    lambda lay, st, pp: _buy_dev_apply(lay, st, None),
+    lambda lay, st, pp: _knight_apply(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _road_building_apply(lay, st, None),
+    lambda lay, st, pp: _yop_apply(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _monopoly_apply(lay, st, pp.idx),
+    lambda lay, st, pp: _maritime_apply(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _end_turn_apply(lay, st, None),
 )
 
 _AVAIL_BRANCHES = (
-    lambda l, s, p: _setup_settlement_avail(l, s, p.idx),
-    lambda l, s, p: _setup_road_avail(l, s, p.idx),
-    lambda l, s, p: _roll_avail(l, s, None),
-    lambda l, s, p: _discard_avail(l, s, (p.idx, p.resources)),
-    lambda l, s, p: _move_robber_avail(l, s, (p.idx, p.target)),
-    lambda l, s, p: _build_road_avail(l, s, p.idx),
-    lambda l, s, p: _build_settlement_avail(l, s, p.idx),
-    lambda l, s, p: _build_city_avail(l, s, p.idx),
-    lambda l, s, p: _buy_dev_avail(l, s, None),
-    lambda l, s, p: _knight_avail(l, s, (p.idx, p.target)),
-    lambda l, s, p: _road_building_avail(l, s, None),
-    lambda l, s, p: _yop_avail(l, s, (p.idx, p.target)),
-    lambda l, s, p: _monopoly_avail(l, s, p.idx),
-    lambda l, s, p: _maritime_avail(l, s, (p.idx, p.target)),
-    lambda l, s, p: _end_turn_avail(l, s, None),
+    lambda lay, st, pp: _setup_settlement_avail(lay, st, pp.idx),
+    lambda lay, st, pp: _setup_road_avail(lay, st, pp.idx),
+    lambda lay, st, pp: _roll_avail(lay, st, None),
+    lambda lay, st, pp: _discard_avail(lay, st, (pp.idx, pp.resources)),
+    lambda lay, st, pp: _move_robber_avail(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _build_road_avail(lay, st, pp.idx),
+    lambda lay, st, pp: _build_settlement_avail(lay, st, pp.idx),
+    lambda lay, st, pp: _build_city_avail(lay, st, pp.idx),
+    lambda lay, st, pp: _buy_dev_avail(lay, st, None),
+    lambda lay, st, pp: _knight_avail(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _road_building_avail(lay, st, None),
+    lambda lay, st, pp: _yop_avail(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _monopoly_avail(lay, st, pp.idx),
+    lambda lay, st, pp: _maritime_avail(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _end_turn_avail(lay, st, None),
 )
 
 
 def apply_action(
     layout: BoardLayout,
     state: BoardState,
-    action_type: jax.Array,
+    action_type: ActionTypeArray,
     params: ActionParams,
-) -> tuple[BoardState, jax.Array]:
+) -> tuple[BoardState, ResultCode]:
     """Apply ``action_type`` (single game) and return (new state, ActionResult code)."""
     return cast(
-        "tuple[BoardState, jax.Array]",
+        "tuple[BoardState, ResultCode]",
         jax.lax.switch(action_type, _APPLY_BRANCHES, layout, state, params),
     )
 
@@ -1149,11 +1188,11 @@ def apply_action(
 def action_available(
     layout: BoardLayout,
     state: BoardState,
-    action_type: jax.Array,
+    action_type: ActionTypeArray,
     params: ActionParams,
-) -> jax.Array:
+) -> Mask:
     """Legality of ``action_type`` with ``params`` (single game) as a scalar bool."""
     return cast(
-        jax.Array,
+        Mask,
         jax.lax.switch(action_type, _AVAIL_BRANCHES, layout, state, params),
     )

@@ -1,5 +1,6 @@
-"""Equivalence tests: the traceable rules_vec helpers must match the trusted
-NumPy single-game reference in catan_engine.rules across randomized boards."""
+"""Equivalence tests: the traceable rule modules (``awards`` / ``dice`` / ``trade``
+/ ``economy``) must match the trusted NumPy single-game oracle in
+``tests.reference`` across randomized boards."""
 
 from typing import TypeVar, cast
 
@@ -8,8 +9,8 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import TestCase
 
-from catan_engine import rules_vec
-from tests import reference as rules
+from catan_engine import awards, dice, economy, trade
+from tests import reference
 from catan_engine.layout import BoardLayout, N_EDGES, N_TILES, N_VERTICES, make_layout
 from catan_engine.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.state import BoardState, make_board_state
@@ -22,7 +23,7 @@ def _single(tree: _T) -> _T:
 
 
 # Compile the single-game DFS once; reused across calls (static shapes).
-_LRL = jax.jit(rules_vec.longest_road_length)
+_LRL = jax.jit(awards.longest_road_length)
 
 
 def _random_occupancy(seed: int) -> tuple[np.ndarray, np.ndarray]:
@@ -65,7 +66,7 @@ class TestLongestRoad(TestCase):
             edge_road, vertex_owner = _random_occupancy(seed)
             state = _state_with(edge_road, vertex_owner)
             for p in range(N_PLAYERS):
-                ref = rules.longest_road_length(state, p, 0)
+                ref = reference.longest_road_length(state, p, 0)
                 got = int(
                     _LRL(jnp.asarray(edge_road), jnp.asarray(vertex_owner), jnp.int32(p))
                 )
@@ -101,8 +102,8 @@ class TestProductionAndPorts(TestCase):
             layout, state = self._random_state(seed)
             layout1, state1 = _single(layout), _single(state)
             for roll in range(2, 13):
-                ref = rules.distribute_resources(layout, state, roll, 0)
-                got = rules_vec.distribute_resources(layout1, state1, jnp.int32(roll))
+                ref = reference.distribute_resources(layout, state, roll, 0)
+                got = dice.distribute_resources(layout1, state1, jnp.int32(roll))
                 assert np.array_equal(
                     np.asarray(got.player_resources),
                     np.asarray(ref.player_resources[0]),
@@ -114,9 +115,9 @@ class TestProductionAndPorts(TestCase):
             layout1, state1 = _single(layout), _single(state)
             for p in range(N_PLAYERS):
                 for give in range(N_RESOURCES):
-                    ref = rules.port_ratio(state, layout, p, give, 0)
+                    ref = reference.port_ratio(state, layout, p, give, 0)
                     got = int(
-                        rules_vec.port_ratio(
+                        trade.port_ratio(
                             state1.vertex_owner,
                             layout1.port_allocation,
                             jnp.int32(p),
@@ -129,17 +130,17 @@ class TestProductionAndPorts(TestCase):
 class TestEconomyHelpers(TestCase):
     def test_can_afford(self) -> None:
         assert bool(
-            rules_vec.can_afford(
-                jnp.array([1, 1, 1, 1, 0], jnp.uint8), rules_vec.SETTLEMENT_COST_ARR
+            economy.can_afford(
+                jnp.array([1, 1, 1, 1, 0], jnp.uint8), economy.SETTLEMENT_COST_ARR
             )
         )
         assert not bool(
-            rules_vec.can_afford(
-                jnp.array([0, 1, 1, 1, 0], jnp.uint8), rules_vec.SETTLEMENT_COST_ARR
+            economy.can_afford(
+                jnp.array([0, 1, 1, 1, 0], jnp.uint8), economy.SETTLEMENT_COST_ARR
             )
         )
 
     def test_pay_clips_at_zero(self) -> None:
         pr = jnp.zeros((N_PLAYERS, N_RESOURCES), jnp.uint8)
-        out = rules_vec.pay(pr, jnp.int32(0), rules_vec.ROAD_COST_ARR)
+        out = economy.pay(pr, jnp.int32(0), economy.ROAD_COST_ARR)
         assert np.array_equal(np.asarray(out[0]), np.zeros(N_RESOURCES, np.uint8))

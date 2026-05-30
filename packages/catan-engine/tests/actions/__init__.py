@@ -1,15 +1,17 @@
 """Per-action tests for the vectorized engine.
 
-Convention: one file per action, each with a success case as an
-``assertExpectedInline`` snapshot plus invalidation cases (wrong phase, bad
-params, unaffordable, ...) that assert ``INVALID`` and that state is unchanged.
-Build positions with the shared fixtures (which use the board.py helpers).
+Convention: one file per action, written as plain pytest functions. Each success
+case is an ``expecttest.assert_expected_inline`` snapshot (a compact one-field-
+per-line summary via ``fixtures.fmt``, and — for board-changing actions — an
+ASCII board snapshot from the ``render`` fixture). Invalidation cases (wrong
+phase, bad params, unaffordable, ...) assert ``INVALID`` and that state is
+unchanged. Success boards come from the ``*_board`` pytest fixtures in
+``conftest.py``; ``fixtures.py`` holds the low-level builders they compose.
 
-All 15 actions are vectorized in action_vec.py and covered here (one file per
+All 15 actions are vectorized in ``action.py`` and covered here (one file per
 action). DomesticTrade is intentionally deferred (never implemented). The NumPy
 single-game path has been removed; its reference implementation now lives in
-``tests/reference.py`` (the differential oracle for ``tests/test_rules_vec.py``).
-``ActionResult`` lives in ``action_vec.py``.
-
-TODO: add a unified ``step`` for ``env.py`` over this action set.
+``tests/reference.py`` (the differential oracle for ``tests/test_rules.py``).
+``ActionResult`` lives in ``action.py``, and ``catan_engine.env`` exposes a
+unified ``step`` / ``available`` over this action set (see ``tests/test_env.py``).
 """

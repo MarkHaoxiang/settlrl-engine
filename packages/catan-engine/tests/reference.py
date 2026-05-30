@@ -1,9 +1,10 @@
 """Trusted NumPy single-game rule reference (test oracle only).
 
 This is the original NumPy single-game rule implementation, kept in the test
-suite as the differential reference that ``test_rules_vec.py`` validates the
-JAX-native ``catan_engine.rules_vec`` against. It is intentionally NOT part of
-the shipped package -- the engine uses ``rules_vec`` exclusively.
+suite as the differential reference that ``test_rules.py`` validates the
+JAX-native rule modules (``awards`` / ``dice`` / ``trade`` / ``economy`` / ...)
+against. It is intentionally NOT part of the shipped package -- the engine uses
+those traceable modules exclusively.
 
 Everything here operates on one game (batch index ``b``, default 0). The board
 state stays a batched ``BoardState``; these helpers read the requested game via

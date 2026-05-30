@@ -9,7 +9,6 @@ N_DEV_CARD_TYPES = 5
 # Remaining counts per type in a full, undrawn deck.
 # Order matches DevCard enum values.
 DEV_CARD_COUNTS: tuple[int, ...] = (14, 2, 2, 2, 5)  # sums to 25
-N_DEV_CARDS: int = sum(DEV_CARD_COUNTS)  # 25
 
 # Cost to purchase one development card: [sheep, wheat, wood, brick, ore]
 # Indices match Tile enum (SHEEP=0, WHEAT=1, WOOD=2, BRICK=3, ORE=4).

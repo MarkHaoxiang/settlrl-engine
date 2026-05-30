@@ -14,7 +14,6 @@ CITY_COST: tuple[int, ...] = (0, 2, 0, 0, 3)
 PlayerResourcesArray = UInt8[
     Array, f"batch players={N_PLAYERS} resources={N_RESOURCES}"
 ]
-BankResourcesArray = UInt8[Array, f"batch resources={N_RESOURCES}"]
 
 
 def compute_bank_resources(player_resources: jax.Array) -> jax.Array:

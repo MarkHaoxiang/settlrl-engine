@@ -20,10 +20,6 @@ def make_board(batch_size: int = 1, seed: int = 0) -> Board:
     return make_layout(batch_size, key=key), make_board_state(batch_size, key=key)
 
 
-def with_state(board: Board, state: BoardState) -> Board:
-    return (board[0], state)
-
-
 def replicate(board: Board, batch_size: int) -> Board:
     """Tile a single-game (batch=1) board into shape ``(batch_size, ...)``."""
 

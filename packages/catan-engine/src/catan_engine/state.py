@@ -1,13 +1,19 @@
 from enum import IntEnum
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, UInt8
+from jaxtyping import Array, Key, UInt8
 
-from catan_engine.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES
+from catan_engine.dev_cards import (
+    DEV_CARD_COUNTS,
+    DevCardDeckArray,
+    N_DEV_CARD_TYPES,
+    PlayerDevCardHandArray,
+    PlayerPlayedKnightsArray,
+)
 from catan_engine.layout import NO_INDEX, N_EDGES, N_VERTICES
-from catan_engine.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.resources import N_PLAYERS, N_RESOURCES, PlayerResourcesArray
 
 # Per-player building stock (standard Catan).
 MAX_ROADS = 15
@@ -23,16 +29,20 @@ VICTORY_POINTS_TO_WIN = 10
 # "empty". longest_road_owner / largest_army_owner store a 0-indexed player or
 # NO_INDEX for "unclaimed".
 
+# jaxtyping aliases for the BoardState arrays. Every field carries a leading
+# variable `batch` axis; all remaining axes are fixed board/game constants, so
+# the shapes are fully known in advance. Per-vertex/-edge/-player/-dev-card
+# arrays reuse the canonical aliases from layout / resources / dev_cards.
 VertexOwnerArray = UInt8[Array, f"batch vertices={N_VERTICES}"]  # 0=none, 1-4=player
 VertexTypeArray = UInt8[
     Array, f"batch vertices={N_VERTICES}"
 ]  # 0=none, 1=settlement, 2=city
 EdgeRoadArray = UInt8[Array, f"batch edges={N_EDGES}"]  # 0=none, 1-4=player
-RobberArray = UInt8[Array, "batch"]  # tile index; batch is variable
-PlayerResourcesArray = UInt8[
-    Array, f"batch players={N_PLAYERS} resources={N_RESOURCES}"
-]
 VictoryPointsArray = UInt8[Array, f"batch players={N_PLAYERS}"]
+PlayerDiscardArray = UInt8[Array, f"batch players={N_PLAYERS}"]  # cards still owed
+# Per-game scalars: phase, current_player, robber tile, counters, flags, awards.
+GameScalarArray = UInt8[Array, "batch"]
+KeyArray = Key[Array, "batch"]
 
 
 class GamePhase(IntEnum):
@@ -64,41 +74,51 @@ class BoardState(NamedTuple):
     Players are 0-indexed except in vertex_owner / edge_road (player + 1, 0=empty).
     victory_points holds *building* points only (settlement=1, city=2); Longest
     Road, Largest Army and hidden Victory Point cards are added on top when a
-    total is needed (see catan_engine.rules.player_total_vp).
+    total is needed (see catan_engine.economy.player_total_vp).
     """
 
     # -- Board occupancy ----------------------------------------------------
-    vertex_owner: jax.Array  # (batch, N_VERTICES)
-    vertex_type: jax.Array  # (batch, N_VERTICES)
-    edge_road: jax.Array  # (batch, N_EDGES)
-    robber: jax.Array  # (batch,) tile index
-    player_resources: jax.Array  # (batch, N_PLAYERS, N_RESOURCES)
-    victory_points: jax.Array  # (batch, N_PLAYERS) building points only
+    vertex_owner: VertexOwnerArray
+    vertex_type: VertexTypeArray
+    edge_road: EdgeRoadArray
+    robber: GameScalarArray  # tile index
+    player_resources: PlayerResourcesArray
+    victory_points: VictoryPointsArray  # building points only
 
     # -- Development cards --------------------------------------------------
-    dev_deck: jax.Array  # (batch, N_DEV_CARD_TYPES) remaining in draw pile
-    dev_hand: jax.Array  # (batch, N_PLAYERS, N_DEV_CARD_TYPES) held, unplayed
-    knights_played: jax.Array  # (batch, N_PLAYERS) cumulative, for Largest Army
+    dev_deck: DevCardDeckArray  # remaining in draw pile
+    dev_hand: PlayerDevCardHandArray  # held, unplayed
+    knights_played: PlayerPlayedKnightsArray  # cumulative, for Largest Army
 
     # -- Turn / flow --------------------------------------------------------
-    phase: jax.Array  # (batch,) GamePhase
-    current_player: jax.Array  # (batch,) 0-indexed
-    turn_number: jax.Array  # (batch,) main-game turn counter (uint16)
-    setup_index: jax.Array  # (batch,) 0..2*N_PLAYERS placement counter
-    dice_roll: jax.Array  # (batch,) 0 = not rolled this turn, else 2..12
-    has_rolled: jax.Array  # (batch,) flag
-    dev_played: jax.Array  # (batch,) flag - a dev card played this turn
-    dev_bought: jax.Array  # (batch, N_DEV_CARD_TYPES) bought this turn (unplayable)
-    free_roads: jax.Array  # (batch,) free roads owed (Road Building)
-    pending_discard: jax.Array  # (batch, N_PLAYERS) cards still owed after a 7
+    phase: GameScalarArray  # GamePhase
+    current_player: GameScalarArray  # 0-indexed
+    setup_index: GameScalarArray  # 0..2*N_PLAYERS placement counter
+    dice_roll: GameScalarArray  # 0 = not rolled this turn, else 2..12
+    has_rolled: GameScalarArray  # flag
+    dev_played: GameScalarArray  # flag - a dev card played this turn
+    dev_bought: DevCardDeckArray  # bought this turn (unplayable)
+    free_roads: GameScalarArray  # free roads owed (Road Building)
+    pending_discard: PlayerDiscardArray  # cards still owed after a 7
 
     # -- Awards -------------------------------------------------------------
-    longest_road_owner: jax.Array  # (batch,) player or NO_INDEX
-    largest_army_owner: jax.Array  # (batch,) player or NO_INDEX
-    longest_road_len: jax.Array  # (batch,) length held by longest_road_owner
+    longest_road_owner: GameScalarArray  # player or NO_INDEX
+    largest_army_owner: GameScalarArray  # player or NO_INDEX
+    longest_road_len: GameScalarArray  # length held by longest_road_owner
 
     # -- Randomness ---------------------------------------------------------
-    key: jax.Array  # (batch,) PRNG keys for dice rolls and steals
+    key: KeyArray  # PRNG keys for dice rolls and steals
+
+
+def tree_select(mask: jax.Array, a: BoardState, b: BoardState) -> BoardState:
+    """Per-leaf ``where(mask, a, b)`` over two single-game states (mask scalar).
+
+    The branchless-application primitive for the action layer: an action always
+    computes its candidate next state, then commits it only where legal.
+    """
+    return cast(
+        BoardState, jax.tree_util.tree_map(lambda x, y: jnp.where(mask, x, y), a, b)
+    )
 
 
 def make_board_state(batch_size: int = 1, key: jax.Array | None = None) -> BoardState:
@@ -120,7 +140,6 @@ def make_board_state(batch_size: int = 1, key: jax.Array | None = None) -> Board
         knights_played=jnp.zeros((B, N_PLAYERS), dtype=jnp.uint8),
         phase=jnp.full((B,), GamePhase.SETUP_SETTLEMENT, dtype=jnp.uint8),
         current_player=jnp.zeros((B,), dtype=jnp.uint8),
-        turn_number=jnp.zeros((B,), dtype=jnp.uint16),
         setup_index=jnp.zeros((B,), dtype=jnp.uint8),
         dice_roll=jnp.zeros((B,), dtype=jnp.uint8),
         has_rolled=jnp.zeros((B,), dtype=jnp.uint8),
