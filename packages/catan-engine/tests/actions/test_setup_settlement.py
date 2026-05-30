@@ -8,10 +8,13 @@ from expecttest import assert_expected_inline
 
 from catan_engine.action import ActionResult, SetupSettlement
 from catan_engine.board import Board, place_settlement, set_phase
+from catan_engine.layout import EDGE_V
 from catan_engine.resources import N_PLAYERS
-from catan_engine.geometry import V_NBR
 from catan_engine.state import GamePhase
 from tests.actions.fixtures import fmt
+
+# A vertex sharing an edge with vertex 0 (for the distance-rule test).
+_NBR_OF_0 = int(next(b if a == 0 else a for a, b in np.asarray(EDGE_V).tolist() if 0 in (a, b)))
 
 
 def test_success(setup_board: Board, render: Callable[..., str]) -> None:
@@ -95,6 +98,5 @@ def test_invalid_wrong_phase(setup_board: Board) -> None:
 
 def test_invalid_distance_rule(setup_board: Board) -> None:
     board = place_settlement(setup_board, 0, 0)
-    neighbour = int(np.asarray(V_NBR)[0, 0])
-    _, result = SetupSettlement()(board, jnp.array([neighbour]))
+    _, result = SetupSettlement()(board, jnp.array([_NBR_OF_0]))
     assert int(result[0]) == ActionResult.INVALID.value

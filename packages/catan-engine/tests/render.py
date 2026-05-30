@@ -6,11 +6,12 @@ robber, ports, settlements/cities, roads) plus ``tabulate`` summary tables. This
 is a *test-only* utility: the engine keeps no screen geometry, so the vertex /
 tile positions are re-derived here from the engine's own index ordering.
 
-The geometry mirrors ``layout._generate_mappings`` (cube coordinates generated in
-tile order) and projects every vertex onto a character grid. A vertex cube coord
-``(a, b, c)`` sums to +/-1; a tile centre sums to 0. The projection
+The cube coordinates come from the engine (``layout.vertex_cube`` /
+``layout.tile_cube``); this module just projects each vertex onto a character
+grid. A vertex cube coord ``(a, b, c)`` sums to +/-1; a tile centre sums to 0.
+The projection
 ``row = 3a - (a+b+c)``, ``col = c - b`` lays the standard Catan hexagon out as a
-regular honeycomb. The edge list comes straight from ``_edge_vertex_map`` so road
+regular honeycomb. The edge list comes straight from ``layout.EDGE_V`` so road
 rendering uses the exact same index ordering as ``BoardState.edge_road``.
 """
 
@@ -25,47 +26,27 @@ from tabulate import tabulate
 
 from catan_engine.dev_cards import N_DEV_CARD_TYPES, DevCard
 from catan_engine.layout import (
-    NO_INDEX,
+    EDGE_V,
     N_PORTS,
     N_TILES,
     N_VERTICES,
+    PORT_V,
     BoardLayout,
-    _edge_vertex_map,
-    _port_vertices_map,
+    tile_cube,
+    vertex_cube,
 )
 from catan_engine.port import Port
 from catan_engine.resources import N_PLAYERS, compute_bank_resources
-from catan_engine.state import BoardState, GamePhase
+from catan_engine.state import NO_INDEX, BoardState, GamePhase
 from catan_engine.tile import Tile
 from tests.reference import player_total_vp
 
-_VERTEX_DIRS = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
-
-
-def _build_geometry() -> tuple[
-    list[tuple[int, int, int]],  # tile centre cube coords, in tile order
-    dict[int, tuple[int, int, int]],  # vertex index -> cube coord
-]:
-    vertices: dict[tuple[int, int, int], int] = {}
-    centres: list[tuple[int, int, int]] = []
-    nxt = 0
-    for q in range(-2, 3):
-        for r in range(-2, 3):
-            s = -q - r
-            if abs(s) <= 2:
-                centres.append((q, r, s))
-                for dq, dr, ds in _VERTEX_DIRS:
-                    v = (q + dq, r + dr, s + ds)
-                    if v not in vertices:
-                        vertices[v] = nxt
-                        nxt += 1
-    inv = {idx: cube for cube, idx in vertices.items()}
-    return centres, inv
-
-
-_TILE_CENTRES, _VERTEX_CUBE = _build_geometry()
+# Cube coordinates per tile / vertex, taken from the engine's canonical index
+# ordering (layout owns the assignment) rather than re-derived here.
+_TILE_CENTRES = [tile_cube(t) for t in range(N_TILES)]
+_VERTEX_CUBE = {v: vertex_cube(v) for v in range(N_VERTICES)}
 # Canonical edge -> (vertex, vertex) ordering, owned by the engine.
-_EDGE_VERTICES = [(int(a), int(b)) for a, b in np.asarray(_edge_vertex_map).tolist()]
+_EDGE_VERTICES = [(int(a), int(b)) for a, b in np.asarray(EDGE_V).tolist()]
 
 # Character-grid scale: each cube step is this many rows / columns.
 _ROW_SCALE = 2
@@ -182,7 +163,7 @@ class BoardRenderer:
 
     def _draw_ports(self, put_str: Any) -> None:
         for port_idx in range(N_PORTS):
-            v1, v2 = (int(v) for v in _port_vertices_map[port_idx])
+            v1, v2 = (int(v) for v in PORT_V[port_idx])
             r1, c1 = _vertex_xy(v1)
             r2, c2 = _vertex_xy(v2)
             mid_r, mid_c = (r1 + r2) / 2, (c1 + c2) / 2

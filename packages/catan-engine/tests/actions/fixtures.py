@@ -11,8 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from catan_engine.action import ActionResult
-from catan_engine.action import BuildRoad
+from catan_engine.action import ActionResult, BuildRoad
 from catan_engine.board import (
     Board,
     give,
@@ -22,11 +21,21 @@ from catan_engine.board import (
     replicate,
     to_main,
 )
-from catan_engine.layout import NO_INDEX, N_EDGES
-from catan_engine.geometry import EDGE_V, V_NBR
+from catan_engine.layout import EDGE_V, N_EDGES
 
 _EDGE_V = np.asarray(EDGE_V)
-_V_NBR = np.asarray(V_NBR)
+
+
+def _neighbors(v: int) -> list[int]:
+    """Vertices sharing an edge with ``v`` (scanned from the edge_index)."""
+    out = []
+    for e in range(N_EDGES):
+        a, b = int(_EDGE_V[e, 0]), int(_EDGE_V[e, 1])
+        if a == v:
+            out.append(b)
+        elif b == v:
+            out.append(a)
+    return out
 
 
 def code(result: jax.Array, lane: int = 0) -> str:
@@ -75,8 +84,8 @@ def settlement_fixture() -> tuple[Board, int]:
     """
     board = to_main(make_board())
     v0 = 0
-    w = int(_V_NBR[v0][0])
-    x = next(int(n) for n in _V_NBR[w] if n != NO_INDEX and int(n) != v0)
+    w = _neighbors(v0)[0]
+    x = next(n for n in _neighbors(w) if n != v0)
     board = place_settlement(board, 0, v0)
     board = place_road(board, 0, _edge_between(v0, w))
     board = place_road(board, 0, _edge_between(w, x))

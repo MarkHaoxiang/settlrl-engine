@@ -5,8 +5,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from catan_engine.geometry import TILE_V
-from catan_engine.layout import N_TILES, BoardLayout
+from catan_engine.layout import N_TILES, TILE_V, BoardLayout
 from catan_engine.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
 from catan_engine.state import BoardState
 from catan_engine.tile import Tile

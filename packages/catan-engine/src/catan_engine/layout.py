@@ -14,8 +14,6 @@ N_PORTS = 9
 
 # Maximum number of edges/neighbours/tiles incident to a single vertex.
 MAX_VERTEX_DEGREE = 3
-# Sentinel stored in the padded incidence maps to mean "no entry".
-NO_INDEX = 255
 
 TileResourceArray = UInt8[Array, f"batch tiles={N_TILES}"]
 TileNumberArray = UInt8[Array, f"batch tiles={N_TILES}"]
@@ -35,9 +33,15 @@ class BoardLayout(NamedTuple):
 _EDGE_DIFFS = ((1, 1, 0), (1, 0, 1), (0, 1, 1))
 
 
-def _generate_mappings() -> tuple[jax.Array, ...]:
+Cube = tuple[int, int, int]
+
+
+def _generate_mappings() -> tuple[
+    jax.Array, jax.Array, jax.Array, dict[Cube, int], list[Cube]
+]:
     tile_vertex_mapping: list[list[int]] = []
-    vertices: dict[tuple[int, int, int], int] = {}
+    tile_centres: list[Cube] = []  # cube coord of each tile centre, in tile order
+    vertices: dict[Cube, int] = {}
 
     vertex_dirs = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
     port_vertices = (
@@ -59,6 +63,7 @@ def _generate_mappings() -> tuple[jax.Array, ...]:
             s = -q - r
             if abs(s) <= 2:
                 # Valid tile
+                tile_centres.append((q, r, s))
                 tile_vertex_mapping.append([])
                 for dq, dr, ds in vertex_dirs:
                     vertex = (q + dq, r + dr, s + ds)
@@ -81,57 +86,86 @@ def _generate_mappings() -> tuple[jax.Array, ...]:
                     edge_list.append((min(a, b), max(a, b)))
     edge_list.sort()
 
-    n_v = len(vertices)
-    pad = [NO_INDEX] * MAX_VERTEX_DEGREE
-
-    # vertex -> incident edge indices, and the vertex across each of those edges.
-    vertex_edges = [pad.copy() for _ in range(n_v)]
-    vertex_neighbours = [pad.copy() for _ in range(n_v)]
-    for e, (a, b) in enumerate(edge_list):
-        for v, w in ((a, b), (b, a)):
-            slot = vertex_edges[v].index(NO_INDEX)
-            vertex_edges[v][slot] = e
-            vertex_neighbours[v][slot] = w
-
-    # vertex -> incident tiles (inverse of tile_vertex_mapping).
-    vertex_tiles = [pad.copy() for _ in range(n_v)]
-    for t, corners in enumerate(tile_vertex_mapping):
-        for v in corners:
-            vertex_tiles[v][vertex_tiles[v].index(NO_INDEX)] = t
-
-    # vertex -> port index (NO_INDEX if the vertex is not a port vertex).
-    vertex_port = [NO_INDEX] * n_v
-    for p, (v1, v2) in enumerate(ports):
-        vertex_port[v1] = p
-        vertex_port[v2] = p
-
+    # int32 so the traceable rule helpers can gather/index through them directly
+    # under a JAX trace.
     return (
-        jnp.array(tile_vertex_mapping, dtype=jnp.uint8),
-        jnp.array(ports, dtype=jnp.uint8),
-        jnp.array(edge_list, dtype=jnp.uint8),
-        jnp.array(vertex_edges, dtype=jnp.uint8),
-        jnp.array(vertex_neighbours, dtype=jnp.uint8),
-        jnp.array(vertex_tiles, dtype=jnp.uint8),
-        jnp.array(vertex_port, dtype=jnp.uint8),
+        jnp.array(tile_vertex_mapping, dtype=jnp.int32),
+        jnp.array(ports, dtype=jnp.int32),
+        jnp.array(edge_list, dtype=jnp.int32),
+        vertices,
+        tile_centres,
     )
 
 
+# Static board geometry as int32 ``jnp`` arrays, shared by the engine's traceable
+# rule modules and the test reference / renderer. These are the dense,
+# padding-free incidence maps: ``EDGE_V`` is the COO ``edge_index`` (every edge
+# has exactly two endpoints) and ``TILE_V`` / ``PORT_V`` are dense hyperedge
+# maps. The rule modules derive vertex-incidence on the fly by scattering over
+# them (see e.g. ``placement`` / ``trade`` / ``dice``), so no ragged vertex->*
+# reverse maps or padding sentinels are stored here. Shapes checked in
+# ``tests/test_layout.py``.
 (
-    _tile_vertex_map,
-    _port_vertices_map,
-    _edge_vertex_map,
-    _vertex_edge_map,
-    _vertex_neighbour_map,
-    _vertex_tile_map,
-    _vertex_port_map,
+    TILE_V,  # (N_TILES, 6) tile -> corner vertices
+    PORT_V,  # (N_PORTS, 2) port -> its two vertices
+    EDGE_V,  # (N_EDGES, 2) edge -> endpoint vertices (the COO edge_index)
+    _CUBE_TO_VERTEX,  # cube coord -> vertex index
+    _TILE_CUBE,  # tile index -> centre cube coord
 ) = _generate_mappings()
-assert _tile_vertex_map.shape == (N_TILES, 6)
-assert _port_vertices_map.shape == (N_PORTS, 2)
-assert _edge_vertex_map.shape == (N_EDGES, 2)
-assert _vertex_edge_map.shape == (N_VERTICES, MAX_VERTEX_DEGREE)
-assert _vertex_neighbour_map.shape == (N_VERTICES, MAX_VERTEX_DEGREE)
-assert _vertex_tile_map.shape == (N_VERTICES, MAX_VERTEX_DEGREE)
-assert _vertex_port_map.shape == (N_VERTICES,)
+
+# Host-side cube-coordinate <-> index lookups, for human-readable inspection of
+# the board (e.g. read vertex_owner at a known corner). Cube coords are
+# (q, r, s) integer triples: tile centres sum to 0, vertices to +/-1. These are
+# plain Python lookups built once at import -- NOT for use inside a JAX trace.
+_VERTEX_CUBE: dict[int, Cube] = {idx: cube for cube, idx in _CUBE_TO_VERTEX.items()}
+_CUBE_TO_TILE: dict[Cube, int] = {cube: t for t, cube in enumerate(_TILE_CUBE)}
+_VPAIR_TO_EDGE: dict[frozenset[int], int] = {
+    frozenset((int(a), int(b))): e for e, (a, b) in enumerate(EDGE_V.tolist())
+}
+
+
+def _cube_key(cube: Cube) -> Cube:
+    return (int(cube[0]), int(cube[1]), int(cube[2]))
+
+
+def vertex_index(cube: Cube) -> int:
+    """Vertex index at cube coord ``(q, r, s)`` (must sum to +/-1)."""
+    key = _cube_key(cube)
+    if key not in _CUBE_TO_VERTEX:
+        raise KeyError(f"no vertex at cube {key}")
+    return _CUBE_TO_VERTEX[key]
+
+
+def vertex_cube(index: int) -> Cube:
+    """Cube coord ``(q, r, s)`` of vertex ``index``."""
+    return _VERTEX_CUBE[index]
+
+
+def edge_index(cube_a: Cube, cube_b: Cube) -> int:
+    """Edge index joining the two vertices at the given cube coords."""
+    pair = frozenset((vertex_index(cube_a), vertex_index(cube_b)))
+    if pair not in _VPAIR_TO_EDGE:
+        raise KeyError(f"no edge between cubes {_cube_key(cube_a)} and {_cube_key(cube_b)}")
+    return _VPAIR_TO_EDGE[pair]
+
+
+def edge_cubes(index: int) -> tuple[Cube, Cube]:
+    """The two endpoint cube coords of edge ``index``."""
+    a, b = (int(x) for x in EDGE_V[index])
+    return _VERTEX_CUBE[a], _VERTEX_CUBE[b]
+
+
+def tile_index(cube: Cube) -> int:
+    """Tile index at centre cube coord ``(q, r, s)`` (must sum to 0)."""
+    key = _cube_key(cube)
+    if key not in _CUBE_TO_TILE:
+        raise KeyError(f"no tile at cube {key}")
+    return _CUBE_TO_TILE[key]
+
+
+def tile_cube(index: int) -> Cube:
+    """Centre cube coord ``(q, r, s)`` of tile ``index``."""
+    return _TILE_CUBE[index]
 
 
 def make_layout(

@@ -1,6 +1,6 @@
 """Costs, building counts, affordability, payment, bank stock and victory points.
 
-Single-game, traceable helpers (see ``geometry`` for the index conventions).
+Single-game, traceable helpers operating on the ``BoardState`` arrays.
 """
 
 from __future__ import annotations

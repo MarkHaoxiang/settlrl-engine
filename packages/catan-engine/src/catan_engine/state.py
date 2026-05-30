@@ -12,7 +12,7 @@ from catan_engine.dev_cards import (
     PlayerDevCardHandArray,
     PlayerPlayedKnightsArray,
 )
-from catan_engine.layout import NO_INDEX, N_EDGES, N_VERTICES
+from catan_engine.layout import N_EDGES, N_VERTICES
 from catan_engine.resources import N_PLAYERS, N_RESOURCES, PlayerResourcesArray
 
 # Per-player building stock (standard Catan).
@@ -22,6 +22,11 @@ MAX_CITIES = 4
 
 # Victory points needed to win.
 VICTORY_POINTS_TO_WIN = 10
+
+# Sentinel for an unclaimed award: longest_road_owner / largest_army_owner hold a
+# 0-indexed player, or this value when no one qualifies (a uint8 out of player
+# range).
+NO_INDEX = 255
 
 # Player convention: players are 0-indexed (0..N_PLAYERS-1) for current_player,
 # player_resources, victory_points and the dev-card arrays. The board occupancy

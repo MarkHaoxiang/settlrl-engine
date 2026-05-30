@@ -8,7 +8,7 @@ from expecttest import assert_expected_inline
 
 from catan_engine.action import ActionResult, SetupRoad
 from catan_engine.board import Board, place_road, set_phase
-from catan_engine.geometry import EDGE_V
+from catan_engine.layout import EDGE_V
 from catan_engine.setup import N_SETUP
 from catan_engine.state import GamePhase
 from tests.actions.fixtures import fmt

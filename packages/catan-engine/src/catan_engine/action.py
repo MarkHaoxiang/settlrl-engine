@@ -3,7 +3,8 @@
 Each action's core is a pure transition on a **single, unbatched game** written
 in traceable JAX, composed from the focused rule modules (``economy``,
 ``placement``, ``awards``, ``trade``, ``dice``, ``robber``, ``setup``,
-``development``, ``geometry``). The public ``is_available`` / ``__call__`` are
+``development``) over the static geometry maps in ``layout``. The public
+``is_available`` / ``__call__`` are
 ``jax.jit(jax.vmap(...))`` over those cores, so they operate on a whole batch at
 once: ``params`` are batched arrays and the outcome is a ``(batch,)`` array of
 ``ActionResult`` codes.
@@ -33,7 +34,6 @@ from catan_engine import (
     development,
     dice,
     economy,
-    geometry,
     placement,
     robber,
     setup,
@@ -41,7 +41,7 @@ from catan_engine import (
 )
 from catan_engine.board import Board
 from catan_engine.dev_cards import DevCard
-from catan_engine.layout import BoardLayout, N_EDGES, N_TILES, N_VERTICES
+from catan_engine.layout import EDGE_V, N_EDGES, N_TILES, N_VERTICES, BoardLayout
 from catan_engine.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.state import (
     MAX_CITIES,
@@ -1014,15 +1014,20 @@ def _setup_road_avail(
     phase_ok = state.phase == GamePhase.SETUP_ROAD
     empty = state.edge_road[e] == 0
 
-    def endpoint_ok(v: jax.Array) -> jax.Array:
-        owns_here = state.vertex_owner[v] == target
-        e2 = geometry.V_EDGES[v]  # (MAX_VERTEX_DEGREE,)
-        valid = e2 != geometry.NO_IDX
-        roads = state.edge_road[jnp.where(valid, e2, 0)]
-        has_own_road = jnp.any(valid & (roads == target))
-        return owns_here & ~has_own_road
+    # Own roads incident to each vertex, by scattering over the edge_index.
+    own = (state.edge_road == target).astype(jnp.int32)
+    inc = (
+        jnp.zeros((N_VERTICES,), jnp.int32)
+        .at[EDGE_V[:, 0]]
+        .add(own)
+        .at[EDGE_V[:, 1]]
+        .add(own)
+    )
 
-    touches = endpoint_ok(geometry.EDGE_V[e, 0]) | endpoint_ok(geometry.EDGE_V[e, 1])
+    def endpoint_ok(v: jax.Array) -> jax.Array:
+        return (state.vertex_owner[v] == target) & (inc[v] == 0)
+
+    touches = endpoint_ok(EDGE_V[e, 0]) | endpoint_ok(EDGE_V[e, 1])
     return in_range & phase_ok & empty & touches
 
 

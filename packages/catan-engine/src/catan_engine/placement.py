@@ -1,30 +1,43 @@
-"""Settlement / road placement legality (single-game, traceable)."""
+"""Settlement / road placement legality (single-game, traceable).
+
+Vertex incidence is computed by scattering per-edge values onto their endpoints
+over the COO ``edge_index`` (``EDGE_V``), rather than gathering through padded
+vertex->edge reverse maps -- the JAX analogue of PyG message passing.
+"""
 
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
 
-from catan_engine.geometry import EDGE_V, NO_IDX, V_EDGES, V_NBR
+from catan_engine.layout import EDGE_V, N_VERTICES
+
+# COO edge_index endpoints (static graph connectivity).
+_SRC = EDGE_V[:, 0]
+_DST = EDGE_V[:, 1]
+
+
+def _scatter_to_vertices(per_edge: jax.Array) -> jax.Array:
+    """Sum a per-edge value onto both of each edge's endpoints."""
+    acc = jnp.zeros((N_VERTICES,), per_edge.dtype)
+    return acc.at[_SRC].add(per_edge).at[_DST].add(per_edge)
 
 
 def distance_rule_ok(vertex_owner: jax.Array, vertex: jax.Array) -> jax.Array:
     """Vertex empty and no adjacent vertex carries a building."""
-    nbr = V_NBR[vertex]  # (MAX_VERTEX_DEGREE,)
-    valid = nbr != NO_IDX
-    occ = vertex_owner[jnp.where(valid, nbr, 0)]
-    blocked = jnp.any(valid & (occ != 0))
-    return (vertex_owner[vertex] == 0) & ~blocked
+    occ = (vertex_owner != 0).astype(jnp.int32)  # (N_VERTICES,)
+    # Scatter each edge's endpoint occupancy onto the opposite endpoint.
+    nbr_occ = jnp.zeros_like(occ).at[_SRC].add(occ[_DST]).at[_DST].add(occ[_SRC])
+    return (vertex_owner[vertex] == 0) & (nbr_occ[vertex] == 0)
 
 
 def settlement_connected(
     edge_road: jax.Array, player: jax.Array, vertex: jax.Array
 ) -> jax.Array:
     """Player owns a road incident to ``vertex`` (required outside setup)."""
-    e = V_EDGES[vertex]
-    valid = e != NO_IDX
-    roads = edge_road[jnp.where(valid, e, 0)]
-    return jnp.any(valid & (roads == player + 1))
+    mine = (edge_road == player + 1).astype(jnp.int32)  # (N_EDGES,)
+    inc = _scatter_to_vertices(mine)  # roads-of-mine touching each vertex
+    return inc[vertex] > 0
 
 
 def road_placeable(
@@ -34,13 +47,13 @@ def road_placeable(
     target = player + 1
     empty = edge_road[edge] == 0
 
+    own_here = vertex_owner == target  # (N_VERTICES,)
+    blocked = (vertex_owner != 0) & ~own_here  # opponent building blocks
+    # Own roads incident to each vertex. The candidate edge is empty (gated by
+    # ``empty``), so it is never one of mine and never self-counts.
+    inc = _scatter_to_vertices((edge_road == target).astype(jnp.int32))
+
     def end_ok(v: jax.Array) -> jax.Array:
-        own_here = vertex_owner[v] == target
-        blocked = (vertex_owner[v] != 0) & ~own_here  # opponent building blocks
-        e2 = V_EDGES[v]
-        valid = (e2 != NO_IDX) & (e2 != edge)
-        roads = edge_road[jnp.where(valid, e2, 0)]
-        has_own_adj = jnp.any(valid & (roads == target))
-        return own_here | (~blocked & has_own_adj)
+        return own_here[v] | (~blocked[v] & (inc[v] > 0))
 
     return empty & (end_ok(EDGE_V[edge, 0]) | end_ok(EDGE_V[edge, 1]))

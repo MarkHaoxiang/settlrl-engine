@@ -14,7 +14,7 @@ from catan_engine.board import (
     set_robber,
     to_main,
 )
-from catan_engine.geometry import TILE_V
+from catan_engine.layout import TILE_V
 from catan_engine.state import GamePhase
 from tests.actions.fixtures import fmt
 

@@ -16,7 +16,7 @@ from catan_engine.board import (
     to_main,
 )
 from catan_engine.dev_cards import DevCard
-from catan_engine.geometry import TILE_V
+from catan_engine.layout import TILE_V
 from tests.actions.fixtures import fmt
 
 _TILE_V = np.asarray(TILE_V)

@@ -12,16 +12,38 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
-from catan_engine.geometry import EDGE_V, NO_IDX, V_EDGES, V_NBR
-from catan_engine.layout import MAX_VERTEX_DEGREE, N_EDGES
+from catan_engine.layout import EDGE_V, MAX_VERTEX_DEGREE, N_EDGES, N_VERTICES
 from catan_engine.resources import N_PLAYERS
-from catan_engine.state import BoardState
+from catan_engine.state import NO_INDEX, BoardState
+
+# int32 "unclaimed" award marker (the uint8 NO_INDEX as stored on BoardState).
+# This is the award-holder sentinel, unrelated to any geometry padding.
+_NONE = jnp.int32(NO_INDEX)
 
 # Generous bound for the longest-road DFS stack. We seed 2 * N_EDGES frames
 # (both directions of every edge) and the live DFS frontier adds only
 # depth * (maxdeg - 1) ~= 15 * 2 on top; this leaves a wide margin.
 STACK_CAP = 2 * N_EDGES + 128
+
+# Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built
+# once at import. Each undirected edge is listed under both endpoints; entries
+# are grouped by source vertex so vertex v owns the slice
+# [_ADJ_INDPTR[v], _ADJ_INDPTR[v + 1]). The DFS reads slots by degree mask
+# (slot < deg), never a padding value.
+_E = np.asarray(EDGE_V)
+_src = np.concatenate([_E[:, 0], _E[:, 1]])
+_order = np.argsort(_src, kind="stable")
+_src = _src[_order]
+_counts = np.bincount(_src, minlength=N_VERTICES)
+_ADJ_INDPTR = jnp.asarray(np.concatenate([[0], np.cumsum(_counts)]), dtype=jnp.int32)
+_ADJ_EDGE = jnp.asarray(
+    np.concatenate([np.arange(N_EDGES), np.arange(N_EDGES)])[_order], dtype=jnp.int32
+)
+_ADJ_NBR = jnp.asarray(
+    np.concatenate([_E[:, 1], _E[:, 0]])[_order], dtype=jnp.int32
+)
 
 
 def longest_road_length(
@@ -68,14 +90,16 @@ def longest_road_length(
         owner = vertex_owner[v]
         can = (owner == 0) | (owner == target)
 
+        start = _ADJ_INDPTR[v]
+        deg = _ADJ_INDPTR[v + 1] - start
         st = (stack_v, stack_len, stack_mask, sp)
         for slot in range(MAX_VERTEX_DEGREE):
             sv, sl, sm, sp_i = st
-            e = V_EDGES[v, slot]
-            w = V_NBR[v, slot]
-            e_c = jnp.clip(e, 0, N_EDGES - 1)
-            valid = (e != NO_IDX) & can & mine[e_c] & ~m[e_c]
-            new_mask = m.at[e_c].set(True)
+            idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
+            e = _ADJ_EDGE[idx]
+            w = _ADJ_NBR[idx]
+            valid = (slot < deg) & can & mine[e] & ~m[e]
+            new_mask = m.at[e].set(True)
             sv = sv.at[sp_i].set(jnp.where(valid, w, sv[sp_i]))
             sl = sl.at[sp_i].set(jnp.where(valid, length + 1, sl[sp_i]))
             sm = sm.at[sp_i].set(jnp.where(valid, new_mask, sm[sp_i]))
@@ -96,11 +120,11 @@ def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.
     top = jnp.max(jnp.where(qualifies, counts, -1))
     leaders = qualifies & (counts == top)
     holder_leads = jnp.where(
-        owner == NO_IDX, False, leaders[jnp.clip(owner, 0, N_PLAYERS - 1)]
+        owner == _NONE, False, leaders[jnp.clip(owner, 0, N_PLAYERS - 1)]
     )
     first_leader = jnp.argmax(leaders).astype(jnp.int32)
     new_owner = jnp.where(
-        any_q, jnp.where(holder_leads, owner.astype(jnp.int32), first_leader), NO_IDX
+        any_q, jnp.where(holder_leads, owner.astype(jnp.int32), first_leader), _NONE
     )
     return new_owner.astype(jnp.uint8)
 

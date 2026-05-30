@@ -26,29 +26,59 @@ import numpy as np
 
 from catan_engine.dev_cards import DevCard
 from catan_engine.layout import (
-    NO_INDEX,
+    EDGE_V,
+    MAX_VERTEX_DEGREE,
     N_EDGES,
     N_VERTICES,
+    PORT_V,
+    TILE_V,
     BoardLayout,
-    _edge_vertex_map,
-    _tile_vertex_map,
-    _vertex_edge_map,
-    _vertex_neighbour_map,
-    _vertex_port_map,
-    _vertex_tile_map,
 )
 from catan_engine.port import Port
 from catan_engine.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
-from catan_engine.state import BoardState, MAX_ROADS
+from catan_engine.state import NO_INDEX, BoardState, MAX_ROADS
 from catan_engine.tile import Tile
 
 # Static geometry as NumPy for fast indexing in the helpers below.
-_EDGE_V = np.asarray(_edge_vertex_map)  # (N_EDGES, 2)
-_V_EDGES = np.asarray(_vertex_edge_map)  # (N_VERTICES, MAX_DEGREE)
-_V_NBR = np.asarray(_vertex_neighbour_map)  # (N_VERTICES, MAX_DEGREE)
-_V_TILES = np.asarray(_vertex_tile_map)  # (N_VERTICES, MAX_DEGREE)
-_V_PORT = np.asarray(_vertex_port_map)  # (N_VERTICES,)
-_TILE_V = np.asarray(_tile_vertex_map)  # (N_TILES, 6)
+_EDGE_V = np.asarray(EDGE_V)  # (N_EDGES, 2)
+_TILE_V = np.asarray(TILE_V)  # (N_TILES, 6)
+_PORT_V = np.asarray(PORT_V)  # (N_PORTS, 2)
+
+# Padding sentinel for this oracle's own (local) reverse maps below. Unrelated to
+# the engine -- the engine scatters and stores no padded maps.
+_PAD = -1
+
+
+def _build_adjacency() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Padded vertex->* reverse maps for the oracle, rebuilt locally from the
+    engine's dense forward maps. The engine itself no longer stores these (it
+    scatters over EDGE_V/TILE_V/PORT_V); keeping the oracle's own copy makes the
+    differential test an independent check rather than shared code."""
+    pad = [_PAD] * MAX_VERTEX_DEGREE
+    v_edges = [pad.copy() for _ in range(N_VERTICES)]
+    v_nbr = [pad.copy() for _ in range(N_VERTICES)]
+    for e, (a, b) in enumerate(_EDGE_V.tolist()):
+        for v, w in ((a, b), (b, a)):
+            slot = v_edges[v].index(_PAD)
+            v_edges[v][slot] = e
+            v_nbr[v][slot] = w
+    v_tiles = [pad.copy() for _ in range(N_VERTICES)]
+    for t, corners in enumerate(_TILE_V.tolist()):
+        for v in corners:
+            v_tiles[v][v_tiles[v].index(_PAD)] = t
+    v_port = [_PAD] * N_VERTICES
+    for p, (v1, v2) in enumerate(_PORT_V.tolist()):
+        v_port[v1] = p
+        v_port[v2] = p
+    return (
+        np.array(v_edges, np.int64),
+        np.array(v_nbr, np.int64),
+        np.array(v_tiles, np.int64),
+        np.array(v_port, np.int64),
+    )
+
+
+_V_EDGES, _V_NBR, _V_TILES, _V_PORT = _build_adjacency()
 
 # Setup placement order over 2 * N_PLAYERS settlements (snake / boustrophedon).
 SETUP_ORDER: list[int] = list(range(N_PLAYERS)) + list(range(N_PLAYERS - 1, -1, -1))
@@ -121,7 +151,7 @@ def distance_rule_ok(state: BoardState, vertex: int, b: int = 0) -> bool:
     if owner[vertex] != 0:
         return False
     for w in _V_NBR[vertex]:
-        if w != NO_INDEX and owner[int(w)] != 0:
+        if w != _PAD and owner[int(w)] != 0:
             return False
     return True
 
@@ -132,7 +162,7 @@ def settlement_connected(
     """Player owns a road incident to ``vertex`` (required outside setup)."""
     road = np.asarray(state.edge_road[b])
     for e in _V_EDGES[vertex]:
-        if e != NO_INDEX and road[int(e)] == player + 1:
+        if e != _PAD and road[int(e)] == player + 1:
             return True
     return False
 
@@ -150,7 +180,7 @@ def road_placeable(state: BoardState, player: int, edge: int, b: int = 0) -> boo
         if owner[v] != 0:  # opponent building blocks routing through this end
             continue
         for e2 in _V_EDGES[v]:
-            if e2 != NO_INDEX and int(e2) != edge and road[int(e2)] == target:
+            if e2 != _PAD and int(e2) != edge and road[int(e2)] == target:
                 return True
     return False
 
@@ -255,7 +285,7 @@ def port_ratio(
     alloc = np.asarray(layout.port_allocation[b])
     ratio = 4
     for v in range(N_VERTICES):
-        if owner[v] != player + 1 or _V_PORT[v] == NO_INDEX:
+        if owner[v] != player + 1 or _V_PORT[v] == _PAD:
             continue
         ptype = int(alloc[int(_V_PORT[v])])
         if ptype == Port.GENERAL:
@@ -359,7 +389,7 @@ def grant_setup_resources(
     tile_resource = np.asarray(layout.tile_resource[b])
     res = np.asarray(state.player_resources[b]).astype(np.int64)
     for t in _V_TILES[vertex]:
-        if t == NO_INDEX:
+        if t == _PAD:
             continue
         resource = int(tile_resource[int(t)])
         if resource != Tile.DESERT and bank_stock(state, resource, b) > 0:

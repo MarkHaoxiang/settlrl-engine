@@ -25,8 +25,7 @@ from catan_engine.board import (
     to_main,
 )
 from catan_engine.dev_cards import DevCard
-from catan_engine.layout import BoardLayout
-from catan_engine.geometry import TILE_V
+from catan_engine.layout import TILE_V, BoardLayout
 from catan_engine.state import BoardState, GamePhase
 from tests.actions.fixtures import road_fixture, settlement_fixture
 from tests.render import BoardRenderer
