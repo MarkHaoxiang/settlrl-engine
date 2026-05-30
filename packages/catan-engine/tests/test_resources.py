@@ -23,11 +23,11 @@ class TestBankResources(TestCase):
         player_resources = player_resources.at[0, 0, 0].set(5)
         player_resources = player_resources.at[0, 0, 4].set(3)
         bank = np.asarray(compute_bank_resources(player_resources)[0])
-        assert bank[0] == BANK_INITIAL - 5   # sheep
-        assert bank[4] == BANK_INITIAL - 3   # ore
-        assert bank[1] == BANK_INITIAL       # wheat unchanged
-        assert bank[2] == BANK_INITIAL       # wood unchanged
-        assert bank[3] == BANK_INITIAL       # brick unchanged
+        assert bank[0] == BANK_INITIAL - 5  # sheep
+        assert bank[4] == BANK_INITIAL - 3  # ore
+        assert bank[1] == BANK_INITIAL  # wheat unchanged
+        assert bank[2] == BANK_INITIAL  # wood unchanged
+        assert bank[3] == BANK_INITIAL  # brick unchanged
 
     def test_bank_decreases_across_all_players(self) -> None:
         # Each player holds 1 of every resource
@@ -42,9 +42,9 @@ class TestBankResources(TestCase):
         player_resources = player_resources.at[1, 0, 1].set(2)
         bank = np.asarray(compute_bank_resources(player_resources))
         assert bank.shape == (B, N_RESOURCES)
-        assert bank[0, 1] == BANK_INITIAL       # batch 0 unchanged
-        assert bank[1, 1] == BANK_INITIAL - 2   # batch 1 reduced
-        assert bank[2, 1] == BANK_INITIAL       # batch 2 unchanged
+        assert bank[0, 1] == BANK_INITIAL  # batch 0 unchanged
+        assert bank[1, 1] == BANK_INITIAL - 2  # batch 1 reduced
+        assert bank[2, 1] == BANK_INITIAL  # batch 2 unchanged
 
 
 class TestBoardStateResources(TestCase):

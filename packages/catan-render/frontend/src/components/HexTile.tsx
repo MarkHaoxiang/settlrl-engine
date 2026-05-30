@@ -1,23 +1,6 @@
 import { hexCorners } from "../lib/hex";
+import { TERRAIN_FILL as FILL, TERRAIN_STROKE as STROKE } from "../lib/boardData";
 import type { Terrain } from "../lib/boardData";
-
-const FILL: Record<Terrain, string> = {
-  wheat: "#EEC900",
-  sheep: "#7DC95E",
-  wood: "#2D6A2D",
-  ore: "#8B949E",
-  brick: "#C0392B",
-  desert: "#E8D5A3",
-};
-
-const STROKE: Record<Terrain, string> = {
-  wheat: "#B89A00",
-  sheep: "#4E9A35",
-  wood: "#1A4A1A",
-  ore: "#5A666E",
-  brick: "#8E2319",
-  desert: "#C4B080",
-};
 
 interface Props {
   cx: number;

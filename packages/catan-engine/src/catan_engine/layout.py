@@ -12,12 +12,17 @@ N_VERTICES = 54
 N_EDGES = 72  # V - E + F = 2, F = N_TILES + 1 outer face
 N_PORTS = 9
 
+# Maximum number of edges/neighbours/tiles incident to a single vertex.
+MAX_VERTEX_DEGREE = 3
+# Sentinel stored in the padded incidence maps to mean "no entry".
+NO_INDEX = 255
+
 TileResourceArray = UInt8[Array, f"batch tiles={N_TILES}"]
 TileNumberArray = UInt8[Array, f"batch tiles={N_TILES}"]
 PortAllocationArray = UInt8[Array, f"batch ports={N_PORTS}"]
 
 
-class BoardStatic(NamedTuple):
+class BoardLayout(NamedTuple):
     """Immutable board geometry: tile resources, number tokens, and port types."""
 
     tile_resource: jax.Array
@@ -25,9 +30,14 @@ class BoardStatic(NamedTuple):
     port_allocation: jax.Array
 
 
-def _generate_mappings() -> tuple[jax.Array, jax.Array]:
+# Two vertices share an edge iff one cube coord sums to +1, the other to -1,
+# and their difference is one of these (matches the renderer's geometry).
+_EDGE_DIFFS = ((1, 1, 0), (1, 0, 1), (0, 1, 1))
+
+
+def _generate_mappings() -> tuple[jax.Array, ...]:
     tile_vertex_mapping: list[list[int]] = []
-    vertices = {}
+    vertices: dict[tuple[int, int, int], int] = {}
 
     vertex_dirs = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
     port_vertices = (
@@ -59,21 +69,75 @@ def _generate_mappings() -> tuple[jax.Array, jax.Array]:
 
     ports = [[vertices[v1], vertices[v2]] for v1, v2 in port_vertices]
 
+    # Edges: connect each cube-sum +1 vertex to its cube-sum -1 neighbours.
+    # Sorted to give a stable, canonical edge index for BoardState.edge_road.
+    edge_list: list[tuple[int, int]] = []
+    for cube, idx in vertices.items():
+        if sum(cube) == 1:
+            for dq, dr, ds in _EDGE_DIFFS:
+                other = (cube[0] - dq, cube[1] - dr, cube[2] - ds)
+                if other in vertices:
+                    a, b = idx, vertices[other]
+                    edge_list.append((min(a, b), max(a, b)))
+    edge_list.sort()
+
+    n_v = len(vertices)
+    pad = [NO_INDEX] * MAX_VERTEX_DEGREE
+
+    # vertex -> incident edge indices, and the vertex across each of those edges.
+    vertex_edges = [pad.copy() for _ in range(n_v)]
+    vertex_neighbours = [pad.copy() for _ in range(n_v)]
+    for e, (a, b) in enumerate(edge_list):
+        for v, w in ((a, b), (b, a)):
+            slot = vertex_edges[v].index(NO_INDEX)
+            vertex_edges[v][slot] = e
+            vertex_neighbours[v][slot] = w
+
+    # vertex -> incident tiles (inverse of tile_vertex_mapping).
+    vertex_tiles = [pad.copy() for _ in range(n_v)]
+    for t, corners in enumerate(tile_vertex_mapping):
+        for v in corners:
+            vertex_tiles[v][vertex_tiles[v].index(NO_INDEX)] = t
+
+    # vertex -> port index (NO_INDEX if the vertex is not a port vertex).
+    vertex_port = [NO_INDEX] * n_v
+    for p, (v1, v2) in enumerate(ports):
+        vertex_port[v1] = p
+        vertex_port[v2] = p
+
     return (
         jnp.array(tile_vertex_mapping, dtype=jnp.uint8),
         jnp.array(ports, dtype=jnp.uint8),
+        jnp.array(edge_list, dtype=jnp.uint8),
+        jnp.array(vertex_edges, dtype=jnp.uint8),
+        jnp.array(vertex_neighbours, dtype=jnp.uint8),
+        jnp.array(vertex_tiles, dtype=jnp.uint8),
+        jnp.array(vertex_port, dtype=jnp.uint8),
     )
 
 
-_tile_vertex_map, _port_vertices_map = _generate_mappings()
+(
+    _tile_vertex_map,
+    _port_vertices_map,
+    _edge_vertex_map,
+    _vertex_edge_map,
+    _vertex_neighbour_map,
+    _vertex_tile_map,
+    _vertex_port_map,
+) = _generate_mappings()
 assert _tile_vertex_map.shape == (N_TILES, 6)
 assert _port_vertices_map.shape == (N_PORTS, 2)
+assert _edge_vertex_map.shape == (N_EDGES, 2)
+assert _vertex_edge_map.shape == (N_VERTICES, MAX_VERTEX_DEGREE)
+assert _vertex_neighbour_map.shape == (N_VERTICES, MAX_VERTEX_DEGREE)
+assert _vertex_tile_map.shape == (N_VERTICES, MAX_VERTEX_DEGREE)
+assert _vertex_port_map.shape == (N_VERTICES,)
 
 
-def make_board(
+def make_layout(
     batch_size: int = 1,
     key: jax.Array | None = None,
-) -> BoardStatic:
+) -> BoardLayout:
     B = batch_size
     key = key if key is not None else jax.random.key(0)
     key, k1, k2, k3 = jax.random.split(key, 4)
@@ -122,7 +186,7 @@ def make_board(
     allocation_idxs = jnp.stack([jax.random.permutation(k, N_PORTS) for k in keys])
     port_allocation = port_allocation[batch_idx, allocation_idxs]
 
-    return BoardStatic(
+    return BoardLayout(
         tile_resource=tile_resource,
         tile_number=tile_number,
         port_allocation=port_allocation,

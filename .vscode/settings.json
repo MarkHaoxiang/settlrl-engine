@@ -1,0 +1,24 @@
+{
+  // Use the uv-managed workspace virtual environment for everything (running,
+  // debugging, and test discovery). Created/updated by `uv sync`.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // --- Testing -------------------------------------------------------------
+  // pytest only; turn off the unittest discovery so the two don't compete.
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  // Point discovery at the package's test suite. pytest auto-resolves its
+  // rootdir/config from packages/catan-engine/pyproject.toml ([tool.pytest]).
+  "python.testing.pytestArgs": ["packages/catan-engine/tests"],
+
+  // --- Editor tooling (matches the pre-commit hooks) -----------------------
+  "ruff.importStrategy": "fromEnvironment",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    }
+  }
+}
