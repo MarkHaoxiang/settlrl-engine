@@ -33,47 +33,48 @@ dev_played=1
 player0_monopoly=0""",
     )
     # The full board's Players table shows all sheep swept onto player 1.
-    assert_expected_inline(render(monopoly_board[0], state, full=True), """\
-Catan Board
+    assert_expected_inline(
+        render(monopoly_board[0], state, full=True),
+        r"""Catan Board
 ============================================================
 
 
 
 
           ORE             3:1
-               /o\\     /o\\     /o\\
-              /   \\   /   \\   /   \\
-            o/     \\o/     \\o/     \\o
+               /o\     /o\     /o\
+              /   \   /   \   /   \
+            o/     \o/     \o/     \o
             |  SHP  |  ORE  |  BRK  |
             |   5   |   6   |  10   |
-            |       |       |  <R>  |
-           /o\\     /o\\     /o\\     /o\\   3:1
-          /   \\   /   \\   /   \\   /   \\
-        o/     \\o/     \\o/     \\o/     \\o
+            |       |       |       |
+           /o\     /o\     /o\     /o\   3:1
+          /   \   /   \   /   \   /   \
+        o/     \o/     \o/     \o/     \o
   WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
         |   9   |   2   |  10   |  11   |
         |       |       |       |       |
-       /o\\     /o\\     /o\\     /o\\     /o\\
-      /   \\   /   \\   /   \\   /   \\   /   \\
-    o/     \\o/     \\o/     \\o/     \\o/     \\o
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
     |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
     |   8   |   4   |   3   |       |  12   |   3
-    |       |       |       |       |       |
-    o\\     /o\\     /o\\     /o\\     /o\\     /o
-      \\   /   \\   /   \\   /   \\   /   \\   /
-       \\o/     \\o/     \\o/     \\o/     \\o/
+    |       |       |       |  <R>  |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
         |  SHP  |  ORE  |  BRK  |  BRK  |
         |   8   |   3   |  11   |   6   |
   3:1   |       |       |       |       |
-        o\\     /o\\     /o\\     /o\\     /o
-          \\   /   \\   /   \\   /   \\   /
-           \\o/     \\o/     \\o/     \\o/   BRK
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
             |  WHT  |  WHT  |  WOD  |
             |   4   |   9   |   5   |
             |       |       |       |
-            o\\     /o\\     /o\\     /o
-              \\   /   \\   /   \\   /
-               \\o/     \\o/     \\o/
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
           SHP             WHT
 
 
@@ -107,8 +108,9 @@ Bank
 |      13 |      19 |     19 |      19 |    19 |
 +---------+---------+--------+---------+-------+
 
-Robber: tile 0 (BRK, 10)
-""")
+Robber: tile 8 (DST, desert)
+""",
+    )
 
 
 def test_invalid_wrong_phase(monopoly_board: Board) -> None:

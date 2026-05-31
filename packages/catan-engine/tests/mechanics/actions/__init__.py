@@ -9,9 +9,10 @@ unchanged. Success boards come from the ``*_board`` pytest fixtures in
 ``conftest.py``; ``fixtures.py`` holds the low-level builders they compose.
 
 All 15 actions are vectorized in ``action.py`` and covered here (one file per
-action). DomesticTrade is intentionally deferred (never implemented). The NumPy
-single-game path has been removed; its reference implementation now lives in
-``tests/reference.py`` (the differential oracle for ``tests/test_rules.py``).
+action). DomesticTrade is intentionally deferred (never implemented). The trusted
+single-game oracle is the standalone ``catan-reference`` package, bridged to the
+engine by ``tests/conversion.py`` (the differential reference for
+``tests/test_rules.py`` and ``tests/test_reference_equivalence.py``).
 ``ActionResult`` lives in ``action.py``, and ``catan_engine.env`` exposes a
 unified ``step`` / ``available`` over this action set (see ``tests/test_env.py``).
 """

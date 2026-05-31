@@ -39,7 +39,7 @@ from catan_engine.board.port import Port
 from catan_engine.board.resources import N_PLAYERS, compute_bank_resources
 from catan_engine.board.state import NO_INDEX, BoardState, GamePhase
 from catan_engine.board.tile import Tile
-from tests.reference import player_total_vp
+from tests.conversion import player_total_vp
 
 # Cube coordinates per tile / vertex, taken from the engine's canonical index
 # ordering (layout owns the assignment) rather than re-derived here.

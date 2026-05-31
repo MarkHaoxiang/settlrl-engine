@@ -1,0 +1,17 @@
+[project]
+name = "catan-reference"
+version = "0.1.0"
+description = "A plain-Python gold-standard reference implementation of the Catan rules, used to differentially test catan-engine."
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.mypy]
+strict = true

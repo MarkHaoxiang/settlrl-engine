@@ -14,7 +14,9 @@ from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 # A vertex sharing an edge with vertex 0 (for the distance-rule test).
-_NBR_OF_0 = int(next(b if a == 0 else a for a, b in np.asarray(EDGE_V).tolist() if 0 in (a, b)))
+_NBR_OF_0 = int(
+    next(b if a == 0 else a for a, b in np.asarray(EDGE_V).tolist() if 0 in (a, b))
+)
 
 
 def test_success(setup_board: Board, render: Callable[..., str]) -> None:
@@ -36,48 +38,50 @@ vp=1
 phase=SETUP_ROAD
 resources_total=0""",
     )
-    assert_expected_inline(render(setup_board[0], state), """\
-
+    assert_expected_inline(
+        render(setup_board[0], state),
+        r"""
 
 
           ORE             3:1
-               /o\\     /o\\     /o\\
-              /   \\   /   \\   /   \\
-            o/     \\o/     \\o/     \\o
+               /o\     /o\     /o\
+              /   \   /   \   /   \
+            o/     \o/     \o/     \o
             |  SHP  |  ORE  |  BRK  |
             |   5   |   6   |  10   |
-            |       |       |  <R>  |
-           /o\\     /o\\     /o\\     /o\\   3:1
-          /   \\   /   \\   /   \\   /   \\
-        o/     \\o/     \\o/     \\1/     \\o
+            |       |       |       |
+           /o\     /o\     /o\     /o\   3:1
+          /   \   /   \   /   \   /   \
+        o/     \o/     \o/     \1/     \o
   WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
         |   9   |   2   |  10   |  11   |
         |       |       |       |       |
-       /o\\     /o\\     /o\\     /o\\     /o\\
-      /   \\   /   \\   /   \\   /   \\   /   \\
-    o/     \\o/     \\o/     \\o/     \\o/     \\o
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
     |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
     |   8   |   4   |   3   |       |  12   |   3
-    |       |       |       |       |       |
-    o\\     /o\\     /o\\     /o\\     /o\\     /o
-      \\   /   \\   /   \\   /   \\   /   \\   /
-       \\o/     \\o/     \\o/     \\o/     \\o/
+    |       |       |       |  <R>  |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
         |  SHP  |  ORE  |  BRK  |  BRK  |
         |   8   |   3   |  11   |   6   |
   3:1   |       |       |       |       |
-        o\\     /o\\     /o\\     /o\\     /o
-          \\   /   \\   /   \\   /   \\   /
-           \\o/     \\o/     \\o/     \\o/   BRK
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
             |  WHT  |  WHT  |  WOD  |
             |   4   |   9   |   5   |
             |       |       |       |
-            o\\     /o\\     /o\\     /o
-              \\   /   \\   /   \\   /
-               \\o/     \\o/     \\o/
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
           SHP             WHT
 
 
-""")
+""",
+    )
 
 
 def test_second_settlement_grants_resources(setup_board: Board) -> None:

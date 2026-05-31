@@ -148,7 +148,9 @@ def edge_index(cube_a: Cube, cube_b: Cube) -> int:
     """Edge index joining the two vertices at the given cube coords."""
     pair = frozenset((vertex_index(cube_a), vertex_index(cube_b)))
     if pair not in _VPAIR_TO_EDGE:
-        raise KeyError(f"no edge between cubes {_cube_key(cube_a)} and {_cube_key(cube_b)}")
+        raise KeyError(
+            f"no edge between cubes {_cube_key(cube_a)} and {_cube_key(cube_b)}"
+        )
     return _VPAIR_TO_EDGE[pair]
 
 
@@ -228,3 +230,14 @@ def make_layout(
         tile_number=tile_number,
         port_allocation=port_allocation,
     )
+
+
+def desert_tile(tile_resource: jax.Array) -> jax.Array:
+    """Per-lane index of the desert tile -- the robber's starting position.
+
+    Catan starts the robber on the desert (where it blocks no production). The
+    desert is the only ``Tile.DESERT`` tile; ``make_layout`` shuffles tile
+    positions, so the location must be read off the generated ``tile_resource``
+    (shape ``(batch, N_TILES)``). Returns a ``(batch,)`` uint8 array.
+    """
+    return jnp.argmax(tile_resource == Tile.DESERT.value, axis=1).astype(jnp.uint8)

@@ -7,6 +7,7 @@ A fast, batched implementation of the board game [Catan](https://www.catan.com/)
 | Package | Description |
 |---|---|
 | [`catan-engine`](packages/catan-engine/) | The game engine — board generation, rules, and actions. |
+| [`catan-reference`](packages/catan-reference/) | A plain-Python, gold-standard reference implementation of the rules, used as the differential test oracle for `catan-engine`. |
 | [`catan-render`](packages/catan-render/) | A web app for viewing a board in the browser. |
 
 ## Requirements

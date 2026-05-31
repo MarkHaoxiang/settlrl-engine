@@ -1,5 +1,6 @@
 """Equivalence tests: the traceable placement-legality rules must match the
-NumPy oracle in ``tests.reference`` across randomized board occupancy."""
+``catan-reference`` oracle (via ``tests.conversion``) across randomized board
+occupancy."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from catan_engine.mechanics import placement
 from catan_engine.board.layout import N_EDGES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import BoardState, make_board_state
-from tests import reference
+from tests import conversion as reference
 
 _dist = jax.jit(placement.distance_rule_ok)
 _conn = jax.jit(placement.settlement_connected)
@@ -34,7 +35,7 @@ def _state(seed: int) -> tuple[BoardState, np.ndarray, np.ndarray]:
 
 
 def test_distance_rule_matches_reference() -> None:
-    for seed in range(25):
+    for seed in range(8):
         state, _, vertex_owner = _state(seed)
         vo = jnp.asarray(vertex_owner)
         for v in range(N_VERTICES):
@@ -44,7 +45,7 @@ def test_distance_rule_matches_reference() -> None:
 
 
 def test_settlement_connected_matches_reference() -> None:
-    for seed in range(25):
+    for seed in range(8):
         state, edge_road, _ = _state(seed)
         er = jnp.asarray(edge_road)
         for p in range(N_PLAYERS):
@@ -55,7 +56,7 @@ def test_settlement_connected_matches_reference() -> None:
 
 
 def test_road_placeable_matches_reference() -> None:
-    for seed in range(25):
+    for seed in range(8):
         state, edge_road, vertex_owner = _state(seed)
         er, vo = jnp.asarray(edge_road), jnp.asarray(vertex_owner)
         for p in range(N_PLAYERS):

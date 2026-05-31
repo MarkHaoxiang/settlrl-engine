@@ -32,48 +32,50 @@ kind=1
 vp=2
 resources=0""",
     )
-    assert_expected_inline(render(board[0], state), """\
-
+    assert_expected_inline(
+        render(board[0], state),
+        r"""
 
 
           ORE             3:1
-               /o\\     /o\\     /o\\
-              /   \\   /   \\   /   \\
-            o/     \\o/     \\o/     \\1
+               /o\     /o\     /o\
+              /   \   /   \   /   \
+            o/     \o/     \o/     \1
             |  SHP  |  ORE  |  BRK  1
             |   5   |   6   |  10   1
-            |       |       |  <R>  1
-           /o\\     /o\\     /o\\     1o\\   3:1
-          /   \\   /   \\   /   \\   1   \\
-        o/     \\o/     \\o/     \\11     \\o
+            |       |       |       1
+           /o\     /o\     /o\     1o\   3:1
+          /   \   /   \   /   \   1   \
+        o/     \o/     \o/     \11     \o
   WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
         |   9   |   2   |  10   |  11   |
         |       |       |       |       |
-       /o\\     /o\\     /o\\     /o\\     /o\\
-      /   \\   /   \\   /   \\   /   \\   /   \\
-    o/     \\o/     \\o/     \\o/     \\o/     \\o
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
     |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
     |   8   |   4   |   3   |       |  12   |   3
-    |       |       |       |       |       |
-    o\\     /o\\     /o\\     /o\\     /o\\     /o
-      \\   /   \\   /   \\   /   \\   /   \\   /
-       \\o/     \\o/     \\o/     \\o/     \\o/
+    |       |       |       |  <R>  |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
         |  SHP  |  ORE  |  BRK  |  BRK  |
         |   8   |   3   |  11   |   6   |
   3:1   |       |       |       |       |
-        o\\     /o\\     /o\\     /o\\     /o
-          \\   /   \\   /   \\   /   \\   /
-           \\o/     \\o/     \\o/     \\o/   BRK
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
             |  WHT  |  WHT  |  WOD  |
             |   4   |   9   |   5   |
             |       |       |       |
-            o\\     /o\\     /o\\     /o
-              \\   /   \\   /   \\   /
-               \\o/     \\o/     \\o/
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
           SHP             WHT
 
 
-""")
+""",
+    )
 
 
 def test_invalid_wrong_phase(settlement_board: tuple[Board, int]) -> None:

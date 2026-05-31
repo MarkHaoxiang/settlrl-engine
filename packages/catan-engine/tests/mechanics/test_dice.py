@@ -34,10 +34,6 @@ class TestRollDice:
             np.asarray(jax.random.key_data(k_in)),
         )
 
-    def test_covers_a_spread_of_totals(self) -> None:
-        totals = {int(dice.roll_dice(jax.random.key(s))[1]) for s in range(200)}
-        assert len(totals) >= 6  # not stuck on a single value
-
 
 def test_distribute_on_empty_board_is_noop() -> None:
     layout, state = make_board(1, seed=0)

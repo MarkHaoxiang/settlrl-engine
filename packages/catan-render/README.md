@@ -51,6 +51,17 @@ uv run catan-render
 
 Open http://localhost:8000.
 
+## Tests
+
+The renderer mirrors several engine internals (board index ordering, the AEC flat
+action table, resource / dev-card / terrain orderings). The test suite pins those
+reconstructions against the engine's own authoritative lookups so they can't drift
+silently — if the engine reindexes the board or reorders an enum, these tests fail.
+
+```bash
+uv run pytest packages/catan-render/tests
+```
+
 ## API
 
 | Endpoint | Description |
@@ -90,6 +101,7 @@ packages/catan-render/
 │   ├── actions.py       # Decode AEC flat actions -> wire ActionModels
 │   ├── convert.py       # catan-engine Board -> BoardModel
 │   └── models.py        # Pydantic board / game / action models
+├── tests/               # Pytest: renderer<->engine sync checks (geometry, actions, enums)
 └── frontend/
     └── src/
         ├── App.tsx          # Routes: menu, /play, /replay/:gameId

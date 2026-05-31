@@ -77,6 +77,7 @@ from catan_engine.board.layout import (
     N_TILES,
     N_VERTICES,
     BoardLayout,
+    desert_tile,
     make_layout,
 )
 from catan_engine.board.resources import (
@@ -120,9 +121,7 @@ def step(
     return new_state, result
 
 
-def available(
-    board: Board, action_type: ActionTypeArray, params: ActionParams
-) -> Mask:
+def available(board: Board, action_type: ActionTypeArray, params: ActionParams) -> Mask:
     """``(batch,)`` legality mask for the chosen action per game (no state change)."""
     return cast(Mask, _available(board[0], board[1], action_type, params))
 
@@ -248,10 +247,14 @@ def _robber_tile_mask_factory(avail: _PairAvail) -> _BatchedMask:
 # (Multi-parameter / parameterless actions are absent; use ``action_mask`` /
 # ``available`` for those.)
 _INDEX_MASKS = {
-    ActionType.SETUP_SETTLEMENT: _index_mask_factory(_setup_settlement_avail, N_VERTICES),
+    ActionType.SETUP_SETTLEMENT: _index_mask_factory(
+        _setup_settlement_avail, N_VERTICES
+    ),
     ActionType.SETUP_ROAD: _index_mask_factory(_setup_road_avail, N_EDGES),
     ActionType.BUILD_ROAD: _index_mask_factory(_build_road_avail, N_EDGES),
-    ActionType.BUILD_SETTLEMENT: _index_mask_factory(_build_settlement_avail, N_VERTICES),
+    ActionType.BUILD_SETTLEMENT: _index_mask_factory(
+        _build_settlement_avail, N_VERTICES
+    ),
     ActionType.BUILD_CITY: _index_mask_factory(_build_city_avail, N_VERTICES),
     ActionType.PLAY_MONOPOLY: _index_mask_factory(_monopoly_avail, N_RESOURCES),
     ActionType.MOVE_ROBBER: _robber_tile_mask_factory(_move_robber_avail),
@@ -340,6 +343,9 @@ class BatchedCatanEnv:
         self._key, k_layout, k_state = jax.random.split(self._key, 3)
         self._layout = make_layout(self.batch_size, key=k_layout)
         self._state = make_board_state(self.batch_size, key=k_state)
+        self._state = self._state._replace(
+            robber=desert_tile(self._layout.tile_resource)
+        )
         B, P = self.batch_size, N_PLAYERS
         self._reward = jnp.zeros((B, P), dtype=jnp.float32)
         self._terminations = jnp.zeros((B, P), dtype=jnp.bool_)
@@ -368,9 +374,7 @@ class BatchedCatanEnv:
         self._truncations = jnp.zeros((self.batch_size, N_PLAYERS), dtype=jnp.bool_)
         self._result = result
 
-        self._layout, self._state = self._auto_reset(
-            self._layout, new_state, done_lane
-        )
+        self._layout, self._state = self._auto_reset(self._layout, new_state, done_lane)
         self._vps = cast(jax.Array, _total_vp_b(self._state))
 
     def last(
@@ -525,10 +529,12 @@ class BatchedCatanEnv:
         state, layout = self._state, self._layout
         res = state.player_resources
         self_res = jnp.take_along_axis(res, sel[:, None, None], axis=1)[:, 0, :]
-        self_dev = jnp.take_along_axis(state.dev_hand, sel[:, None, None], axis=1)[:, 0, :]
-        self_pending = jnp.take_along_axis(
-            state.pending_discard, sel[:, None], axis=1
-        )[:, 0]
+        self_dev = jnp.take_along_axis(state.dev_hand, sel[:, None, None], axis=1)[
+            :, 0, :
+        ]
+        self_pending = jnp.take_along_axis(state.pending_discard, sel[:, None], axis=1)[
+            :, 0
+        ]
         return {
             # public board
             "tile_resource": layout.tile_resource,
@@ -575,6 +581,9 @@ class BatchedCatanEnv:
         self._key, k_layout, k_state = jax.random.split(self._key, 3)
         fresh_layout = make_layout(self.batch_size, key=k_layout)
         fresh_state = make_board_state(self.batch_size, key=k_state)
+        fresh_state = fresh_state._replace(
+            robber=desert_tile(fresh_layout.tile_resource)
+        )
         new_layout = BoardLayout(
             *(
                 _where_lane(done_lane, f, c)

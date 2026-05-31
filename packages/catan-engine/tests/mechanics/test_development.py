@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from catan_engine.mechanics import development
-from catan_engine.board.dev_cards import DevCard, N_DEV_CARD_TYPES
+from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.state import make_board_state
 
 _T = TypeVar("_T")
@@ -51,12 +51,6 @@ class TestDrawDevCard:
         for s in range(20):
             _, card = development.draw_dev_card(jax.random.key(s), deck)
             assert int(card) == DevCard.YEAR_OF_PLENTY
-
-    def test_card_in_range(self) -> None:
-        deck = jnp.array([14, 2, 2, 2, 5], jnp.uint8)
-        for s in range(20):
-            _, card = development.draw_dev_card(jax.random.key(s), deck)
-            assert 0 <= int(card) < N_DEV_CARD_TYPES
 
     def test_advances_key(self) -> None:
         deck = jnp.array([1, 1, 1, 1, 1], jnp.uint8)

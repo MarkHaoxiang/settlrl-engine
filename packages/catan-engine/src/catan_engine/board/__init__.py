@@ -8,16 +8,23 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from catan_engine.board.layout import BoardLayout, make_layout
+from catan_engine.board.layout import BoardLayout, desert_tile, make_layout
 from catan_engine.board.state import BoardState, GamePhase, make_board_state
 
 Board = tuple[BoardLayout, BoardState]
 
 
 def make_board(batch_size: int = 1, seed: int = 0) -> Board:
-    """A fresh batched Board: random layout paired with a setup-phase state."""
+    """A fresh batched Board: random layout paired with a setup-phase state.
+
+    The robber starts on the desert tile (rulebook); since tile positions are
+    randomised it is read off the generated layout.
+    """
     key = jax.random.key(seed)
-    return make_layout(batch_size, key=key), make_board_state(batch_size, key=key)
+    layout = make_layout(batch_size, key=key)
+    state = make_board_state(batch_size, key=key)
+    state = state._replace(robber=desert_tile(layout.tile_resource))
+    return layout, state
 
 
 def replicate(board: Board, batch_size: int) -> Board:
@@ -100,9 +107,7 @@ def give_dev_card(
     layout, state = board
     return (
         layout,
-        state._replace(
-            dev_hand=state.dev_hand.at[lane, player, card].add(count)
-        ),
+        state._replace(dev_hand=state.dev_hand.at[lane, player, card].add(count)),
     )
 
 

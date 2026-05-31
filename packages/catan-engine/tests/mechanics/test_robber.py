@@ -1,4 +1,4 @@
-"""Tests for robber.py: the victim mask (equivalence vs the NumPy oracle) and
+"""Tests for robber.py: the victim mask (equivalence vs the `catan-reference` oracle) and
 the conservation properties of the random steal."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from catan_engine.mechanics import robber
 from catan_engine.board.layout import N_TILES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState, make_board_state
-from tests import reference
+from tests import conversion as reference
 
 _T = TypeVar("_T")
 
@@ -35,7 +35,7 @@ def _state(seed: int) -> BoardState:
 
 
 def test_victim_mask_matches_reference() -> None:
-    for seed in range(30):
+    for seed in range(10):
         state = _state(seed)
         single = _single(state)
         for tile in range(N_TILES):

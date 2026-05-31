@@ -1,5 +1,5 @@
 """Tests for setup.py: the snake placement order and the 2nd-settlement grant
-(equivalence vs the NumPy oracle on a full-bank setup board)."""
+(equivalence vs the `catan-reference` oracle on a full-bank setup board)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from catan_engine.mechanics import setup
 from catan_engine.board import make_board
 from catan_engine.board.layout import N_VERTICES
 from catan_engine.board.resources import N_PLAYERS
-from tests import reference
+from tests import conversion as reference
 
 _T = TypeVar("_T")
 

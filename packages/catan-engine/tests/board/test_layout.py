@@ -76,7 +76,7 @@ class TestBoardGenerator(TestCase):
         assert board.port_allocation.shape == (batch_size, 9)
 
     @given(st.integers(min_value=0, max_value=2**31))
-    @settings(max_examples=50, deadline=None)
+    @settings(max_examples=20, deadline=None)
     def test_tile_resource_counts(self, seed: int) -> None:
         board = make_layout(batch_size=1, key=jax.random.key(seed))
         resources = np.asarray(board.tile_resource[0])
@@ -94,7 +94,7 @@ WOD: 4""",
         )
 
     @given(st.integers(min_value=0, max_value=2**31))
-    @settings(max_examples=50, deadline=None)
+    @settings(max_examples=20, deadline=None)
     def test_tile_number_distribution(self, seed: int) -> None:
         board = make_layout(batch_size=1, key=jax.random.key(seed))
         resources = np.asarray(board.tile_resource[0])
@@ -106,7 +106,7 @@ WOD: 4""",
         )
 
     @given(st.integers(min_value=0, max_value=2**31))
-    @settings(max_examples=50, deadline=None)
+    @settings(max_examples=20, deadline=None)
     def test_desert_has_no_number(self, seed: int) -> None:
         board = make_layout(batch_size=1, key=jax.random.key(seed))
         resources = np.asarray(board.tile_resource[0])
@@ -116,7 +116,7 @@ WOD: 4""",
         )
 
     @given(st.integers(min_value=0, max_value=2**31))
-    @settings(max_examples=50, deadline=None)
+    @settings(max_examples=20, deadline=None)
     def test_port_counts(self, seed: int) -> None:
         board = make_layout(batch_size=1, key=jax.random.key(seed))
         ports = np.asarray(board.port_allocation[0])

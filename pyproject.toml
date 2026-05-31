@@ -4,6 +4,7 @@ members = ["packages/*"]
 [dependency-groups]
 dev = [
     "beartype>=0.19",
+    "catan-reference",
     "expecttest>=0.2.1",
     "gymnasium>=0.29",
     "hypothesis>=6.131.0",
@@ -11,14 +12,22 @@ dev = [
     "pettingzoo>=1.24",
     "pre-commit>=4.2.0",
     "pytest>=8.4.0",
+    "pytest-benchmark>=5.2.3",
     "pytest-cov>=6.0.0",
     "ruff>=0.15.14",
     "tabulate>=0.9.0",
     "types-tabulate>=0.9.0",
 ]
 
+[tool.uv.sources]
+catan-reference = { workspace = true }
+
 [tool.mypy]
-mypy_path = ["packages/catan-engine/src", "packages/catan-render/src"]
+mypy_path = [
+    "packages/catan-engine/src",
+    "packages/catan-render/src",
+    "packages/catan-reference/src",
+]
 strict = true
 disallow_any_explicit = false
 disallow_any_generics = false

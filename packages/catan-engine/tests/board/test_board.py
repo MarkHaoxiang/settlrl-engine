@@ -21,6 +21,7 @@ from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import N_TILES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import GamePhase
+from catan_engine.board.tile import Tile
 
 
 class TestMakeBoardAndReplicate:
@@ -32,9 +33,7 @@ class TestMakeBoardAndReplicate:
     def test_seed_is_deterministic(self) -> None:
         a, _ = make_board(1, seed=7)
         b, _ = make_board(1, seed=7)
-        assert np.array_equal(
-            np.asarray(a.tile_resource), np.asarray(b.tile_resource)
-        )
+        assert np.array_equal(np.asarray(a.tile_resource), np.asarray(b.tile_resource))
 
     def test_replicate_broadcasts_and_copies(self) -> None:
         board = make_board(1, seed=0)
@@ -62,9 +61,7 @@ class TestPhaseHelpers:
 class TestOccupancyHelpers:
     def test_give_sets_hand(self) -> None:
         _, state = give(make_board(seed=0), 0, [1, 2, 3, 4, 0])
-        assert np.array_equal(
-            np.asarray(state.player_resources[0, 0]), [1, 2, 3, 4, 0]
-        )
+        assert np.array_equal(np.asarray(state.player_resources[0, 0]), [1, 2, 3, 4, 0])
         assert state.player_resources.shape == (1, N_PLAYERS, N_RESOURCES)
 
     def test_place_settlement(self) -> None:
@@ -95,3 +92,15 @@ class TestOccupancyHelpers:
     def test_set_robber(self) -> None:
         _, state = set_robber(make_board(seed=0), 4)
         assert int(state.robber[0]) == 4
+
+
+def test_robber_starts_on_desert() -> None:
+    """The robber starts on the desert tile (rulebook), not a producing tile."""
+    for seed in range(20):
+        layout, state = make_board(batch_size=1, seed=seed)
+        tile_resource = np.asarray(layout.tile_resource[0])
+        desert = int(np.where(tile_resource == Tile.DESERT.value)[0][0])
+        assert int(state.robber[0]) == desert, (
+            f"seed={seed}: robber on tile {int(state.robber[0])}, "
+            f"desert is tile {desert}"
+        )
