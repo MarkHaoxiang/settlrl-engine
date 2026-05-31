@@ -120,23 +120,33 @@ def longest_road_length(
 
 
 def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.Array:
-    """Award holder given per-player ``counts``: need >= threshold; ties to holder."""
+    """Award holder given per-player ``counts`` (need >= ``threshold``).
+
+    Follows the rulebook tie rule (Almanac, "Longest Road", p.9): the current
+    holder keeps the card while still tied for the lead; if it is beaten, a
+    *single* new leader takes it, but a 2+ way tie among non-holders leaves the
+    card unheld (``NO_INDEX``). With no qualifier the card is unheld.
+    """
     qualifies = counts >= threshold
     any_q = jnp.any(qualifies)
     top = jnp.max(jnp.where(qualifies, counts, -1))
     leaders = qualifies & (counts == top)
+    n_leaders = jnp.sum(leaders.astype(jnp.int32))
     holder_leads = jnp.where(
         owner == _NONE, False, leaders[jnp.clip(owner, 0, N_PLAYERS - 1)]
     )
     first_leader = jnp.argmax(leaders).astype(jnp.int32)
-    new_owner = jnp.where(
-        any_q, jnp.where(holder_leads, owner.astype(jnp.int32), first_leader), _NONE
+    taken = jnp.where(
+        holder_leads,
+        owner.astype(jnp.int32),
+        jnp.where(n_leaders == 1, first_leader, _NONE),
     )
+    new_owner = jnp.where(any_q, taken, _NONE)
     return new_owner.astype(jnp.uint8)
 
 
 def recompute_longest_road(state: BoardState) -> BoardState:
-    """Reassign Longest Road (need >= 5; current holder wins ties)."""
+    """Reassign Longest Road (need >= 5; see ``_reassign_award`` for the tie rule)."""
     lengths = jnp.stack(
         [
             longest_road_length(state.edge_road, state.vertex_owner, jnp.int32(p))
@@ -144,15 +154,19 @@ def recompute_longest_road(state: BoardState) -> BoardState:
         ]
     )
     new_owner = _reassign_award(lengths, state.longest_road_owner, 5)
-    qualifies_any = jnp.any(lengths >= 5)
+    has_owner = new_owner != jnp.uint8(NO_INDEX)
     new_len = jnp.where(
-        qualifies_any, lengths[jnp.clip(new_owner, 0, N_PLAYERS - 1)], 0
+        has_owner, lengths[jnp.clip(new_owner.astype(jnp.int32), 0, N_PLAYERS - 1)], 0
     ).astype(jnp.uint8)
     return state._replace(longest_road_owner=new_owner, longest_road_len=new_len)
 
 
 def recompute_largest_army(state: BoardState) -> BoardState:
-    """Reassign Largest Army (need >= 3; current holder wins ties)."""
+    """Reassign Largest Army (need >= 3; see ``_reassign_award`` for the tie rule).
+
+    In real play knights never decrease, so a holder is always among the leaders
+    and the "tie among non-holders" branch is unreachable here.
+    """
     new_owner = _reassign_award(
         state.knights_played.astype(jnp.int32), state.largest_army_owner, 3
     )
