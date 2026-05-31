@@ -800,10 +800,7 @@ class Game:
         self.buildings[a.vertex] = (self.current_player, Building.SETTLEMENT)
         # The second settlement (reverse pass) grants its adjacent resources.
         if self.setup_index >= N_PLAYERS:
-            for t in board.VERTEX_TILES[a.vertex]:
-                resource = self.layout.tile_resource[t]
-                if resource is not None and self.bank(resource) > 0:
-                    self.players[self.current_player].resources[resource] += 1
+            self.grant_setup_resources(a.vertex, self.current_player)
         self.phase = Phase.SETUP_ROAD
 
     def _apply_setup_road(self, a: SetupRoad) -> None:
