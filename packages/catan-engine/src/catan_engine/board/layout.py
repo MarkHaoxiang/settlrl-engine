@@ -187,7 +187,7 @@ def make_layout(
     )
     tile_number = jnp.tile(tile_number, (B, 1))
     keys = jax.random.split(k1, B)
-    allocation_idxs = jnp.stack([jax.random.permutation(k, 18) for k in keys])
+    allocation_idxs = jax.vmap(lambda k: jax.random.permutation(k, 18))(keys)
     batch_idx = jnp.arange(B)[:, None]
     tile_number = tile_number[batch_idx, allocation_idxs]
     tile_number = jnp.concatenate(  # Concatenate desert tile with no number
@@ -202,7 +202,7 @@ def make_layout(
     tile_resource = tile_resource.at[:, 15:18].set(Tile.ORE.value)
     tile_resource = tile_resource.at[:, 18].set(Tile.DESERT.value)
     keys = jax.random.split(k2, B)
-    allocation_idxs = jnp.stack([jax.random.permutation(k, N_TILES) for k in keys])
+    allocation_idxs = jax.vmap(lambda k: jax.random.permutation(k, N_TILES))(keys)
     tile_resource = tile_resource[batch_idx, allocation_idxs]
     tile_number = tile_number[batch_idx, allocation_idxs]
 
@@ -222,7 +222,7 @@ def make_layout(
     )
     port_allocation = jnp.tile(port_allocation, (B, 1))
     keys = jax.random.split(k3, B)
-    allocation_idxs = jnp.stack([jax.random.permutation(k, N_PORTS) for k in keys])
+    allocation_idxs = jax.vmap(lambda k: jax.random.permutation(k, N_PORTS))(keys)
     port_allocation = port_allocation[batch_idx, allocation_idxs]
 
     return BoardLayout(

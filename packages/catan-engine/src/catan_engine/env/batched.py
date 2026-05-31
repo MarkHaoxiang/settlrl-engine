@@ -37,6 +37,7 @@ caller can wrap them in real ``gymnasium`` spaces if needed.
 from __future__ import annotations
 
 import dataclasses
+import functools
 from collections.abc import Callable
 from typing import cast
 
@@ -739,11 +740,51 @@ class BatchedCatanEnv:
     def _auto_reset(
         self, layout: BoardLayout, state: BoardState, done_lane: jax.Array
     ) -> tuple[BoardLayout, BoardState]:
-        if not self.auto_reset or not bool(jnp.any(done_lane)):
+        if not self.auto_reset:
             return layout, state
-        self._key, k_layout, k_state = jax.random.split(self._key, 3)
-        fresh_layout = make_layout(self.batch_size, key=k_layout)
-        fresh_state = make_board_state(self.batch_size, key=k_state)
+        self._key, subkey = jax.random.split(self._key)
+        return cast(
+            "tuple[BoardLayout, BoardState]",
+            _auto_reset_core(layout, state, done_lane, subkey, self.batch_size),
+        )
+
+
+def _where_lane(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
+    """Per-lane ``where``: pick ``a`` where ``mask`` (``(B,)``) is set, else ``b``."""
+    m = mask.reshape((mask.shape[0],) + (1,) * (a.ndim - 1))
+    return jnp.where(m, a, b)
+
+
+def _select_key(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
+    """``_where_lane`` for typed PRNG key arrays (select on the raw key data)."""
+    ad, bd = jax.random.key_data(a), jax.random.key_data(b)
+    m = mask.reshape((mask.shape[0],) + (1,) * (ad.ndim - 1))
+    return cast(jax.Array, jax.random.wrap_key_data(jnp.where(m, ad, bd)))
+
+
+@functools.partial(jax.jit, static_argnames=("batch_size",))
+def _auto_reset_core(
+    layout: BoardLayout,
+    state: BoardState,
+    done_lane: jax.Array,
+    key: jax.Array,
+    batch_size: int,
+) -> tuple[BoardLayout, BoardState]:
+    """Replace finished lanes (``done_lane``) with fresh games, fully on device.
+
+    The branch decision is a device-side ``lax.cond`` on ``jnp.any(done_lane)``
+    rather than a host ``bool(...)``: this avoids a per-step device->host sync
+    (so dispatch can run ahead of the device) while still only paying for the
+    expensive board generation on steps where some lane actually terminated.
+    """
+
+    def do_reset(
+        operand: tuple[BoardLayout, BoardState],
+    ) -> tuple[BoardLayout, BoardState]:
+        layout, state = operand
+        k_layout, k_state = jax.random.split(key)
+        fresh_layout = make_layout(batch_size, key=k_layout)
+        fresh_state = make_board_state(batch_size, key=k_state)
         fresh_state = fresh_state._replace(
             robber=desert_tile(fresh_layout.tile_resource)
         )
@@ -763,15 +804,12 @@ class BatchedCatanEnv:
             )
         return new_layout, BoardState(**fields)
 
+    def no_reset(
+        operand: tuple[BoardLayout, BoardState],
+    ) -> tuple[BoardLayout, BoardState]:
+        return operand
 
-def _where_lane(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
-    """Per-lane ``where``: pick ``a`` where ``mask`` (``(B,)``) is set, else ``b``."""
-    m = mask.reshape((mask.shape[0],) + (1,) * (a.ndim - 1))
-    return jnp.where(m, a, b)
-
-
-def _select_key(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
-    """``_where_lane`` for typed PRNG key arrays (select on the raw key data)."""
-    ad, bd = jax.random.key_data(a), jax.random.key_data(b)
-    m = mask.reshape((mask.shape[0],) + (1,) * (ad.ndim - 1))
-    return cast(jax.Array, jax.random.wrap_key_data(jnp.where(m, ad, bd)))
+    return cast(
+        "tuple[BoardLayout, BoardState]",
+        jax.lax.cond(jnp.any(done_lane), do_reset, no_reset, (layout, state)),
+    )
