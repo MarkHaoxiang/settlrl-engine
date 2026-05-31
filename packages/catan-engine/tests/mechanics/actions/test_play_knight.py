@@ -6,7 +6,8 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, PlayKnight
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import play_knight_step
 from catan_engine.board import (
     Board,
     make_board,
@@ -23,7 +24,7 @@ _TILE_V = np.asarray(TILE_V)
 
 def test_success(knight_board: Board, render: Callable[..., str]) -> None:
     # Robber starts on tile 1; play a knight to tile 0 and steal from player 1.
-    state, result = PlayKnight()(knight_board, (jnp.array([0]), jnp.array([1])))
+    state, result = play_knight_step(knight_board, (jnp.array([0]), jnp.array([1])))
     assert_expected_inline(
         fmt(
             result,
@@ -94,7 +95,7 @@ def test_invalid_no_knight() -> None:
     board = place_settlement(board, 1, int(_TILE_V[0, 0]))
     board = set_robber(board, 1 % _TILE_V.shape[0])
     before = np.asarray(board[1].player_resources)
-    state, result = PlayKnight()(board, (jnp.array([0]), jnp.array([1])))
+    state, result = play_knight_step(board, (jnp.array([0]), jnp.array([1])))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
 
@@ -104,7 +105,7 @@ def test_invalid_wrong_phase(knight_board: Board) -> None:
     layout, st = knight_board
     board = (layout, st._replace(phase=st.phase.at[0].set(int(GamePhase.MOVE_ROBBER))))
     before = np.asarray(board[1].player_resources)
-    state, result = PlayKnight()(board, (jnp.array([0]), jnp.array([1])))
+    state, result = play_knight_step(board, (jnp.array([0]), jnp.array([1])))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
 
@@ -113,6 +114,6 @@ def test_invalid_dev_already_played(knight_board: Board) -> None:
     layout, st = knight_board
     board = (layout, st._replace(dev_played=st.dev_played.at[0].set(1)))
     before = np.asarray(board[1].player_resources)
-    state, result = PlayKnight()(board, (jnp.array([0]), jnp.array([1])))
+    state, result = play_knight_step(board, (jnp.array([0]), jnp.array([1])))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)

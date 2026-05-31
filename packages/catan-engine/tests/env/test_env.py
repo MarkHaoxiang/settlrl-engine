@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 
 from catan_engine import env
-from catan_engine.mechanics.action import ActionParams, ActionResult, ActionType, BuildRoad
+from catan_engine.mechanics.action import ActionParams, ActionResult, ActionType
+from catan_engine.mechanics.placement import build_road_step
 from catan_engine.board import make_board, replicate, set_phase
 from catan_engine.env import N_ACTION_TYPES, BatchedCatanEnv, Box, Discrete
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
@@ -30,7 +31,7 @@ class TestEnvStep:
         params = _params([edge], [-1], batch=1)
 
         state_env, result_env = env.step(board, atype, params)
-        state_dir, result_dir = BuildRoad()(board, jnp.asarray([edge]))
+        state_dir, result_dir = build_road_step(board, jnp.asarray([edge]))
 
         assert int(result_env[0]) == int(result_dir[0]) == ActionResult.SUCCESS.value
         assert np.array_equal(

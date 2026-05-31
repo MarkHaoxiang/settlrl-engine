@@ -11,7 +11,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from catan_engine.mechanics.action import ActionResult, BuildRoad
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.placement import build_road_available
 from catan_engine.board import (
     Board,
     give,
@@ -106,7 +107,7 @@ def first_legal_edge(board: Board) -> int:
     """Lowest-index edge where BuildRoad is currently legal (single game)."""
     batched = replicate(board, N_EDGES)
     avail = np.asarray(
-        BuildRoad().is_available(batched, jnp.arange(N_EDGES, dtype=jnp.int32))
+        build_road_available(batched, jnp.arange(N_EDGES, dtype=jnp.int32))
     )
     idx = np.where(avail)[0]
     assert idx.size, "no legal road edge available"

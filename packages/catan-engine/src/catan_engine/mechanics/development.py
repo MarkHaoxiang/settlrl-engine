@@ -1,17 +1,52 @@
-"""Development-card rules: playability and weighted draws (single-game, traceable).
+"""Development-card rules and action cores (single-game, traceable).
 
-Separate from ``dev_cards.py`` (which holds the ``DevCard`` enum and deck counts)
-because these rules operate on ``BoardState`` and ``state`` already imports
-``dev_cards`` -- colocating would create an import cycle.
+The playability / weighted-draw primitives are separate from ``dev_cards.py``
+(which holds the ``DevCard`` enum and deck counts) because they operate on
+``BoardState`` and ``state`` already imports ``dev_cards`` -- colocating would
+create an import cycle. The lower half holds the dev-card action cores:
+``BuyDevelopmentCard``, ``PlayMonopoly``, ``PlayYearOfPlenty``,
+``PlayRoadBuilding``, and ``PlayKnight`` (which composes the robber helpers in
+``robber`` and the Largest Army award in ``awards``).
 """
 
 from __future__ import annotations
 
+from typing import cast
+
 import jax
 import jax.numpy as jnp
 
-from catan_engine.board.dev_cards import DevDeckVec, N_DEV_CARD_TYPES
-from catan_engine.board.state import BoolScalar, BoardState, IntScalar, KeyScalar
+from catan_engine.board import Board
+from catan_engine.board.dev_cards import DevCard, DevDeckVec, N_DEV_CARD_TYPES
+from catan_engine.board.layout import N_TILES, BoardLayout
+from catan_engine.board.resources import N_PLAYERS, N_RESOURCES, bank_stock
+from catan_engine.board.state import (
+    VICTORY_POINTS_TO_WIN,
+    BoardState,
+    BoolScalar,
+    GamePhase,
+    IntScalar,
+    KeyScalar,
+    to_u8,
+    tree_select,
+)
+from catan_engine.mechanics import awards, robber
+from catan_engine.mechanics.common import (
+    DEV_CARD_COST_ARR,
+    INVALID,
+    SUCCESS,
+    IndexParam,
+    Mask,
+    ResultCode,
+    TwoIndexParams,
+    can_afford,
+    main_after_roll,
+    main_no_dev_played,
+    outcome,
+    pay,
+    player_total_vp,
+    roads_left,
+)
 
 
 def playable_dev(state: BoardState, player: IntScalar, card: int) -> BoolScalar:
@@ -49,3 +84,295 @@ def draw_dev_card(
     key, sub = jax.random.split(key)
     card = jax.random.choice(sub, N_DEV_CARD_TYPES, p=probs)
     return key, card.astype(jnp.int32)
+
+
+# ===========================================================================
+# BuyDevelopmentCard
+# ===========================================================================
+
+
+def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> BoolScalar:
+    player = state.current_player.astype(jnp.int32)
+    main = main_after_roll(state)
+    deck_nonempty = state.dev_deck.astype(jnp.int32).sum() > 0
+    afford = can_afford(state.player_resources[player], DEV_CARD_COST_ARR)
+    return main & deck_nonempty & afford
+
+
+def _buy_dev_apply(
+    layout: BoardLayout, state: BoardState, params: None
+) -> tuple[BoardState, IntScalar]:
+    available = _buy_dev_avail(layout, state, params)
+    player = state.current_player.astype(jnp.int32)
+    key, card = draw_dev_card(state.key, state.dev_deck)
+    new_deck = state.dev_deck.astype(jnp.int32).at[card].add(-1)
+    new_hand = state.dev_hand.astype(jnp.int32).at[player, card].add(1)
+    new_bought = state.dev_bought.astype(jnp.int32).at[card].add(1)
+    cand = state._replace(
+        player_resources=pay(state.player_resources, player, DEV_CARD_COST_ARR),
+        dev_deck=to_u8(new_deck),
+        dev_hand=to_u8(new_hand),
+        dev_bought=to_u8(new_bought),
+        key=key,
+    )
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), outcome(available, won)
+
+
+_buy_dev_avail_b = jax.jit(jax.vmap(_buy_dev_avail, in_axes=(0, 0, None)))
+_buy_dev_apply_b = jax.jit(jax.vmap(_buy_dev_apply, in_axes=(0, 0, None)))
+
+
+def buy_development_card_available(board: Board, params: None = None) -> Mask:
+    """``(batch,)`` legality of buying a development card (no state change)."""
+    return cast(Mask, _buy_dev_avail_b(board[0], board[1], None))
+
+
+def buy_development_card_step(
+    board: Board, params: None = None
+) -> tuple[BoardState, ResultCode]:
+    """Buy a development card per game. Draws from ``state.dev_deck``."""
+    return cast(
+        "tuple[BoardState, ResultCode]", _buy_dev_apply_b(board[0], board[1], None)
+    )
+
+
+# ===========================================================================
+# PlayMonopoly
+# ===========================================================================
+
+
+def _monopoly_avail(
+    layout: BoardLayout, state: BoardState, resource: IntScalar
+) -> BoolScalar:
+    player = state.current_player.astype(jnp.int32)
+    main = main_no_dev_played(state)
+    in_range = (resource >= 0) & (resource < N_RESOURCES)
+    has_card = playable_dev(state, player, DevCard.MONOPOLY)
+    return main & in_range & has_card
+
+
+def _monopoly_apply(
+    layout: BoardLayout, state: BoardState, resource: IntScalar
+) -> tuple[BoardState, IntScalar]:
+    available = _monopoly_avail(layout, state, resource)
+    player = state.current_player.astype(jnp.int32)
+    r = jnp.clip(resource, 0, N_RESOURCES - 1)
+    res = state.player_resources.astype(jnp.int32)  # (N_PLAYERS, N_RESOURCES)
+    taken = res[:, r].sum() - res[player, r]
+    col = jnp.zeros((N_PLAYERS,), jnp.int32).at[player].set(res[player, r] + taken)
+    res = res.at[:, r].set(col)
+    new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.MONOPOLY].add(-1)
+    cand = state._replace(
+        dev_played=jnp.uint8(1),
+        dev_hand=to_u8(new_hand),
+        player_resources=to_u8(res),
+    )
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
+
+
+_monopoly_avail_b = jax.jit(jax.vmap(_monopoly_avail))
+_monopoly_apply_b = jax.jit(jax.vmap(_monopoly_apply))
+
+
+def play_monopoly_available(board: Board, resource: IndexParam) -> Mask:
+    """``(batch,)`` legality of playing Monopoly on ``resource`` (no state change)."""
+    return cast(Mask, _monopoly_avail_b(board[0], board[1], resource))
+
+
+def play_monopoly_step(
+    board: Board, resource: IndexParam
+) -> tuple[BoardState, ResultCode]:
+    """Play Monopoly: take all of ``resource`` from every other player."""
+    return cast(
+        "tuple[BoardState, ResultCode]", _monopoly_apply_b(board[0], board[1], resource)
+    )
+
+
+# ===========================================================================
+# PlayYearOfPlenty
+# ===========================================================================
+
+
+def _yop_avail(
+    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+) -> BoolScalar:
+    resource_a, resource_b = params
+    player = state.current_player.astype(jnp.int32)
+    ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
+    cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
+    main = main_no_dev_played(state)
+    has_card = playable_dev(state, player, DevCard.YEAR_OF_PLENTY)
+    a_ok = (resource_a >= 0) & (resource_a < N_RESOURCES)
+    b_ok = (resource_b >= 0) & (resource_b < N_RESOURCES)
+    same = resource_a == resource_b
+    need_a = 1 + same.astype(jnp.int32)
+    bank_a = bank_stock(state.player_resources, ca) >= need_a
+    bank_b = same | (bank_stock(state.player_resources, cb) >= 1)
+    return main & has_card & a_ok & b_ok & bank_a & bank_b
+
+
+def _yop_apply(
+    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+) -> tuple[BoardState, IntScalar]:
+    resource_a, resource_b = params
+    available = _yop_avail(layout, state, params)
+    player = state.current_player.astype(jnp.int32)
+    ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
+    cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
+    new_hand = (
+        state.dev_hand.astype(jnp.int32).at[player, DevCard.YEAR_OF_PLENTY].add(-1)
+    )
+    res = state.player_resources.astype(jnp.int32)
+    res = res.at[player, ca].add(1)
+    res = res.at[player, cb].add(1)
+    cand = state._replace(
+        dev_played=jnp.uint8(1),
+        dev_hand=to_u8(new_hand),
+        player_resources=to_u8(res),
+    )
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
+
+
+_yop_avail_b = jax.jit(jax.vmap(_yop_avail))
+_yop_apply_b = jax.jit(jax.vmap(_yop_apply))
+
+
+def play_year_of_plenty_available(board: Board, params: TwoIndexParams) -> Mask:
+    """``(batch,)`` legality of Year of Plenty (params: (a, b)) (no state change)."""
+    return cast(Mask, _yop_avail_b(board[0], board[1], params))
+
+
+def play_year_of_plenty_step(
+    board: Board, params: TwoIndexParams
+) -> tuple[BoardState, ResultCode]:
+    """Play Year of Plenty (params: (a, b)); ``a == b`` draws two of one kind."""
+    return cast(
+        "tuple[BoardState, ResultCode]", _yop_apply_b(board[0], board[1], params)
+    )
+
+
+# ===========================================================================
+# PlayRoadBuilding
+# ===========================================================================
+
+
+def _road_building_avail(
+    layout: BoardLayout, state: BoardState, params: None
+) -> BoolScalar:
+    player = state.current_player.astype(jnp.int32)
+    main = main_no_dev_played(state)
+    has_card = playable_dev(state, player, DevCard.ROAD_BUILDING)
+    return main & has_card
+
+
+def _road_building_apply(
+    layout: BoardLayout, state: BoardState, params: None
+) -> tuple[BoardState, IntScalar]:
+    available = _road_building_avail(layout, state, params)
+    player = state.current_player.astype(jnp.int32)
+    grant = jnp.minimum(2, roads_left(state.edge_road, player))
+    new_hand = (
+        state.dev_hand.astype(jnp.int32).at[player, DevCard.ROAD_BUILDING].add(-1)
+    )
+    new_free = state.free_roads.astype(jnp.int32) + grant
+    cand = state._replace(
+        dev_played=jnp.uint8(1),
+        dev_hand=to_u8(new_hand),
+        free_roads=to_u8(new_free),
+    )
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
+
+
+_road_building_avail_b = jax.jit(jax.vmap(_road_building_avail, in_axes=(0, 0, None)))
+_road_building_apply_b = jax.jit(jax.vmap(_road_building_apply, in_axes=(0, 0, None)))
+
+
+def play_road_building_available(board: Board, params: None = None) -> Mask:
+    """``(batch,)`` legality of playing Road Building (no state change)."""
+    return cast(Mask, _road_building_avail_b(board[0], board[1], None))
+
+
+def play_road_building_step(
+    board: Board, params: None = None
+) -> tuple[BoardState, ResultCode]:
+    """Play Road Building per game. Grants up to 2 free roads."""
+    return cast(
+        "tuple[BoardState, ResultCode]",
+        _road_building_apply_b(board[0], board[1], None),
+    )
+
+
+# ===========================================================================
+# PlayKnight
+# ===========================================================================
+
+
+def _knight_avail(
+    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+) -> BoolScalar:
+    tile, victim = params
+    player = state.current_player.astype(jnp.int32)
+    t = jnp.clip(tile, 0, N_TILES - 1)
+    phase_ok = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
+    not_played = state.dev_played == 0
+    has_card = playable_dev(state, player, DevCard.KNIGHT)
+    tile_in_range = (tile >= 0) & (tile < N_TILES)
+    tile_moves = tile != state.robber
+    valid_victim = robber.valid_robber_victim(state, t, player, victim)
+    return (
+        phase_ok
+        & not_played
+        & has_card
+        & tile_in_range
+        & tile_moves
+        & valid_victim
+    )
+
+
+def _knight_apply(
+    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+) -> tuple[BoardState, IntScalar]:
+    tile, victim = params
+    available = _knight_avail(layout, state, params)
+    player = state.current_player.astype(jnp.int32)
+    t = jnp.clip(tile, 0, N_TILES - 1)
+    new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.KNIGHT].add(-1)
+    new_knights = state.knights_played.astype(jnp.int32).at[player].add(1)
+    cand = state._replace(
+        dev_played=jnp.uint8(1),
+        dev_hand=to_u8(new_hand),
+        knights_played=to_u8(new_knights),
+        robber=t.astype(state.robber.dtype),
+    )
+    cand = awards.recompute_largest_army(cand)
+    cand = robber.apply_steal(cand, player, victim)
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    return tree_select(available, cand, state), outcome(available, won)
+
+
+_knight_avail_b = jax.jit(jax.vmap(_knight_avail))
+_knight_apply_b = jax.jit(jax.vmap(_knight_apply))
+
+
+def play_knight_available(board: Board, params: TwoIndexParams) -> Mask:
+    """``(batch,)`` legality of a (tile, victim) Knight play (no state change)."""
+    return cast(Mask, _knight_avail_b(board[0], board[1], params))
+
+
+def play_knight_step(
+    board: Board, params: TwoIndexParams
+) -> tuple[BoardState, ResultCode]:
+    """Play a Knight (params: (tile, victim)); ``victim == -1`` steals from no one.
+
+    Moves the robber and steals; can win via the Largest Army award (+2 VP).
+    """
+    return cast(
+        "tuple[BoardState, ResultCode]", _knight_apply_b(board[0], board[1], params)
+    )

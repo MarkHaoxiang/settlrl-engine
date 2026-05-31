@@ -6,14 +6,15 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, PlayMonopoly
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import play_monopoly_step
 from catan_engine.board import Board, give, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
 from tests.mechanics.actions.fixtures import fmt
 
 
 def test_success(monopoly_board: Board, render: Callable[..., str]) -> None:
-    state, result = PlayMonopoly()(monopoly_board, jnp.array([0]))
+    state, result = play_monopoly_step(monopoly_board, jnp.array([0]))
     assert_expected_inline(
         fmt(
             result,
@@ -120,7 +121,7 @@ def test_invalid_no_card() -> None:
     board = to_main(make_board())
     board = give(board, 0, [1, 0, 0, 0, 0])
     before = np.asarray(board[1].player_resources)
-    state, result = PlayMonopoly()(board, jnp.array([0]))
+    state, result = play_monopoly_step(board, jnp.array([0]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
 
@@ -129,13 +130,13 @@ def test_invalid_dev_already_played(monopoly_board: Board) -> None:
     layout, st = monopoly_board
     board = (layout, st._replace(dev_played=st.dev_played.at[0].set(1)))
     before = np.asarray(board[1].player_resources)
-    new_state, result = PlayMonopoly()(board, jnp.array([0]))
+    new_state, result = play_monopoly_step(board, jnp.array([0]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(new_state.player_resources), before)
 
 
 def test_invalid_out_of_range(monopoly_board: Board) -> None:
     before = np.asarray(monopoly_board[1].player_resources)
-    state, result = PlayMonopoly()(monopoly_board, jnp.array([-1]))
+    state, result = play_monopoly_step(monopoly_board, jnp.array([-1]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)

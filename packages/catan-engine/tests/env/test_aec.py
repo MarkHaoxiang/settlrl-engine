@@ -7,8 +7,7 @@ import numpy as np
 from pettingzoo.test import api_test
 
 from catan_engine.env.aec import CatanAECEnv, env
-from catan_engine.env.batched import _ATYPE
-from catan_engine.mechanics.action import ActionType
+from catan_engine.mechanics.action import _ATYPE, ActionType
 
 
 class TestCatanAEC:

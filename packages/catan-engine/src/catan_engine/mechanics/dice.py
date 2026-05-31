@@ -1,14 +1,31 @@
-"""Dice rolling and the resource production it triggers (single-game, traceable)."""
+"""Dice rolling and the resource production it triggers (single-game, traceable).
+
+Holds the ``RollDice`` action core (avail/apply) alongside the ``roll_dice`` /
+``distribute_resources`` helpers it composes.
+"""
 
 from __future__ import annotations
+
+from typing import cast
 
 import jax
 import jax.numpy as jnp
 
+from catan_engine.board import Board
 from catan_engine.board.layout import N_TILES, TILE_V, BoardLayout
 from catan_engine.board.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
-from catan_engine.board.state import CITY, SETTLEMENT, BoardState, IntScalar, KeyScalar
+from catan_engine.board.state import (
+    CITY,
+    SETTLEMENT,
+    BoardState,
+    BoolScalar,
+    GamePhase,
+    IntScalar,
+    KeyScalar,
+    tree_select,
+)
 from catan_engine.board.tile import Tile
+from catan_engine.mechanics.common import INVALID, SUCCESS, Mask, ResultCode
 
 
 def roll_dice(key: KeyScalar) -> tuple[KeyScalar, IntScalar]:
@@ -63,3 +80,58 @@ def distribute_resources(
     granted = jnp.where(enough, gains, jnp.where(single, jnp.minimum(gains, bank), 0))
     new_res = (res + granted).astype(jnp.uint8)
     return state._replace(player_resources=new_res)
+
+
+# ===========================================================================
+# RollDice action
+# ===========================================================================
+
+
+def _roll_avail(layout: BoardLayout, state: BoardState, params: None) -> BoolScalar:
+    return (state.phase == GamePhase.ROLL) & (state.has_rolled == 0)
+
+
+def _roll_apply(
+    layout: BoardLayout, state: BoardState, params: None
+) -> tuple[BoardState, IntScalar]:
+    available = _roll_avail(layout, state, params)
+    key, roll = roll_dice(state.key)
+    is_seven = roll == 7
+
+    hand = state.player_resources.astype(jnp.int32).sum(axis=1)  # (P,)
+    owes = jnp.where(hand > 7, hand // 2, 0).astype(jnp.uint8)
+    pending = jnp.where(is_seven, owes, jnp.zeros_like(owes))
+    any_discard = jnp.sum(pending) > 0
+    phase_seven = jnp.where(any_discard, GamePhase.DISCARD, GamePhase.MOVE_ROBBER)
+    new_phase = jnp.where(is_seven, phase_seven, GamePhase.MAIN).astype(jnp.uint8)
+
+    distributed = distribute_resources(layout, state, roll)
+    new_res = jnp.where(is_seven, state.player_resources, distributed.player_resources)
+
+    cand = state._replace(
+        key=key,
+        dice_roll=roll.astype(jnp.uint8),
+        has_rolled=jnp.uint8(1),
+        phase=new_phase,
+        pending_discard=pending,
+        player_resources=new_res,
+    )
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
+
+
+_roll_avail_b = jax.jit(jax.vmap(_roll_avail, in_axes=(0, 0, None)))
+_roll_apply_b = jax.jit(jax.vmap(_roll_apply, in_axes=(0, 0, None)))
+
+
+def roll_available(board: Board, params: None = None) -> Mask:
+    """``(batch,)`` legality of RollDice per game (no state change)."""
+    return cast(Mask, _roll_avail_b(board[0], board[1], None))
+
+
+def roll_step(board: Board, params: None = None) -> tuple[BoardState, ResultCode]:
+    """Apply RollDice per game; return (new state, ActionResult codes)."""
+    return cast(
+        "tuple[BoardState, ResultCode]", _roll_apply_b(board[0], board[1], None)
+    )

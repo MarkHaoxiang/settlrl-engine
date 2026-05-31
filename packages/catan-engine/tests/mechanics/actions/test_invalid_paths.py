@@ -10,24 +10,26 @@ copy-paste invalidation cases live here.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from catan_engine.mechanics.action import (
-    ActionResult,
-    BuildCity,
-    BuildRoad,
-    BuildSettlement,
-    BuyDevelopmentCard,
-    MaritimeTrade,
-    PlayMonopoly,
-    PlayRoadBuilding,
-    PlayYearOfPlenty,
-    VecAction,
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.common import ResultCode
+from catan_engine.mechanics.development import (
+    buy_development_card_step,
+    play_monopoly_step,
+    play_road_building_step,
+    play_year_of_plenty_step,
 )
+from catan_engine.mechanics.placement import (
+    build_city_step,
+    build_road_step,
+    build_settlement_step,
+)
+from catan_engine.mechanics.trade import maritime_step
 from catan_engine.board import (
     Board,
     give,
@@ -38,8 +40,11 @@ from catan_engine.board import (
     to_main,
 )
 from catan_engine.board.dev_cards import DevCard
-from catan_engine.board.state import GamePhase
+from catan_engine.board.state import BoardState, GamePhase
 from tests.mechanics.actions.fixtures import road_fixture, settlement_fixture
+
+# A batched action step: (board, params) -> (new state, ActionResult codes).
+StepFn = Callable[[Board, Any], tuple[BoardState, ResultCode]]
 
 
 def _road() -> tuple[Board, object]:
@@ -93,14 +98,14 @@ def _year_of_plenty() -> tuple[Board, object]:
 # (id, action, board+params builder, inspected state field whose array must be
 # left untouched when the action is rejected).
 _WRONG_PHASE_CASES = [
-    ("build_road", BuildRoad(), _road, "edge_road"),
-    ("build_settlement", BuildSettlement(), _settlement, "vertex_owner"),
-    ("build_city", BuildCity(), _city, "vertex_type"),
-    ("buy_development_card", BuyDevelopmentCard(), _buy, "dev_deck"),
-    ("maritime_trade", MaritimeTrade(), _maritime, "player_resources"),
-    ("play_road_building", PlayRoadBuilding(), _road_building, "dev_hand"),
-    ("play_monopoly", PlayMonopoly(), _monopoly, "player_resources"),
-    ("play_year_of_plenty", PlayYearOfPlenty(), _year_of_plenty, "player_resources"),
+    ("build_road", build_road_step, _road, "edge_road"),
+    ("build_settlement", build_settlement_step, _settlement, "vertex_owner"),
+    ("build_city", build_city_step, _city, "vertex_type"),
+    ("buy_development_card", buy_development_card_step, _buy, "dev_deck"),
+    ("maritime_trade", maritime_step, _maritime, "player_resources"),
+    ("play_road_building", play_road_building_step, _road_building, "dev_hand"),
+    ("play_monopoly", play_monopoly_step, _monopoly, "player_resources"),
+    ("play_year_of_plenty", play_year_of_plenty_step, _year_of_plenty, "player_resources"),
 ]
 
 
@@ -110,7 +115,7 @@ _WRONG_PHASE_CASES = [
     ids=[c[0] for c in _WRONG_PHASE_CASES],
 )
 def test_invalid_wrong_phase(
-    action: VecAction[object],
+    action: StepFn,
     build: Callable[[], tuple[Board, object]],
     field: str,
 ) -> None:
@@ -125,10 +130,10 @@ def test_invalid_wrong_phase(
 
 # The build / buy actions share the same "strip the hand -> can't pay" shape.
 _CANNOT_AFFORD_CASES = [
-    ("build_road", BuildRoad(), _road),
-    ("build_settlement", BuildSettlement(), _settlement),
-    ("build_city", BuildCity(), _city),
-    ("buy_development_card", BuyDevelopmentCard(), _buy),
+    ("build_road", build_road_step, _road),
+    ("build_settlement", build_settlement_step, _settlement),
+    ("build_city", build_city_step, _city),
+    ("buy_development_card", buy_development_card_step, _buy),
 ]
 
 
@@ -138,7 +143,7 @@ _CANNOT_AFFORD_CASES = [
     ids=[c[0] for c in _CANNOT_AFFORD_CASES],
 )
 def test_invalid_cannot_afford(
-    action: VecAction[object],
+    action: StepFn,
     build: Callable[[], tuple[Board, object]],
 ) -> None:
     """With an empty hand (and no free roads) the cost gate rejects the build."""

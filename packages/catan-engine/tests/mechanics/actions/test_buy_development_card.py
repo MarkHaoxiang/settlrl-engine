@@ -3,13 +3,14 @@
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, BuyDevelopmentCard
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import buy_development_card_step
 from catan_engine.board import Board
 from tests.mechanics.actions.fixtures import fmt
 
 
 def test_success(buy_board: Board) -> None:
-    state, result = BuyDevelopmentCard()(buy_board, None)
+    state, result = buy_development_card_step(buy_board, None)
     hand = np.asarray(state.dev_hand[0, 0])
     assert_expected_inline(
         fmt(
@@ -35,5 +36,5 @@ deck_total=24""",
 def test_invalid_empty_deck(buy_board: Board) -> None:
     layout, st = buy_board
     st = st._replace(dev_deck=st.dev_deck.at[0].set(0))
-    _, result = BuyDevelopmentCard()((layout, st), None)
+    _, result = buy_development_card_step((layout, st), None)
     assert int(result[0]) == ActionResult.INVALID.value

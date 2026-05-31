@@ -4,14 +4,15 @@ import jax
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, RollDice
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.dice import roll_step
 from catan_engine.board import Board, give, make_board, to_main
 from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 
 def test_success(roll_board: Board) -> None:
-    state, result = RollDice()(roll_board, None)
+    state, result = roll_step(roll_board, None)
     assert_expected_inline(
         fmt(
             result,
@@ -30,7 +31,7 @@ has_rolled=1""",
 def test_invalid_not_roll_phase() -> None:
     board = to_main(make_board(seed=0))  # MAIN phase -> cannot roll
     before = np.asarray(board[1].phase)
-    state, result = RollDice()(board, None)
+    state, result = roll_step(board, None)
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.phase), before)
 
@@ -45,7 +46,7 @@ def test_seven_routes_to_discard_and_suppresses_production(roll_board: Board) ->
     board = give(board, 0, [4, 4, 1, 1, 0])  # 10 cards -> owes 5
     before = np.asarray(board[1].player_resources)
 
-    state, result = RollDice()(board, None)
+    state, result = roll_step(board, None)
     assert int(result[0]) == ActionResult.SUCCESS.value
     assert int(state.dice_roll[0]) == 7
     assert int(state.phase[0]) == GamePhase.DISCARD
@@ -58,5 +59,5 @@ def test_seven_routes_to_discard_and_suppresses_production(roll_board: Board) ->
 def test_invalid_already_rolled(roll_board: Board) -> None:
     layout, st = roll_board
     st = st._replace(has_rolled=st.has_rolled.at[0].set(1))
-    _, result = RollDice()((layout, st), None)
+    _, result = roll_step((layout, st), None)
     assert int(result[0]) == ActionResult.INVALID.value

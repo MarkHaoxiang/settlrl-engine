@@ -1,1166 +1,112 @@
-"""Vectorized (JAX-native) Catan actions -- the engine's action layer.
+"""Unified action dispatch, flat enumeration, and switch-free legality.
 
-Each action's core is a pure transition on a **single, unbatched game** written
-in traceable JAX, composed from the focused rule modules (``placement``,
-``awards``, ``trade``, ``dice``, ``robber``, ``setup``, ``development``) and the
-local economy helpers below, over the static geometry maps in ``layout``. The public
-``is_available`` / ``__call__`` are
-``jax.jit(jax.vmap(...))`` over those cores, so they operate on a whole batch at
-once: ``params`` are batched arrays and the outcome is a ``(batch,)`` array of
-``ActionResult`` codes.
+The per-action transition cores live in their topical rule modules (``dice``,
+``placement``, ``setup``, ``trade``, ``development``, ``robber``, ``turn``); the
+shared vocabulary they all use lives in ``common``. This module is the layer on
+top of them:
 
-Application is branchless: the candidate next state is always computed, then
-selected against the current state with ``state.tree_select`` using the
-``is_available`` mask. Illegal games are returned unchanged with ``INVALID``.
+1. A single ``(action_type, params)`` interface over all 15 actions, dispatched
+   with ``jax.lax.switch`` (``apply_action`` / ``action_available``) so the whole
+   thing stays traceable and vmappable. The heterogeneous per-action params are
+   packed into one ``ActionParams`` struct; each branch unpacks what it needs.
+2. The *flat action table*: one enumerated index per concrete move (each vertex/
+   edge/tile/resource choice plus the parameterless actions), decoded back to
+   ``(ActionType, ActionParams)``. This backs both ``random_actions`` and the
+   single-game AEC wrapper's flat ``Discrete`` action space.
+3. The switch-free *flat legality* sweep and the per-action-type / per-index
+   legality enumerations, which call each core directly over its own static
+   slice of the parameter space (no ``lax.switch`` branch blow-up).
 
-Player convention (see state.py): players are 0-indexed; ``vertex_owner`` /
-``edge_road`` store ``player + 1`` (0 = empty). Multi-field action params are
-passed as tuples of ``(batch,)`` arrays; ``victim`` parameters are 0-indexed
-with ``-1`` meaning "steal from no one".
+All single-game cores are ``jax.vmap``-ed (see ``catan_engine.env``) to run a
+whole batch at once. ``ActionResult`` / ``Mask`` / ``ResultCode`` /
+``player_total_vp`` are re-exported from ``common`` for callers that import them
+from here.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from collections.abc import Callable
 from enum import IntEnum
-from typing import Generic, NamedTuple, TypeVar, cast
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Int
+import numpy as np
 
-from catan_engine.mechanics import (
-    awards,
-    development,
-    dice,
-    placement,
-    robber,
-    setup,
-    trade,
+from catan_engine.board.layout import (
+    N_EDGES,
+    N_TILES,
+    N_VERTICES,
+    BoardLayout,
 )
-from catan_engine.board import Board
-from catan_engine.board.dev_cards import DEV_CARD_COST, DevCard
-from catan_engine.board.layout import N_EDGES, N_TILES, N_VERTICES, BoardLayout
-from catan_engine.board.resources import (
-    CITY_COST,
-    N_PLAYERS,
-    N_RESOURCES,
-    ROAD_COST,
-    SETTLEMENT_COST,
-    bank_stock,
+from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.board.state import BoardState, GamePhase
+from catan_engine.mechanics.common import (
+    ActionResult,
+    ActionTypeArray,
+    IndexAvail,
+    IndexParam,
+    Mask,
+    NoneAvail,
+    PairAvail,
+    ResourceParam,
+    ResultCode,
+    agent_selection_single,
+    player_total_vp,
 )
-from catan_engine.board.state import (
-    CITY,
-    MAX_CITIES,
-    MAX_ROADS,
-    MAX_SETTLEMENTS,
-    SETTLEMENT,
-    VICTORY_POINTS_TO_WIN,
-    BoardState,
-    GamePhase,
-    to_u8,
-    tree_select,
+from catan_engine.mechanics.development import (
+    _buy_dev_apply,
+    _buy_dev_avail,
+    _knight_apply,
+    _knight_avail,
+    _monopoly_apply,
+    _monopoly_avail,
+    _road_building_apply,
+    _road_building_avail,
+    _yop_apply,
+    _yop_avail,
 )
-
-ParamsT = TypeVar("ParamsT")
-
-# ---------------------------------------------------------------------------
-# jaxtyping aliases for the action layer.
-#
-# Following the BoardState convention (state.py), every array carries a leading
-# variable `batch` axis; `jax.vmap` over the single-game cores in this module
-# strips it, and all other axes are fixed game constants. `is_available` yields
-# a per-game `Mask`; applying an action yields `(BoardState, ResultCode)`.
-# ---------------------------------------------------------------------------
-Mask = Bool[Array, "batch"]  # per-game legality / win flag
-ResultCode = Int[Array, "batch"]  # ActionResult codes
-ActionTypeArray = Int[Array, "batch"]  # ActionType codes (unified dispatch)
-IndexParam = Int[Array, "batch"]  # vertex / edge / tile / resource / player / victim
-ResourceParam = Int[Array, f"batch resources={N_RESOURCES}"]  # per-resource counts
-TwoIndexParams = tuple[IndexParam, IndexParam]  # e.g. (tile, victim), (give, receive)
-DiscardParams = tuple[IndexParam, ResourceParam]  # (player, per-resource discard counts)
-
-
-class ActionResult(IntEnum):
-    """Outcome of attempting to apply an action."""
-
-    SUCCESS = 0        # Legal and applied; play continues.
-    INVALID = 1        # Not legal in the current state; board left unchanged.
-    GAME_COMPLETE = 2  # Applied and ended the game (a player reached 10 VP).
-
-    def __str__(self) -> str:
-        return ("OK", "INVALID", "DONE")[self]
-
-
-SUCCESS = jnp.int32(ActionResult.SUCCESS.value)
-INVALID = jnp.int32(ActionResult.INVALID.value)
-GAME_COMPLETE = jnp.int32(ActionResult.GAME_COMPLETE.value)
-
-
-# ===========================================================================
-# Economy helpers
-#
-# Single-game, traceable cost / affordability / payment / building-count /
-# victory-point helpers operating on the BoardState arrays, used throughout the
-# action cores below. (Generic uint8 saturation lives on state.to_u8; bank stock
-# on resources.bank_stock.)
-# ===========================================================================
-
-# Build-cost vectors in resource order [sheep, wheat, wood, brick, ore].
-ROAD_COST_ARR = jnp.array(ROAD_COST, dtype=jnp.int32)
-SETTLEMENT_COST_ARR = jnp.array(SETTLEMENT_COST, dtype=jnp.int32)
-CITY_COST_ARR = jnp.array(CITY_COST, dtype=jnp.int32)
-DEV_CARD_COST_ARR = jnp.array(DEV_CARD_COST, dtype=jnp.int32)
-
-
-def roads_left(edge_road: jax.Array, player: jax.Array) -> jax.Array:
-    built = jnp.sum(edge_road == player + 1).astype(jnp.int32)
-    return MAX_ROADS - built
-
-
-def count_settlements(
-    vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
-) -> jax.Array:
-    return jnp.sum((vertex_owner == player + 1) & (vertex_type == SETTLEMENT)).astype(
-        jnp.int32
-    )
-
-
-def count_cities(
-    vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
-) -> jax.Array:
-    return jnp.sum((vertex_owner == player + 1) & (vertex_type == CITY)).astype(
-        jnp.int32
-    )
-
-
-def can_afford(resources_row: jax.Array, cost_arr: jax.Array) -> jax.Array:
-    """True if a single player's resource row covers ``cost_arr``."""
-    return jnp.all(resources_row.astype(jnp.int32) >= cost_arr)
-
-
-def pay(
-    player_resources: jax.Array, player: jax.Array, cost_arr: jax.Array
-) -> jax.Array:
-    """Subtract ``cost_arr`` from ``player``'s row (clipped at 0), returning uint8."""
-    updated = player_resources.astype(jnp.int32).at[player].add(-cost_arr)
-    return to_u8(updated)
-
-
-def player_total_vp(state: BoardState, player: jax.Array) -> jax.Array:
-    """Building VP + awards + hidden Victory Point cards for ``player``."""
-    total = state.victory_points[player].astype(jnp.int32)
-    total += jnp.where(state.longest_road_owner == player, 2, 0)
-    total += jnp.where(state.largest_army_owner == player, 2, 0)
-    total += state.dev_hand[player, DevCard.VICTORY_POINT].astype(jnp.int32)
-    return total
-
-
-class VecAction(ABC, Generic[ParamsT]):
-    """Base class for the batched actions: methods return JAX arrays.
-
-    ``is_available`` returns a ``(batch,)`` bool mask; ``__call__`` returns the
-    new batched ``BoardState`` and a ``(batch,)`` int array of ActionResult
-    codes. Cores are single-game; the public methods are jit(vmap(...)).
-    """
-
-    @abstractmethod
-    def is_available(self, board: Board, params: ParamsT) -> Mask: ...
-
-    @abstractmethod
-    def __call__(self, board: Board, params: ParamsT) -> tuple[BoardState, ResultCode]:
-        ...
-
-
-def _outcome(available: Mask, won: Mask) -> ResultCode:
-    return jnp.where(available, jnp.where(won, GAME_COMPLETE, SUCCESS), INVALID)
-
-
-def _main_after_roll(state: BoardState) -> jax.Array:
-    """MAIN phase with the dice already rolled: the build / bank-trade window."""
-    return (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
-
-
-def _main_no_dev_played(state: BoardState) -> jax.Array:
-    """MAIN phase with no development card played yet this turn."""
-    return (state.phase == GamePhase.MAIN) & (state.dev_played == 0)
-
-
-# ===========================================================================
-# BuildRoad
-# ===========================================================================
-
-
-def _build_road_avail(
-    layout: BoardLayout, state: BoardState, edge: IndexParam
-) -> Mask:
-    in_range = (edge >= 0) & (edge < N_EDGES)
-    e = jnp.clip(edge, 0, N_EDGES - 1)
-    player = state.current_player.astype(jnp.int32)
-    main = _main_after_roll(state)
-    has_road = roads_left(state.edge_road, player) > 0
-    placeable = placement.road_placeable(state.edge_road, state.vertex_owner, player, e)
-    free = state.free_roads > 0
-    afford = can_afford(state.player_resources[player], ROAD_COST_ARR)
-    return in_range & main & has_road & placeable & (free | afford)
-
-
-def _build_road_apply(
-    layout: BoardLayout, state: BoardState, edge: IndexParam
-) -> tuple[BoardState, ResultCode]:
-    available = _build_road_avail(layout, state, edge)
-    e = jnp.clip(edge, 0, N_EDGES - 1)
-    player = state.current_player.astype(jnp.int32)
-    use_free = state.free_roads > 0
-    new_free = to_u8(
-        jnp.where(
-            use_free,
-            state.free_roads.astype(jnp.int32) - 1,
-            state.free_roads.astype(jnp.int32),
-        )
-    )
-    paid = pay(state.player_resources, player, ROAD_COST_ARR)
-    new_res = jnp.where(use_free, state.player_resources, paid)
-    cand = state._replace(
-        edge_road=state.edge_road.at[e].set((player + 1).astype(jnp.uint8)),
-        free_roads=new_free,
-        player_resources=new_res,
-    )
-    cand = awards.recompute_longest_road(cand)
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), _outcome(available, won)
-
-
-_build_road_avail_b = jax.jit(jax.vmap(_build_road_avail))
-_build_road_apply_b = jax.jit(jax.vmap(_build_road_apply))
-
-
-class BuildRoad(VecAction[IndexParam]):
-    """Build a road (params: edge indices, shape (batch,)). Free if free_roads > 0."""
-
-    def is_available(self, board: Board, params: IndexParam) -> Mask:
-        return cast(Mask, _build_road_avail_b(board[0], board[1], params))
-
-    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _build_road_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# BuildSettlement
-# ===========================================================================
-
-
-def _build_settlement_avail(
-    layout: BoardLayout, state: BoardState, vertex: IndexParam
-) -> Mask:
-    in_range = (vertex >= 0) & (vertex < N_VERTICES)
-    v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    player = state.current_player.astype(jnp.int32)
-    main = _main_after_roll(state)
-    under_max = (
-        count_settlements(state.vertex_owner, state.vertex_type, player)
-        < MAX_SETTLEMENTS
-    )
-    afford = can_afford(state.player_resources[player], SETTLEMENT_COST_ARR)
-    dist = placement.distance_rule_ok(state.vertex_owner, v)
-    conn = placement.settlement_connected(state.edge_road, player, v)
-    return in_range & main & under_max & afford & dist & conn
-
-
-def _build_settlement_apply(
-    layout: BoardLayout, state: BoardState, vertex: IndexParam
-) -> tuple[BoardState, ResultCode]:
-    available = _build_settlement_avail(layout, state, vertex)
-    v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    player = state.current_player.astype(jnp.int32)
-    cand = state._replace(
-        player_resources=pay(
-            state.player_resources, player, SETTLEMENT_COST_ARR
-        ),
-        vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
-        vertex_type=state.vertex_type.at[v].set(SETTLEMENT),
-        victory_points=state.victory_points.at[player].add(1),
-    )
-    cand = awards.recompute_longest_road(cand)
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), _outcome(available, won)
-
-
-_build_settlement_avail_b = jax.jit(jax.vmap(_build_settlement_avail))
-_build_settlement_apply_b = jax.jit(jax.vmap(_build_settlement_apply))
-
-
-class BuildSettlement(VecAction[IndexParam]):
-    """Build a settlement (params: vertex indices, shape (batch,))."""
-
-    def is_available(self, board: Board, params: IndexParam) -> Mask:
-        return cast(Mask, _build_settlement_avail_b(board[0], board[1], params))
-
-    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _build_settlement_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# RollDice
-# ===========================================================================
-
-
-def _roll_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
-    return (state.phase == GamePhase.ROLL) & (state.has_rolled == 0)
-
-
-def _roll_apply(
-    layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, ResultCode]:
-    available = _roll_avail(layout, state, params)
-    key, roll = dice.roll_dice(state.key)
-    is_seven = roll == 7
-
-    hand = state.player_resources.astype(jnp.int32).sum(axis=1)  # (P,)
-    owes = jnp.where(hand > 7, hand // 2, 0).astype(jnp.uint8)
-    pending = jnp.where(is_seven, owes, jnp.zeros_like(owes))
-    any_discard = jnp.sum(pending) > 0
-    phase_seven = jnp.where(any_discard, GamePhase.DISCARD, GamePhase.MOVE_ROBBER)
-    new_phase = jnp.where(is_seven, phase_seven, GamePhase.MAIN).astype(jnp.uint8)
-
-    distributed = dice.distribute_resources(layout, state, roll)
-    new_res = jnp.where(is_seven, state.player_resources, distributed.player_resources)
-
-    cand = state._replace(
-        key=key,
-        dice_roll=roll.astype(jnp.uint8),
-        has_rolled=jnp.uint8(1),
-        phase=new_phase,
-        pending_discard=pending,
-        player_resources=new_res,
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_roll_avail_b = jax.jit(jax.vmap(_roll_avail, in_axes=(0, 0, None)))
-_roll_apply_b = jax.jit(jax.vmap(_roll_apply, in_axes=(0, 0, None)))
-
-
-class RollDice(VecAction[None]):
-    """Roll the dice (params: None). Distributes resources or triggers a 7."""
-
-    def is_available(self, board: Board, params: None = None) -> Mask:
-        return cast(Mask, _roll_avail_b(board[0], board[1], None))
-
-    def __call__(
-        self, board: Board, params: None = None
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]", _roll_apply_b(board[0], board[1], None)
-        )
-
-
-# ===========================================================================
-# BuildCity
-# ===========================================================================
-
-
-def _build_city_avail(
-    layout: BoardLayout, state: BoardState, vertex: IndexParam
-) -> Mask:
-    in_range = (vertex >= 0) & (vertex < N_VERTICES)
-    v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    player = state.current_player.astype(jnp.int32)
-    main = _main_after_roll(state)
-    under_max = (
-        count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
-    )
-    owns_settlement = (state.vertex_owner[v] == (player + 1).astype(jnp.uint8)) & (
-        state.vertex_type[v] == SETTLEMENT
-    )
-    afford = can_afford(state.player_resources[player], CITY_COST_ARR)
-    return in_range & main & under_max & owns_settlement & afford
-
-
-def _build_city_apply(
-    layout: BoardLayout, state: BoardState, vertex: IndexParam
-) -> tuple[BoardState, ResultCode]:
-    available = _build_city_avail(layout, state, vertex)
-    v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    player = state.current_player.astype(jnp.int32)
-    cand = state._replace(
-        player_resources=pay(state.player_resources, player, CITY_COST_ARR),
-        vertex_type=state.vertex_type.at[v].set(CITY),
-        victory_points=state.victory_points.at[player].add(1),
-    )
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), _outcome(available, won)
-
-
-_build_city_avail_b = jax.jit(jax.vmap(_build_city_avail))
-_build_city_apply_b = jax.jit(jax.vmap(_build_city_apply))
-
-
-class BuildCity(VecAction[IndexParam]):
-    """Upgrade an own settlement to a city (params: vertex indices, shape (batch,))."""
-
-    def is_available(self, board: Board, params: IndexParam) -> Mask:
-        return cast(Mask, _build_city_avail_b(board[0], board[1], params))
-
-    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _build_city_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# BuyDevelopmentCard
-# ===========================================================================
-
-
-def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
-    player = state.current_player.astype(jnp.int32)
-    main = _main_after_roll(state)
-    deck_nonempty = state.dev_deck.astype(jnp.int32).sum() > 0
-    afford = can_afford(state.player_resources[player], DEV_CARD_COST_ARR)
-    return main & deck_nonempty & afford
-
-
-def _buy_dev_apply(
-    layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, ResultCode]:
-    available = _buy_dev_avail(layout, state, params)
-    player = state.current_player.astype(jnp.int32)
-    key, card = development.draw_dev_card(state.key, state.dev_deck)
-    new_deck = state.dev_deck.astype(jnp.int32).at[card].add(-1)
-    new_hand = state.dev_hand.astype(jnp.int32).at[player, card].add(1)
-    new_bought = state.dev_bought.astype(jnp.int32).at[card].add(1)
-    cand = state._replace(
-        player_resources=pay(
-            state.player_resources, player, DEV_CARD_COST_ARR
-        ),
-        dev_deck=to_u8(new_deck),
-        dev_hand=to_u8(new_hand),
-        dev_bought=to_u8(new_bought),
-        key=key,
-    )
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), _outcome(available, won)
-
-
-_buy_dev_avail_b = jax.jit(jax.vmap(_buy_dev_avail, in_axes=(0, 0, None)))
-_buy_dev_apply_b = jax.jit(jax.vmap(_buy_dev_apply, in_axes=(0, 0, None)))
-
-
-class BuyDevelopmentCard(VecAction[None]):
-    """Buy a development card (params: None). Draws from ``state.dev_deck``."""
-
-    def is_available(self, board: Board, params: None = None) -> Mask:
-        return cast(Mask, _buy_dev_avail_b(board[0], board[1], None))
-
-    def __call__(
-        self, board: Board, params: None = None
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]", _buy_dev_apply_b(board[0], board[1], None)
-        )
-
-
-# ===========================================================================
-# EndTurn
-# ===========================================================================
-
-
-def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
-    return _main_after_roll(state)
-
-
-def _end_turn_apply(
-    layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, ResultCode]:
-    available = _end_turn_avail(layout, state, params)
-    nxt = (state.current_player.astype(jnp.int32) + 1) % N_PLAYERS
-    cand = state._replace(
-        dice_roll=jnp.uint8(0),
-        has_rolled=jnp.uint8(0),
-        dev_played=jnp.uint8(0),
-        dev_bought=jnp.zeros_like(state.dev_bought),
-        free_roads=jnp.uint8(0),
-        current_player=nxt.astype(state.current_player.dtype),
-        phase=jnp.uint8(GamePhase.ROLL),
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_end_turn_avail_b = jax.jit(jax.vmap(_end_turn_avail, in_axes=(0, 0, None)))
-_end_turn_apply_b = jax.jit(jax.vmap(_end_turn_apply, in_axes=(0, 0, None)))
-
-
-class EndTurn(VecAction[None]):
-    """End the current player's turn (params: None). Advances to the next player."""
-
-    def is_available(self, board: Board, params: None = None) -> Mask:
-        return cast(Mask, _end_turn_avail_b(board[0], board[1], None))
-
-    def __call__(
-        self, board: Board, params: None = None
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]", _end_turn_apply_b(board[0], board[1], None)
-        )
-
-
-# ===========================================================================
-# MaritimeTrade
-# ===========================================================================
-
-
-def _maritime_avail(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> Mask:
-    give, receive = params
-    player = state.current_player.astype(jnp.int32)
-    g = jnp.clip(give, 0, N_RESOURCES - 1)
-    r = jnp.clip(receive, 0, N_RESOURCES - 1)
-    main = _main_after_roll(state)
-    give_ok = (give >= 0) & (give < N_RESOURCES)
-    recv_ok = (receive >= 0) & (receive < N_RESOURCES)
-    distinct = give != receive
-    ratio = trade.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
-    has_give = state.player_resources[player, g].astype(jnp.int32) >= ratio
-    bank_ok = bank_stock(state.player_resources, r) >= 1
-    return main & give_ok & recv_ok & distinct & has_give & bank_ok
-
-
-def _maritime_apply(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> tuple[BoardState, ResultCode]:
-    give, receive = params
-    available = _maritime_avail(layout, state, params)
-    player = state.current_player.astype(jnp.int32)
-    g = jnp.clip(give, 0, N_RESOURCES - 1)
-    r = jnp.clip(receive, 0, N_RESOURCES - 1)
-    ratio = trade.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
-    res = state.player_resources.astype(jnp.int32)
-    res = res.at[player, g].add(-ratio)
-    res = res.at[player, r].add(1)
-    cand = state._replace(
-        player_resources=to_u8(res)
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_maritime_avail_b = jax.jit(jax.vmap(_maritime_avail))
-_maritime_apply_b = jax.jit(jax.vmap(_maritime_apply))
-
-
-class MaritimeTrade(VecAction["TwoIndexParams"]):
-    """Trade with the bank at the best available ratio (params: (give, receive))."""
-
-    def is_available(
-        self, board: Board, params: TwoIndexParams
-    ) -> Mask:
-        return cast(Mask, _maritime_avail_b(board[0], board[1], params))
-
-    def __call__(
-        self, board: Board, params: TwoIndexParams
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _maritime_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# PlayMonopoly
-# ===========================================================================
-
-
-def _monopoly_avail(
-    layout: BoardLayout, state: BoardState, resource: IndexParam
-) -> Mask:
-    player = state.current_player.astype(jnp.int32)
-    main = _main_no_dev_played(state)
-    in_range = (resource >= 0) & (resource < N_RESOURCES)
-    has_card = development.playable_dev(state, player, DevCard.MONOPOLY)
-    return main & in_range & has_card
-
-
-def _monopoly_apply(
-    layout: BoardLayout, state: BoardState, resource: IndexParam
-) -> tuple[BoardState, ResultCode]:
-    available = _monopoly_avail(layout, state, resource)
-    player = state.current_player.astype(jnp.int32)
-    r = jnp.clip(resource, 0, N_RESOURCES - 1)
-    res = state.player_resources.astype(jnp.int32)  # (N_PLAYERS, N_RESOURCES)
-    taken = res[:, r].sum() - res[player, r]
-    col = jnp.zeros((N_PLAYERS,), jnp.int32).at[player].set(res[player, r] + taken)
-    res = res.at[:, r].set(col)
-    new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.MONOPOLY].add(-1)
-    cand = state._replace(
-        dev_played=jnp.uint8(1),
-        dev_hand=to_u8(new_hand),
-        player_resources=to_u8(res),
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_monopoly_avail_b = jax.jit(jax.vmap(_monopoly_avail))
-_monopoly_apply_b = jax.jit(jax.vmap(_monopoly_apply))
-
-
-class PlayMonopoly(VecAction[IndexParam]):
-    """Play Monopoly (params: resource indices, shape (batch,)).
-
-    Takes all of one resource from every other player.
-    """
-
-    def is_available(self, board: Board, params: IndexParam) -> Mask:
-        return cast(Mask, _monopoly_avail_b(board[0], board[1], params))
-
-    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _monopoly_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# PlayYearOfPlenty
-# ===========================================================================
-
-
-def _yop_avail(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> Mask:
-    resource_a, resource_b = params
-    player = state.current_player.astype(jnp.int32)
-    ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
-    cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
-    main = _main_no_dev_played(state)
-    has_card = development.playable_dev(state, player, DevCard.YEAR_OF_PLENTY)
-    a_ok = (resource_a >= 0) & (resource_a < N_RESOURCES)
-    b_ok = (resource_b >= 0) & (resource_b < N_RESOURCES)
-    same = resource_a == resource_b
-    need_a = 1 + same.astype(jnp.int32)
-    bank_a = bank_stock(state.player_resources, ca) >= need_a
-    bank_b = same | (bank_stock(state.player_resources, cb) >= 1)
-    return main & has_card & a_ok & b_ok & bank_a & bank_b
-
-
-def _yop_apply(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> tuple[BoardState, ResultCode]:
-    resource_a, resource_b = params
-    available = _yop_avail(layout, state, params)
-    player = state.current_player.astype(jnp.int32)
-    ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
-    cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
-    new_hand = (
-        state.dev_hand.astype(jnp.int32).at[player, DevCard.YEAR_OF_PLENTY].add(-1)
-    )
-    res = state.player_resources.astype(jnp.int32)
-    res = res.at[player, ca].add(1)
-    res = res.at[player, cb].add(1)
-    cand = state._replace(
-        dev_played=jnp.uint8(1),
-        dev_hand=to_u8(new_hand),
-        player_resources=to_u8(res),
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_yop_avail_b = jax.jit(jax.vmap(_yop_avail))
-_yop_apply_b = jax.jit(jax.vmap(_yop_apply))
-
-
-class PlayYearOfPlenty(VecAction["TwoIndexParams"]):
-    """Play Year of Plenty (params: (resource_a, resource_b)).
-
-    Takes two resource cards from the bank; ``a == b`` draws two of one kind.
-    """
-
-    def is_available(
-        self, board: Board, params: TwoIndexParams
-    ) -> Mask:
-        return cast(Mask, _yop_avail_b(board[0], board[1], params))
-
-    def __call__(
-        self, board: Board, params: TwoIndexParams
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _yop_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# PlayRoadBuilding
-# ===========================================================================
-
-
-def _road_building_avail(
-    layout: BoardLayout, state: BoardState, params: None
-) -> Mask:
-    player = state.current_player.astype(jnp.int32)
-    main = _main_no_dev_played(state)
-    has_card = development.playable_dev(state, player, DevCard.ROAD_BUILDING)
-    return main & has_card
-
-
-def _road_building_apply(
-    layout: BoardLayout, state: BoardState, params: None
-) -> tuple[BoardState, ResultCode]:
-    available = _road_building_avail(layout, state, params)
-    player = state.current_player.astype(jnp.int32)
-    grant = jnp.minimum(2, roads_left(state.edge_road, player))
-    new_hand = (
-        state.dev_hand.astype(jnp.int32).at[player, DevCard.ROAD_BUILDING].add(-1)
-    )
-    new_free = state.free_roads.astype(jnp.int32) + grant
-    cand = state._replace(
-        dev_played=jnp.uint8(1),
-        dev_hand=to_u8(new_hand),
-        free_roads=to_u8(new_free),
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_road_building_avail_b = jax.jit(jax.vmap(_road_building_avail, in_axes=(0, 0, None)))
-_road_building_apply_b = jax.jit(jax.vmap(_road_building_apply, in_axes=(0, 0, None)))
-
-
-class PlayRoadBuilding(VecAction[None]):
-    """Play Road Building (params: None). Grants up to 2 free roads."""
-
-    def is_available(self, board: Board, params: None = None) -> Mask:
-        return cast(Mask, _road_building_avail_b(board[0], board[1], None))
-
-    def __call__(
-        self, board: Board, params: None = None
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _road_building_apply_b(board[0], board[1], None),
-        )
-
-
-# ===========================================================================
-# Robber helpers (shared by PlayKnight and MoveRobber)
-# ===========================================================================
-
-
-def _valid_robber_victim(
-    state: BoardState, tile: jax.Array, player: jax.Array, victim: IndexParam
-) -> Mask:
-    """Victim choice is legal for a robber move onto ``tile`` by ``player``.
-
-    If any opponent can be robbed on ``tile``, ``victim`` must name one of them;
-    otherwise the only legal choice is ``-1`` ("steal from no one").
-    """
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
-    mask = robber.robber_victim_mask(state, tile, player)
-    victims_exist = jnp.any(mask)
-    return jnp.where(
-        victims_exist,
-        (victim >= 0) & (victim < N_PLAYERS) & mask[vc],
-        victim == -1,
-    )
-
-
-def _apply_steal(state: BoardState, player: jax.Array, victim: IndexParam) -> BoardState:
-    """Steal a random card from ``victim`` when ``victim >= 0``; else leave state."""
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
-    stolen = robber.steal(state, player, vc)
-    return tree_select(victim >= 0, stolen, state)
-
-
-# ===========================================================================
-# PlayKnight
-# ===========================================================================
-
-
-def _knight_avail(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> Mask:
-    tile, victim = params
-    player = state.current_player.astype(jnp.int32)
-    t = jnp.clip(tile, 0, N_TILES - 1)
-    phase_ok = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
-    not_played = state.dev_played == 0
-    has_card = development.playable_dev(state, player, DevCard.KNIGHT)
-    tile_in_range = (tile >= 0) & (tile < N_TILES)
-    tile_moves = tile != state.robber
-    valid_victim = _valid_robber_victim(state, t, player, victim)
-    return (
-        phase_ok
-        & not_played
-        & has_card
-        & tile_in_range
-        & tile_moves
-        & valid_victim
-    )
-
-
-def _knight_apply(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> tuple[BoardState, ResultCode]:
-    tile, victim = params
-    available = _knight_avail(layout, state, params)
-    player = state.current_player.astype(jnp.int32)
-    t = jnp.clip(tile, 0, N_TILES - 1)
-    new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.KNIGHT].add(-1)
-    new_knights = state.knights_played.astype(jnp.int32).at[player].add(1)
-    cand = state._replace(
-        dev_played=jnp.uint8(1),
-        dev_hand=to_u8(new_hand),
-        knights_played=to_u8(new_knights),
-        robber=t.astype(state.robber.dtype),
-    )
-    cand = awards.recompute_largest_army(cand)
-    cand = _apply_steal(cand, player, victim)
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), _outcome(available, won)
-
-
-_knight_avail_b = jax.jit(jax.vmap(_knight_avail))
-_knight_apply_b = jax.jit(jax.vmap(_knight_apply))
-
-
-class PlayKnight(VecAction["TwoIndexParams"]):
-    """Play a Knight (params: (tile, victim)).
-
-    Moves the robber to ``tile`` and steals from ``victim`` (``victim == -1``
-    steals from no one). Can win via the Largest Army award (+2 VP).
-    """
-
-    def is_available(
-        self, board: Board, params: TwoIndexParams
-    ) -> Mask:
-        return cast(Mask, _knight_avail_b(board[0], board[1], params))
-
-    def __call__(
-        self, board: Board, params: TwoIndexParams
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _knight_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# MoveRobber
-# ===========================================================================
-
-
-def _move_robber_avail(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> Mask:
-    tile, victim = params
-    player = state.current_player.astype(jnp.int32)
-    t = jnp.clip(tile, 0, N_TILES - 1)
-    phase_ok = state.phase == GamePhase.MOVE_ROBBER
-    tile_in_range = (tile >= 0) & (tile < N_TILES)
-    tile_moves = tile != state.robber
-    valid_victim = _valid_robber_victim(state, t, player, victim)
-    return phase_ok & tile_in_range & tile_moves & valid_victim
-
-
-def _move_robber_apply(
-    layout: BoardLayout,
-    state: BoardState,
-    params: TwoIndexParams,
-) -> tuple[BoardState, ResultCode]:
-    tile, victim = params
-    available = _move_robber_avail(layout, state, params)
-    player = state.current_player.astype(jnp.int32)
-    t = jnp.clip(tile, 0, N_TILES - 1)
-    # Knight-before-roll resumes ROLL; the post-7 robber move resumes MAIN.
-    new_phase = jnp.where(
-        state.has_rolled != 0, GamePhase.MAIN, GamePhase.ROLL
-    ).astype(jnp.uint8)
-    cand = state._replace(
-        robber=t.astype(state.robber.dtype),
-        phase=new_phase,
-    )
-    cand = _apply_steal(cand, player, victim)
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_move_robber_avail_b = jax.jit(jax.vmap(_move_robber_avail))
-_move_robber_apply_b = jax.jit(jax.vmap(_move_robber_apply))
-
-
-class MoveRobber(VecAction["TwoIndexParams"]):
-    """Move the robber and steal (params: (tile, victim)).
-
-    Moves the robber to ``tile`` and steals from ``victim`` (``victim == -1``
-    steals from no one). Resolves the post-7 (or knight-before-roll) robber
-    move; never wins, so it always returns SUCCESS / INVALID.
-    """
-
-    def is_available(
-        self, board: Board, params: TwoIndexParams
-    ) -> Mask:
-        return cast(Mask, _move_robber_avail_b(board[0], board[1], params))
-
-    def __call__(
-        self, board: Board, params: TwoIndexParams
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _move_robber_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# Discard
-# ===========================================================================
-
-
-def _discard_avail(
-    layout: BoardLayout,
-    state: BoardState,
-    params: DiscardParams,
-) -> Mask:
-    player, resources = params
-    p = jnp.clip(player, 0, N_PLAYERS - 1)
-    req = resources.astype(jnp.int32)  # (N_RESOURCES,)
-    phase_ok = state.phase == GamePhase.DISCARD
-    player_ok = (player >= 0) & (player < N_PLAYERS)
-    nonneg = jnp.all(req >= 0)
-    owed = state.pending_discard[p].astype(jnp.int32)
-    owes = owed != 0
-    count_ok = req.sum() == owed
-    held = state.player_resources[p].astype(jnp.int32)
-    within_hand = jnp.all(req <= held)
-    return phase_ok & player_ok & nonneg & owes & count_ok & within_hand
-
-
-def _discard_apply(
-    layout: BoardLayout,
-    state: BoardState,
-    params: DiscardParams,
-) -> tuple[BoardState, ResultCode]:
-    player, resources = params
-    available = _discard_avail(layout, state, params)
-    p = jnp.clip(player, 0, N_PLAYERS - 1)
-    req = resources.astype(jnp.int32)
-    new_row = jnp.clip(state.player_resources[p].astype(jnp.int32) - req, 0, 255).astype(
-        jnp.uint8
-    )
-    new_resources = state.player_resources.at[p].set(new_row)
-    updated_pending = state.pending_discard.at[p].set(jnp.uint8(0))
-    new_phase = jnp.where(
-        updated_pending.astype(jnp.int32).sum() == 0,
-        GamePhase.MOVE_ROBBER,
-        GamePhase.DISCARD,
-    ).astype(state.phase.dtype)
-    cand = state._replace(
-        player_resources=new_resources,
-        pending_discard=updated_pending,
-        phase=new_phase,
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_discard_avail_b = jax.jit(jax.vmap(_discard_avail))
-_discard_apply_b = jax.jit(jax.vmap(_discard_apply))
-
-
-class Discard(VecAction["DiscardParams"]):
-    """Discard half your hand after a 7 (params: (player, resources)).
-
-    ``player`` is a ``(batch,)`` int array; ``resources`` is a
-    ``(batch, N_RESOURCES)`` int array of per-resource discard counts. When
-    every player has finished discarding, the phase advances to MOVE_ROBBER.
-    Never wins, so it always returns SUCCESS / INVALID.
-    """
-
-    def is_available(
-        self, board: Board, params: DiscardParams
-    ) -> Mask:
-        return cast(Mask, _discard_avail_b(board[0], board[1], params))
-
-    def __call__(
-        self, board: Board, params: DiscardParams
-    ) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _discard_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# SetupSettlement
-# ===========================================================================
-
-
-def _setup_settlement_avail(
-    layout: BoardLayout, state: BoardState, vertex: IndexParam
-) -> Mask:
-    in_range = (vertex >= 0) & (vertex < N_VERTICES)
-    v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    phase_ok = state.phase == GamePhase.SETUP_SETTLEMENT
-    dist = placement.distance_rule_ok(state.vertex_owner, v)
-    return in_range & phase_ok & dist
-
-
-def _setup_settlement_apply(
-    layout: BoardLayout, state: BoardState, vertex: IndexParam
-) -> tuple[BoardState, ResultCode]:
-    available = _setup_settlement_avail(layout, state, vertex)
-    v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    player = state.current_player.astype(jnp.int32)
-    placed = state._replace(
-        vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
-        vertex_type=state.vertex_type.at[v].set(SETTLEMENT),
-        victory_points=state.victory_points.at[player].add(1),
-    )
-    # The second settlement (placed in the reverse pass) grants resources.
-    granted = setup.grant_setup_resources(layout, placed, v, player)
-    placed = tree_select(
-        state.setup_index.astype(jnp.int32) >= N_PLAYERS, granted, placed
-    )
-    cand = placed._replace(phase=jnp.uint8(GamePhase.SETUP_ROAD))
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_setup_settlement_avail_b = jax.jit(jax.vmap(_setup_settlement_avail))
-_setup_settlement_apply_b = jax.jit(jax.vmap(_setup_settlement_apply))
-
-
-class SetupSettlement(VecAction[IndexParam]):
-    """Place a free starting settlement (params: vertex indices, shape (batch,)).
-
-    The second settlement (placed in the reverse setup pass, when
-    ``setup_index >= N_PLAYERS``) grants one resource per adjacent tile. Always
-    advances to SETUP_ROAD; never wins, so it returns SUCCESS / INVALID.
-    """
-
-    def is_available(self, board: Board, params: IndexParam) -> Mask:
-        return cast(Mask, _setup_settlement_avail_b(board[0], board[1], params))
-
-    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _setup_settlement_apply_b(board[0], board[1], params),
-        )
-
-
-# ===========================================================================
-# SetupRoad
-# ===========================================================================
-
-
-def _setup_road_avail(
-    layout: BoardLayout, state: BoardState, edge: IndexParam
-) -> Mask:
-    in_range = (edge >= 0) & (edge < N_EDGES)
-    e = jnp.clip(edge, 0, N_EDGES - 1)
-    player = state.current_player.astype(jnp.int32)
-    phase_ok = state.phase == GamePhase.SETUP_ROAD
-    empty = state.edge_road[e] == 0
-    touches = placement.setup_road_placeable(
-        state.edge_road, state.vertex_owner, player, e
-    )
-    return in_range & phase_ok & empty & touches
-
-
-def _setup_road_apply(
-    layout: BoardLayout, state: BoardState, edge: IndexParam
-) -> tuple[BoardState, ResultCode]:
-    available = _setup_road_avail(layout, state, edge)
-    e = jnp.clip(edge, 0, N_EDGES - 1)
-    player = state.current_player.astype(jnp.int32)
-    new_index = state.setup_index.astype(jnp.int32) + 1
-    setup_continues = new_index < setup.N_SETUP
-    next_player = jnp.where(
-        setup_continues,
-        setup.SETUP_ORDER_ARR[jnp.clip(new_index, 0, setup.N_SETUP - 1)],
-        0,
-    )
-    next_phase = jnp.where(
-        setup_continues, GamePhase.SETUP_SETTLEMENT, GamePhase.ROLL
-    )
-    cand = state._replace(
-        edge_road=state.edge_road.at[e].set((player + 1).astype(jnp.uint8)),
-        setup_index=new_index.astype(state.setup_index.dtype),
-        phase=next_phase.astype(state.phase.dtype),
-        current_player=next_player.astype(state.current_player.dtype),
-    )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
-
-
-_setup_road_avail_b = jax.jit(jax.vmap(_setup_road_avail))
-_setup_road_apply_b = jax.jit(jax.vmap(_setup_road_apply))
-
-
-class SetupRoad(VecAction[IndexParam]):
-    """Place the road next to the just-placed setup settlement (params: edge).
-
-    The edge must be empty and touch a setup settlement the player owns that has
-    no incident road yet. Advances the snake setup order: the next settlement
-    placement, or ROLL with player 0 once setup is complete. Never wins, so it
-    returns SUCCESS / INVALID.
-    """
-
-    def is_available(self, board: Board, params: IndexParam) -> Mask:
-        return cast(Mask, _setup_road_avail_b(board[0], board[1], params))
-
-    def __call__(self, board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
-        return cast(
-            "tuple[BoardState, ResultCode]",
-            _setup_road_apply_b(board[0], board[1], params),
-        )
+from catan_engine.mechanics.dice import _roll_apply, _roll_avail
+from catan_engine.mechanics.placement import (
+    _build_city_apply,
+    _build_city_avail,
+    _build_road_apply,
+    _build_road_avail,
+    _build_settlement_apply,
+    _build_settlement_avail,
+)
+from catan_engine.mechanics.robber import (
+    _discard_apply,
+    _discard_avail,
+    _move_robber_apply,
+    _move_robber_avail,
+)
+from catan_engine.mechanics.setup import (
+    _setup_road_apply,
+    _setup_road_avail,
+    _setup_settlement_apply,
+    _setup_settlement_avail,
+)
+from catan_engine.mechanics.trade import _maritime_apply, _maritime_avail
+from catan_engine.mechanics.turn import _end_turn_apply, _end_turn_avail
+
+__all__ = [
+    "ActionParams",
+    "ActionResult",
+    "ActionType",
+    "ActionTypeArray",
+    "Mask",
+    "N_ACTION_TYPES",
+    "ResultCode",
+    "action_available",
+    "apply_action",
+    "player_total_vp",
+]
 
 
 # ===========================================================================
 # Unified action dispatch
 # ===========================================================================
-#
-# A single ``(action_type, params)`` interface over all 15 actions, dispatched
-# with ``jax.lax.switch`` so the whole thing stays traceable and vmappable. The
-# heterogeneous per-action params are packed into one ``ActionParams`` struct;
-# each branch unpacks the fields it needs and ignores the rest. Wrap
-# ``apply_action`` / ``action_available`` in ``jax.vmap`` to run a batch (see
-# ``catan_engine.env``).
 
 
 class ActionType(IntEnum):
@@ -1271,3 +217,314 @@ def action_available(
         Mask,
         jax.lax.switch(action_type, _AVAIL_BRANCHES, layout, state, params),
     )
+
+
+# ===========================================================================
+# Flat action table: one enumerated index per concrete move.
+#
+# A single flat enumeration of every concrete action (each vertex/edge/tile/
+# resource choice plus the parameterless moves), decoded to the engine's
+# ``(ActionType, ActionParams)``. DISCARD collapses to one entry whose
+# per-resource amounts are filled in canonically per lane. This is the table
+# behind both :meth:`BatchedCatanEnv.random_actions` and the single-game AEC
+# wrapper's flat ``Discrete`` action space (see ``env/aec.py``).
+# ===========================================================================
+def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Flat action index -> (ActionType, primary index, secondary target).
+
+    Returns the three lookup arrays plus the flat index of the single DISCARD
+    action (whose resource amounts are computed on the fly).
+    """
+    atype: list[int] = []
+    idx: list[int] = []
+    target: list[int] = []
+
+    def add(t: ActionType, i: int = 0, tg: int = 0) -> None:
+        atype.append(int(t))
+        idx.append(i)
+        target.append(tg)
+
+    for v in range(N_VERTICES):
+        add(ActionType.SETUP_SETTLEMENT, v)
+    for e in range(N_EDGES):
+        add(ActionType.SETUP_ROAD, e)
+    add(ActionType.ROLL_DICE)
+    discard_flat = len(atype)
+    add(ActionType.DISCARD)
+    for t in range(N_TILES):
+        for victim in range(-1, N_PLAYERS):
+            add(ActionType.MOVE_ROBBER, t, victim)
+    for e in range(N_EDGES):
+        add(ActionType.BUILD_ROAD, e)
+    for v in range(N_VERTICES):
+        add(ActionType.BUILD_SETTLEMENT, v)
+    for v in range(N_VERTICES):
+        add(ActionType.BUILD_CITY, v)
+    add(ActionType.BUY_DEVELOPMENT_CARD)
+    for t in range(N_TILES):
+        for victim in range(-1, N_PLAYERS):
+            add(ActionType.PLAY_KNIGHT, t, victim)
+    add(ActionType.PLAY_ROAD_BUILDING)
+    for a in range(N_RESOURCES):
+        for b in range(N_RESOURCES):
+            add(ActionType.PLAY_YEAR_OF_PLENTY, a, b)
+    for r in range(N_RESOURCES):
+        add(ActionType.PLAY_MONOPOLY, r)
+    for g in range(N_RESOURCES):
+        for r in range(N_RESOURCES):
+            add(ActionType.MARITIME_TRADE, g, r)
+    add(ActionType.END_TURN)
+
+    return (
+        np.asarray(atype, dtype=np.int32),
+        np.asarray(idx, dtype=np.int32),
+        np.asarray(target, dtype=np.int32),
+        discard_flat,
+    )
+
+
+_ATYPE, _IDX, _TARGET, _DISCARD_FLAT = _build_action_table()
+_N_FLAT = int(_ATYPE.shape[0])
+# Device-side copies for the batched random-action sweep.
+_ATYPE_J = jnp.asarray(_ATYPE)
+_IDX_J = jnp.asarray(_IDX)
+_TARGET_J = jnp.asarray(_TARGET)
+
+
+def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
+    """A valid discard of ``owed`` cards, taken greedily in resource order."""
+    out = np.zeros(N_RESOURCES, dtype=np.int32)
+    remaining = owed
+    for r in range(N_RESOURCES):
+        take = min(int(hand[r]), remaining)
+        out[r] = take
+        remaining -= take
+    return out
+
+
+# ===========================================================================
+# Switch-free flat legality sweep.
+#
+# ``action_available`` dispatches the 15 action types with ``jax.lax.switch``.
+# ``vmap``-ing it over the whole flat table (whose action type *varies* per
+# entry) forces XLA to evaluate *every* branch for *every* entry -- a ~15x
+# blow-up, worse once the expensive cores (Longest Road, placement scatters)
+# are counted. Because the flat table is *static* we instead call each action's
+# legality core *directly* over its own slice of the table, board closed over,
+# and stitch the results back in table order: same mask, no switch.
+# ===========================================================================
+def _flat_positions(t: ActionType) -> np.ndarray:
+    """Flat-table row indices belonging to action type ``t`` (static)."""
+    return np.where(_ATYPE == int(t))[0]
+
+
+# (core, flat rows, primary index per row) for the single-index actions.
+_INDEX_AVAIL: tuple[tuple[IndexAvail, jax.Array, jax.Array], ...] = tuple(
+    (core, jnp.asarray(p), jnp.asarray(_IDX[p]))
+    for core, p in (
+        (_setup_settlement_avail, _flat_positions(ActionType.SETUP_SETTLEMENT)),
+        (_setup_road_avail, _flat_positions(ActionType.SETUP_ROAD)),
+        (_build_road_avail, _flat_positions(ActionType.BUILD_ROAD)),
+        (_build_settlement_avail, _flat_positions(ActionType.BUILD_SETTLEMENT)),
+        (_build_city_avail, _flat_positions(ActionType.BUILD_CITY)),
+        (_monopoly_avail, _flat_positions(ActionType.PLAY_MONOPOLY)),
+    )
+)
+
+# (core, flat rows, primary, secondary) for the (idx, target) pair actions.
+_PAIR_AVAIL: tuple[tuple[PairAvail, jax.Array, jax.Array, jax.Array], ...] = tuple(
+    (core, jnp.asarray(p), jnp.asarray(_IDX[p]), jnp.asarray(_TARGET[p]))
+    for core, p in (
+        (_move_robber_avail, _flat_positions(ActionType.MOVE_ROBBER)),
+        (_knight_avail, _flat_positions(ActionType.PLAY_KNIGHT)),
+        (_yop_avail, _flat_positions(ActionType.PLAY_YEAR_OF_PLENTY)),
+        (_maritime_avail, _flat_positions(ActionType.MARITIME_TRADE)),
+    )
+)
+
+# (core, single flat row) for the parameterless actions.
+_NONE_AVAIL: tuple[tuple[NoneAvail, int], ...] = tuple(
+    (core, int(_flat_positions(t)[0]))
+    for core, t in (
+        (_roll_avail, ActionType.ROLL_DICE),
+        (_buy_dev_avail, ActionType.BUY_DEVELOPMENT_CARD),
+        (_road_building_avail, ActionType.PLAY_ROAD_BUILDING),
+        (_end_turn_avail, ActionType.END_TURN),
+    )
+)
+
+
+def _sweep_index(
+    core: IndexAvail, layout: BoardLayout, state: BoardState, idxs: jax.Array
+) -> jax.Array:
+    """Map a single-index legality core over ``idxs`` (board closed over)."""
+    return jax.vmap(lambda i: core(layout, state, i))(idxs)
+
+
+def _sweep_pair(
+    core: PairAvail,
+    layout: BoardLayout,
+    state: BoardState,
+    idxs: jax.Array,
+    tgts: jax.Array,
+) -> jax.Array:
+    """Map a ``(primary, secondary)`` legality core over ``idxs``/``tgts``."""
+    return jax.vmap(lambda i, tg: core(layout, state, (i, tg)))(idxs, tgts)
+
+
+def _acting_discard(state: BoardState, sel: jax.Array) -> jax.Array:
+    """The acting player's canonical greedy discard ``(R,)`` (zeros if not owed).
+
+    Computed in int32 (not the uint8 the resource arrays are stored in): the
+    intermediate ``owed - exclusive_prefix`` is signed, so uint8 would wrap, and
+    the result feeds ``_discard_avail`` whose ``resources`` param is signed.
+    """
+    hand = state.player_resources[sel].astype(jnp.int32)
+    owed = state.pending_discard[sel].astype(jnp.int32)
+    return jnp.clip(owed - (jnp.cumsum(hand) - hand), 0, hand)
+
+
+def _flat_available_single(
+    layout: BoardLayout, state: BoardState, sel: jax.Array, discard: jax.Array
+) -> jax.Array:
+    """``(N_FLAT,)`` legality of every flat action for one game -- switch-free.
+
+    Each action type's legality core is ``vmap``-ed over its own slice of the
+    flat table (board closed over, not replicated) and scattered back into the
+    flat mask, reproducing :func:`action_available` over the table without the
+    ``lax.switch`` branch blow-up. ``sel`` is the acting player and ``discard``
+    its canonical discard (for the single DISCARD entry).
+    """
+    out = jnp.zeros(_N_FLAT, dtype=bool)
+    for core, pos, idxs in _INDEX_AVAIL:
+        out = out.at[pos].set(_sweep_index(core, layout, state, idxs))
+    for pair_core, pos, idxs, tgts in _PAIR_AVAIL:
+        out = out.at[pos].set(_sweep_pair(pair_core, layout, state, idxs, tgts))
+    for none_core, p in _NONE_AVAIL:
+        out = out.at[p].set(none_core(layout, state, None))
+    return out.at[_DISCARD_FLAT].set(_discard_avail(layout, state, (sel, discard)))
+
+
+def _flat_available_for(layout: BoardLayout, state: BoardState) -> jax.Array:
+    """``(N_FLAT,)`` flat legality for one game's acting player (``sel`` derived)."""
+    sel = agent_selection_single(state)
+    return _flat_available_single(layout, state, sel, _acting_discard(state, sel))
+
+
+_flat_available_b = jax.jit(jax.vmap(_flat_available_for))
+"""``(B, N_FLAT)`` flat legality per lane for its acting player (switch-free)."""
+
+
+# ===========================================================================
+# Per-action-type and per-index legality enumerations.
+#
+# Coarser views over the same cores: ``_action_type_mask_b`` reduces each action
+# type to a single "is any concrete move of this type legal" flag (the env's
+# ``action_mask``); ``_INDEX_MASKS`` sweeps an index-parameterized action's whole
+# primary domain (the env's ``available_indices``).
+# ===========================================================================
+
+# Static parameter domains for the legality sweeps.
+_VERTEX_DOM = jnp.arange(N_VERTICES, dtype=jnp.int32)
+_EDGE_DOM = jnp.arange(N_EDGES, dtype=jnp.int32)
+_TILE_DOM = jnp.arange(N_TILES, dtype=jnp.int32)
+_RES_DOM = jnp.arange(N_RESOURCES, dtype=jnp.int32)
+_VICTIM_DOM = jnp.arange(-1, N_PLAYERS, dtype=jnp.int32)  # -1 = steal from no one
+
+
+def _action_type_mask_single(layout: BoardLayout, state: BoardState) -> jax.Array:
+    """Per-action-type legality for the acting player in one game (any params)."""
+
+    def any_idx(avail: IndexAvail, dom: jax.Array) -> jax.Array:
+        return jnp.any(jax.vmap(lambda i: avail(layout, state, i))(dom))
+
+    def any_robber(avail: PairAvail) -> jax.Array:
+        # Legal if some (tile, victim) pair -- including victim == -1 -- is valid.
+        return jnp.any(
+            jax.vmap(
+                lambda t: jnp.any(
+                    jax.vmap(lambda v: avail(layout, state, (t, v)))(_VICTIM_DOM)
+                )
+            )(_TILE_DOM)
+        )
+
+    def any_two_res(avail: PairAvail) -> jax.Array:
+        return jnp.any(
+            jax.vmap(
+                lambda a: jnp.any(
+                    jax.vmap(lambda b: avail(layout, state, (a, b)))(_RES_DOM)
+                )
+            )(_RES_DOM)
+        )
+
+    # Discard enumerates a resource vector; reduce to its precondition instead.
+    discard = (state.phase == jnp.uint8(GamePhase.DISCARD)) & jnp.any(
+        state.pending_discard > 0
+    )
+
+    flags = [
+        any_idx(_setup_settlement_avail, _VERTEX_DOM),
+        any_idx(_setup_road_avail, _EDGE_DOM),
+        _roll_avail(layout, state, None),
+        discard,
+        any_robber(_move_robber_avail),
+        any_idx(_build_road_avail, _EDGE_DOM),
+        any_idx(_build_settlement_avail, _VERTEX_DOM),
+        any_idx(_build_city_avail, _VERTEX_DOM),
+        _buy_dev_avail(layout, state, None),
+        any_robber(_knight_avail),
+        _road_building_avail(layout, state, None),
+        any_two_res(_yop_avail),
+        any_idx(_monopoly_avail, _RES_DOM),
+        any_two_res(_maritime_avail),
+        _end_turn_avail(layout, state, None),
+    ]
+    return jnp.stack(flags)  # (N_ACTION_TYPES,) bool, in ActionType order
+
+
+_action_type_mask_b = jax.jit(jax.vmap(_action_type_mask_single))
+
+
+_BatchedMask = Callable[[BoardLayout, BoardState], jax.Array]
+
+
+def _index_mask_factory(avail: IndexAvail, n: int) -> _BatchedMask:
+    """Batched ``(B, n)`` legality sweep over a single index parameter."""
+    dom = jnp.arange(n, dtype=jnp.int32)
+
+    def single(layout: BoardLayout, state: BoardState) -> jax.Array:
+        return jax.vmap(lambda i: avail(layout, state, i))(dom)
+
+    return cast(_BatchedMask, jax.jit(jax.vmap(single)))
+
+
+def _robber_tile_mask_factory(avail: PairAvail) -> _BatchedMask:
+    """Batched ``(B, N_TILES)`` mask: a tile is legal if some victim choice works."""
+
+    def single(layout: BoardLayout, state: BoardState) -> jax.Array:
+        return jax.vmap(
+            lambda t: jnp.any(
+                jax.vmap(lambda v: avail(layout, state, (t, v)))(_VICTIM_DOM)
+            )
+        )(_TILE_DOM)
+
+    return cast(_BatchedMask, jax.jit(jax.vmap(single)))
+
+
+# ActionType -> batched legality sweep over that action's primary index domain.
+# (Multi-parameter / parameterless actions are absent; use ``action_mask`` /
+# ``available`` for those.)
+_INDEX_MASKS = {
+    ActionType.SETUP_SETTLEMENT: _index_mask_factory(
+        _setup_settlement_avail, N_VERTICES
+    ),
+    ActionType.SETUP_ROAD: _index_mask_factory(_setup_road_avail, N_EDGES),
+    ActionType.BUILD_ROAD: _index_mask_factory(_build_road_avail, N_EDGES),
+    ActionType.BUILD_SETTLEMENT: _index_mask_factory(
+        _build_settlement_avail, N_VERTICES
+    ),
+    ActionType.BUILD_CITY: _index_mask_factory(_build_city_avail, N_VERTICES),
+    ActionType.PLAY_MONOPOLY: _index_mask_factory(_monopoly_avail, N_RESOURCES),
+    ActionType.MOVE_ROBBER: _robber_tile_mask_factory(_move_robber_avail),
+    ActionType.PLAY_KNIGHT: _robber_tile_mask_factory(_knight_avail),
+}

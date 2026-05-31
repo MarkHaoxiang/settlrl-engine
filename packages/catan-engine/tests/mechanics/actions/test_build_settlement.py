@@ -6,7 +6,8 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, BuildSettlement
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.placement import build_settlement_step
 from catan_engine.board import (
     Board,
     give,
@@ -29,7 +30,7 @@ def test_success(
     settlement_board: tuple[Board, int], render: Callable[..., str]
 ) -> None:
     board, vertex = settlement_board
-    state, result = BuildSettlement()(board, jnp.array([vertex]))
+    state, result = build_settlement_step(board, jnp.array([vertex]))
     assert_expected_inline(
         fmt(
             result,
@@ -99,7 +100,7 @@ def test_invalid_not_connected(settlement_board: tuple[Board, int]) -> None:
     # A distant empty vertex with no adjacent road is not connected.
     board, _ = settlement_board
     lonely = 40
-    _, result = BuildSettlement()(board, jnp.array([lonely]))
+    _, result = build_settlement_step(board, jnp.array([lonely]))
     assert int(result[0]) == ActionResult.INVALID.value
 
 
@@ -108,7 +109,7 @@ def test_win_crossing_ten_vp() -> None:
     # the new settlement's +1 building VP crosses to 10.
     board, vertex = settlement_fixture()
     board = give_dev_card(board, 0, DevCard.VICTORY_POINT, 8)
-    state, result = BuildSettlement()(board, jnp.array([vertex]))
+    state, result = build_settlement_step(board, jnp.array([vertex]))
     assert int(result[0]) == ActionResult.GAME_COMPLETE.value
     assert int(state.victory_points[0, 0]) == 2  # two on-board settlements
 
@@ -142,5 +143,5 @@ def test_invalid_settlement_stock_exhausted() -> None:
     board = place_road(board, 0, e0)
     board = place_road(board, 0, e1)
     board = give(board, 0, [1, 1, 1, 1, 0])  # one settlement's worth
-    _, result = BuildSettlement()(board, jnp.array([x]))
+    _, result = build_settlement_step(board, jnp.array([x]))
     assert int(result[0]) == ActionResult.INVALID.value

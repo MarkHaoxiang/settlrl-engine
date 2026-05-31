@@ -6,7 +6,8 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, BuildCity
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.placement import build_city_step
 from catan_engine.board import (
     Board,
     give,
@@ -22,7 +23,7 @@ from tests.mechanics.actions.fixtures import fmt, independent_vertices
 
 def test_success(city_board: tuple[Board, int], render: Callable[..., str]) -> None:
     board, vertex = city_board
-    state, result = BuildCity()(board, jnp.array([vertex]))
+    state, result = build_city_step(board, jnp.array([vertex]))
     assert_expected_inline(
         fmt(
             result,
@@ -93,7 +94,7 @@ def test_invalid_no_own_settlement(city_board: tuple[Board, int]) -> None:
     board, _ = city_board
     lonely = 40
     before = np.asarray(board[1].vertex_type)
-    state, result = BuildCity()(board, jnp.array([lonely]))
+    state, result = build_city_step(board, jnp.array([lonely]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.vertex_type), before)
 
@@ -103,7 +104,7 @@ def test_win_crossing_ten_vp(city_board: tuple[Board, int]) -> None:
     # upgrade's +1 building VP crosses to 10.
     board, vertex = city_board
     board = give_dev_card(board, 0, DevCard.VICTORY_POINT, 8)
-    state, result = BuildCity()(board, jnp.array([vertex]))
+    state, result = build_city_step(board, jnp.array([vertex]))
     assert int(result[0]) == ActionResult.GAME_COMPLETE.value
     assert int(state.victory_points[0, 0]) == 2  # settlement(1) + city upgrade(+1)
 
@@ -117,5 +118,5 @@ def test_invalid_city_stock_exhausted() -> None:
         board = place_city(board, 0, v)
     board = place_settlement(board, 0, sites[4])
     board = give(board, 0, [0, 2, 0, 0, 3])  # one city's worth
-    _, result = BuildCity()(board, jnp.array([sites[4]]))
+    _, result = build_city_step(board, jnp.array([sites[4]]))
     assert int(result[0]) == ActionResult.INVALID.value

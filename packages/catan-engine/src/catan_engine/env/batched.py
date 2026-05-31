@@ -38,37 +38,33 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-from collections.abc import Callable
 from typing import cast
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 from catan_engine.mechanics.action import (
     ActionParams,
     ActionResult,
     ActionType,
-    ActionTypeArray,
-    Mask,
     N_ACTION_TYPES,
-    ResultCode,
-    _build_city_avail,
-    _build_road_avail,
-    _build_settlement_avail,
-    _buy_dev_avail,
-    _end_turn_avail,
-    _knight_avail,
-    _maritime_avail,
-    _monopoly_avail,
-    _move_robber_avail,
-    _road_building_avail,
-    _roll_avail,
-    _setup_road_avail,
-    _setup_settlement_avail,
-    _yop_avail,
+    _ATYPE_J,
+    _DISCARD_FLAT,
+    _IDX_J,
+    _INDEX_MASKS,
+    _N_FLAT,
+    _TARGET_J,
+    _acting_discard,
+    _action_type_mask_b,
+    _flat_available_single,
     action_available,
     apply_action,
+)
+from catan_engine.mechanics.common import (
+    ActionTypeArray,
+    Mask,
+    ResultCode,
+    agent_selection_single,
     player_total_vp,
 )
 from catan_engine.board import Board
@@ -133,13 +129,6 @@ def available(board: Board, action_type: ActionTypeArray, params: ActionParams) 
 # ---------------------------------------------------------------------------
 Observation = dict[str, jax.Array]
 
-# Static parameter domains for the legality sweeps.
-_VERTEX_DOM = jnp.arange(N_VERTICES, dtype=jnp.int32)
-_EDGE_DOM = jnp.arange(N_EDGES, dtype=jnp.int32)
-_TILE_DOM = jnp.arange(N_TILES, dtype=jnp.int32)
-_RES_DOM = jnp.arange(N_RESOURCES, dtype=jnp.int32)
-_VICTIM_DOM = jnp.arange(-1, N_PLAYERS, dtype=jnp.int32)  # -1 = steal from no one
-
 
 def _total_vp_single(state: BoardState) -> jax.Array:
     """Total VP (buildings + awards + VP cards) for every player in one game."""
@@ -150,228 +139,49 @@ def _total_vp_single(state: BoardState) -> jax.Array:
 _total_vp_b = jax.jit(jax.vmap(_total_vp_single))
 
 
-def _agent_selection_single(state: BoardState) -> jax.Array:
-    """Acting player for one game: the discarder during DISCARD, else current."""
-    owes = state.pending_discard > 0
-    discarder = jnp.argmax(owes).astype(jnp.int32)
-    in_discard = state.phase == jnp.uint8(GamePhase.DISCARD)
-    return jnp.where(in_discard, discarder, state.current_player.astype(jnp.int32))
+_agent_selection_b = jax.jit(jax.vmap(agent_selection_single))
 
 
-_agent_selection_b = jax.jit(jax.vmap(_agent_selection_single))
+def _random_action_single(
+    layout: BoardLayout, state: BoardState, key: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Sample a uniformly-random *legal* flat action for one game.
 
+    The single-game core behind :meth:`BatchedCatanEnv.random_actions`: takes
+    the switch-free flat legality mask (:func:`_flat_available_single`) and the
+    argmax of uniform noise over its legal entries. Returns the chosen action's
+    ``(action_type, idx, target, resources)``.
+    """
+    sel = agent_selection_single(state)  # acting player this lane
+    discard = _acting_discard(state, sel)  # (R,) -- DISCARD entry amounts
+    mask = _flat_available_single(layout, state, sel, discard)  # (N_FLAT,)
 
-# Single-game legality cores by parameter shape (see action.py).
-_IndexAvail = Callable[[BoardLayout, BoardState, jax.Array], jax.Array]
-_PairAvail = Callable[[BoardLayout, BoardState, tuple[jax.Array, jax.Array]], jax.Array]
-
-
-def _action_type_mask_single(layout: BoardLayout, state: BoardState) -> jax.Array:
-    """Per-action-type legality for the acting player in one game (any params)."""
-
-    def any_idx(avail: _IndexAvail, dom: jax.Array) -> jax.Array:
-        return jnp.any(jax.vmap(lambda i: avail(layout, state, i))(dom))
-
-    def any_robber(avail: _PairAvail) -> jax.Array:
-        # Legal if some (tile, victim) pair -- including victim == -1 -- is valid.
-        return jnp.any(
-            jax.vmap(
-                lambda t: jnp.any(
-                    jax.vmap(lambda v: avail(layout, state, (t, v)))(_VICTIM_DOM)
-                )
-            )(_TILE_DOM)
-        )
-
-    def any_two_res(avail: _PairAvail) -> jax.Array:
-        return jnp.any(
-            jax.vmap(
-                lambda a: jnp.any(
-                    jax.vmap(lambda b: avail(layout, state, (a, b)))(_RES_DOM)
-                )
-            )(_RES_DOM)
-        )
-
-    # Discard enumerates a resource vector; reduce to its precondition instead.
-    discard = (state.phase == jnp.uint8(GamePhase.DISCARD)) & jnp.any(
-        state.pending_discard > 0
+    # Flat params are state-independent except DISCARD, whose player / amounts
+    # depend on the acting lane -- override that single column.
+    idx = _IDX_J.at[_DISCARD_FLAT].set(sel)  # (N_FLAT,)
+    resources = (
+        jnp.zeros((_N_FLAT, N_RESOURCES), jnp.int32).at[_DISCARD_FLAT].set(discard)
     )
 
-    flags = [
-        any_idx(_setup_settlement_avail, _VERTEX_DOM),
-        any_idx(_setup_road_avail, _EDGE_DOM),
-        _roll_avail(layout, state, None),
-        discard,
-        any_robber(_move_robber_avail),
-        any_idx(_build_road_avail, _EDGE_DOM),
-        any_idx(_build_settlement_avail, _VERTEX_DOM),
-        any_idx(_build_city_avail, _VERTEX_DOM),
-        _buy_dev_avail(layout, state, None),
-        any_robber(_knight_avail),
-        _road_building_avail(layout, state, None),
-        any_two_res(_yop_avail),
-        any_idx(_monopoly_avail, _RES_DOM),
-        any_two_res(_maritime_avail),
-        _end_turn_avail(layout, state, None),
-    ]
-    return jnp.stack(flags)  # (N_ACTION_TYPES,) bool, in ActionType order
+    # Random legal action: score legal moves with uniform noise and take the
+    # argmax (illegal scored -1, so only picked if the lane has no legal move).
+    noise = jax.random.uniform(key, (_N_FLAT,))
+    chosen = jnp.argmax(jnp.where(mask, noise, -1.0))
+    return _ATYPE_J[chosen], idx[chosen], _TARGET_J[chosen], resources[chosen]
 
 
-_action_type_mask_b = jax.jit(jax.vmap(_action_type_mask_single))
+@jax.jit
+def _random_actions_b(
+    layout: BoardLayout, state: BoardState, key: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Sample a random legal action per lane: ``(action_type, idx, target, resources)``.
 
-
-_BatchedMask = Callable[[BoardLayout, BoardState], jax.Array]
-
-
-def _index_mask_factory(avail: _IndexAvail, n: int) -> _BatchedMask:
-    """Batched ``(B, n)`` legality sweep over a single index parameter."""
-    dom = jnp.arange(n, dtype=jnp.int32)
-
-    def single(layout: BoardLayout, state: BoardState) -> jax.Array:
-        return jax.vmap(lambda i: avail(layout, state, i))(dom)
-
-    return cast(_BatchedMask, jax.jit(jax.vmap(single)))
-
-
-def _robber_tile_mask_factory(avail: _PairAvail) -> _BatchedMask:
-    """Batched ``(B, N_TILES)`` mask: a tile is legal if some victim choice works."""
-
-    def single(layout: BoardLayout, state: BoardState) -> jax.Array:
-        return jax.vmap(
-            lambda t: jnp.any(
-                jax.vmap(lambda v: avail(layout, state, (t, v)))(_VICTIM_DOM)
-            )
-        )(_TILE_DOM)
-
-    return cast(_BatchedMask, jax.jit(jax.vmap(single)))
-
-
-# ActionType -> batched legality sweep over that action's primary index domain.
-# (Multi-parameter / parameterless actions are absent; use ``action_mask`` /
-# ``available`` for those.)
-_INDEX_MASKS = {
-    ActionType.SETUP_SETTLEMENT: _index_mask_factory(
-        _setup_settlement_avail, N_VERTICES
-    ),
-    ActionType.SETUP_ROAD: _index_mask_factory(_setup_road_avail, N_EDGES),
-    ActionType.BUILD_ROAD: _index_mask_factory(_build_road_avail, N_EDGES),
-    ActionType.BUILD_SETTLEMENT: _index_mask_factory(
-        _build_settlement_avail, N_VERTICES
-    ),
-    ActionType.BUILD_CITY: _index_mask_factory(_build_city_avail, N_VERTICES),
-    ActionType.PLAY_MONOPOLY: _index_mask_factory(_monopoly_avail, N_RESOURCES),
-    ActionType.MOVE_ROBBER: _robber_tile_mask_factory(_move_robber_avail),
-    ActionType.PLAY_KNIGHT: _robber_tile_mask_factory(_knight_avail),
-}
-
-
-# ---------------------------------------------------------------------------
-# Flat action table: one enumerated index per concrete move.
-#
-# A single flat enumeration of every concrete action (each vertex/edge/tile/
-# resource choice plus the parameterless moves), decoded to the engine's
-# ``(ActionType, ActionParams)``. DISCARD collapses to one entry whose
-# per-resource amounts are filled in canonically per lane. This is the table
-# behind both :meth:`BatchedCatanEnv.random_actions` and the single-game AEC
-# wrapper's flat ``Discrete`` action space (see ``env/aec.py``).
-# ---------------------------------------------------------------------------
-def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
-    """Flat action index -> (ActionType, primary index, secondary target).
-
-    Returns the three lookup arrays plus the flat index of the single DISCARD
-    action (whose resource amounts are computed on the fly).
+    Splits ``key`` per lane *inside* the trace (so the split fuses into the XLA
+    graph rather than dispatching eagerly every step) and maps
+    :func:`_random_action_single` over the batch.
     """
-    atype: list[int] = []
-    idx: list[int] = []
-    target: list[int] = []
-
-    def add(t: ActionType, i: int = 0, tg: int = 0) -> None:
-        atype.append(int(t))
-        idx.append(i)
-        target.append(tg)
-
-    for v in range(N_VERTICES):
-        add(ActionType.SETUP_SETTLEMENT, v)
-    for e in range(N_EDGES):
-        add(ActionType.SETUP_ROAD, e)
-    add(ActionType.ROLL_DICE)
-    discard_flat = len(atype)
-    add(ActionType.DISCARD)
-    for t in range(N_TILES):
-        for victim in range(-1, N_PLAYERS):
-            add(ActionType.MOVE_ROBBER, t, victim)
-    for e in range(N_EDGES):
-        add(ActionType.BUILD_ROAD, e)
-    for v in range(N_VERTICES):
-        add(ActionType.BUILD_SETTLEMENT, v)
-    for v in range(N_VERTICES):
-        add(ActionType.BUILD_CITY, v)
-    add(ActionType.BUY_DEVELOPMENT_CARD)
-    for t in range(N_TILES):
-        for victim in range(-1, N_PLAYERS):
-            add(ActionType.PLAY_KNIGHT, t, victim)
-    add(ActionType.PLAY_ROAD_BUILDING)
-    for a in range(N_RESOURCES):
-        for b in range(N_RESOURCES):
-            add(ActionType.PLAY_YEAR_OF_PLENTY, a, b)
-    for r in range(N_RESOURCES):
-        add(ActionType.PLAY_MONOPOLY, r)
-    for g in range(N_RESOURCES):
-        for r in range(N_RESOURCES):
-            add(ActionType.MARITIME_TRADE, g, r)
-    add(ActionType.END_TURN)
-
-    return (
-        np.asarray(atype, dtype=np.int32),
-        np.asarray(idx, dtype=np.int32),
-        np.asarray(target, dtype=np.int32),
-        discard_flat,
-    )
-
-
-_ATYPE, _IDX, _TARGET, _DISCARD_FLAT = _build_action_table()
-_N_FLAT = int(_ATYPE.shape[0])
-# Device-side copies for the batched random-action sweep.
-_ATYPE_J = jnp.asarray(_ATYPE)
-_IDX_J = jnp.asarray(_IDX)
-_TARGET_J = jnp.asarray(_TARGET)
-
-
-def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
-    """A valid discard of ``owed`` cards, taken greedily in resource order."""
-    out = np.zeros(N_RESOURCES, dtype=np.int32)
-    remaining = owed
-    for r in range(N_RESOURCES):
-        take = min(int(hand[r]), remaining)
-        out[r] = take
-        remaining -= take
-    return out
-
-
-def _canonical_discard_b(hands: jax.Array, owed: jax.Array) -> jax.Array:
-    """Batched canonical discard: ``(B, R)`` hands, ``(B,)`` owed -> ``(B, R)`` takes.
-
-    The vectorised form of :func:`_canonical_discard` -- greedily take in resource
-    order until ``owed`` is met: resource ``r`` contributes ``owed`` minus all it
-    already covered (the prefix sum), clamped to ``[0, hand[r]]``.
-    """
-    prev = jnp.cumsum(hands, axis=1) - hands  # cards covered by earlier resources
-    return jnp.clip(owed[:, None] - prev, 0, hands)
-
-
-def _repeat_lanes(board: Board, repeats: int) -> Board:
-    """Repeat each lane ``repeats`` times along the batch axis (B -> B * repeats)."""
-    layout, state = board
-    layout_r = BoardLayout(*(jnp.repeat(x, repeats, axis=0) for x in layout))
-    fields: dict[str, jax.Array] = {}
-    for name in state._fields:
-        v = getattr(state, name)
-        if name == "key":
-            fields[name] = jax.random.wrap_key_data(
-                jnp.repeat(jax.random.key_data(v), repeats, axis=0)
-            )
-        else:
-            fields[name] = jnp.repeat(v, repeats, axis=0)
-    return layout_r, BoardState(**fields)
+    keys = jax.random.split(key, state.phase.shape[0])
+    return jax.vmap(_random_action_single, in_axes=(0, 0, 0))(layout, state, keys)
 
 
 # ---------------------------------------------------------------------------
@@ -400,9 +210,6 @@ Space = Discrete | Box
 # ---------------------------------------------------------------------------
 # The batched AEC environment.
 # ---------------------------------------------------------------------------
-_BATCH = jnp.int32  # dtype alias for readability
-
-
 class BatchedCatanEnv:
     """A batch of Catan games behind a (batched) PettingZoo-AEC interface.
 
@@ -632,50 +439,17 @@ class BatchedCatanEnv:
     ) -> tuple[ActionTypeArray, ActionParams]:
         """A uniformly-random *legal* action per lane (the random-rollout driver).
 
-        Evaluates the whole flat action table against every lane with one batched
-        :func:`available` sweep, then samples one legal action per lane. A lane
-        with no legal action yields an INVALID action and simply stalls until its
-        next auto-reset. ``key`` is a JAX PRNG key for the per-lane choice.
-
-        Intended for random play / smoke tests, not throughput-critical paths --
-        the sweep evaluates every flat action against every lane.
+        Sweeps the whole flat action table against every lane -- one
+        ``jit(vmap(...))`` over :func:`_random_action_single`, which evaluates
+        the table against each lane's own board (closed over, not replicated) --
+        then samples one legal action per lane. A lane with no legal action
+        yields an INVALID action and simply stalls until its next auto-reset.
+        ``key`` is a JAX PRNG key, split per lane for the choice.
         """
-        layout, state = self.board
-        B = self.batch_size
-        rows = jnp.arange(B)
-        sel = self.agent_selection  # (B,) acting player per lane
-
-        # Flat params are state-independent except DISCARD, whose player / amounts
-        # depend on the acting lane -- override that single column per lane.
-        hands = state.player_resources[rows, sel]  # (B, R)
-        owed = state.pending_discard[rows, sel]  # (B,)
-        discard = _canonical_discard_b(hands, owed)  # (B, R)
-        idx = jnp.broadcast_to(_IDX_J, (B, _N_FLAT)).at[:, _DISCARD_FLAT].set(sel)
-        target = jnp.broadcast_to(_TARGET_J, (B, _N_FLAT))
-        resources = (
-            jnp.zeros((B, _N_FLAT, N_RESOURCES), jnp.int32)
-            .at[:, _DISCARD_FLAT, :]
-            .set(discard)
+        atype, idx, target, resources = _random_actions_b(
+            self._layout, self._state, key
         )
-
-        rep = _repeat_lanes((layout, state), _N_FLAT)
-        atype_flat = jnp.broadcast_to(_ATYPE_J, (B, _N_FLAT)).reshape(-1)
-        params_flat = ActionParams(
-            idx=idx.reshape(-1),
-            target=target.reshape(-1),
-            resources=resources.reshape(B * _N_FLAT, N_RESOURCES),
-        )
-        mask = available(rep, atype_flat, params_flat).reshape(B, _N_FLAT)
-
-        # Random legal action per lane: score legal moves with uniform noise and
-        # take the argmax (illegal scored -1, so only picked if a lane has none).
-        noise = jax.random.uniform(key, (B, _N_FLAT))
-        chosen = jnp.argmax(jnp.where(mask, noise, -1.0), axis=1)  # (B,)
-        return _ATYPE_J[chosen], ActionParams(
-            idx=idx[rows, chosen],
-            target=target[rows, chosen],
-            resources=resources[rows, chosen],
-        )
+        return atype, ActionParams(idx=idx, target=target, resources=resources)
 
     # -- Internals --------------------------------------------------------
 

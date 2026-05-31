@@ -7,13 +7,10 @@ import numpy as np
 import pytest
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import (
-    ActionResult,
-    MoveRobber,
-    PlayKnight,
-    TwoIndexParams,
-    VecAction,
-)
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.common import ResultCode, TwoIndexParams
+from catan_engine.mechanics.development import play_knight_step
+from catan_engine.mechanics.robber import move_robber_step
 from catan_engine.board import (
     Board,
     give,
@@ -26,10 +23,13 @@ from catan_engine.board import (
 )
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import TILE_V
-from catan_engine.board.state import GamePhase
+from catan_engine.board.state import BoardState, GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 _TILE_V = np.asarray(TILE_V)
+
+# A robber-targeting action's batched step: (board, (tile, victim)) -> (state, code).
+RobberStep = Callable[[Board, TwoIndexParams], tuple[BoardState, ResultCode]]
 
 
 def _robber_board() -> Board:
@@ -53,14 +53,14 @@ def _knight_board() -> Board:
 # Both MoveRobber and PlayKnight share robber-targeting params (tile, victim) and
 # the same invalid-target rules; sweep both through the shared cases below.
 _ROBBER_ACTIONS = [
-    pytest.param(MoveRobber(), _robber_board, id="move_robber"),
-    pytest.param(PlayKnight(), _knight_board, id="play_knight"),
+    pytest.param(move_robber_step, _robber_board, id="move_robber"),
+    pytest.param(play_knight_step, _knight_board, id="play_knight"),
 ]
 
 
 def test_success(robber_board: Board, render: Callable[..., str]) -> None:
     # Robber starts on tile 1; move it to tile 0 and steal from player 1.
-    state, result = MoveRobber()(robber_board, (jnp.array([0]), jnp.array([1])))
+    state, result = move_robber_step(robber_board, (jnp.array([0]), jnp.array([1])))
     assert_expected_inline(
         fmt(
             result,
@@ -123,7 +123,7 @@ p1_sheep=0""",
 
 
 @pytest.mark.parametrize("action, build", _ROBBER_ACTIONS)
-def test_no_victim(action: VecAction[TwoIndexParams], build: Callable[[], Board]) -> None:
+def test_no_victim(action: RobberStep, build: Callable[[], Board]) -> None:
     # A tile with no opponent buildings: move the robber, steal from no one.
     board = build()
     # Clear the opponent settlement so no one is robbable on tile 0.
@@ -137,7 +137,7 @@ def test_no_victim(action: VecAction[TwoIndexParams], build: Callable[[], Board]
 
 
 @pytest.mark.parametrize("action, build", _ROBBER_ACTIONS)
-def test_invalid_tile_is_robber(action: VecAction[TwoIndexParams], build: Callable[[], Board]) -> None:
+def test_invalid_tile_is_robber(action: RobberStep, build: Callable[[], Board]) -> None:
     board = set_robber(build(), 0)  # robber already on tile 0
     before = np.asarray(board[1].player_resources)
     state, result = action(board, (jnp.array([0]), jnp.array([1])))
@@ -147,7 +147,7 @@ def test_invalid_tile_is_robber(action: VecAction[TwoIndexParams], build: Callab
 
 @pytest.mark.parametrize("action, build", _ROBBER_ACTIONS)
 def test_invalid_out_of_range_tile(
-    action: VecAction[TwoIndexParams], build: Callable[[], Board]
+    action: RobberStep, build: Callable[[], Board]
 ) -> None:
     board = build()
     before = np.asarray(board[1].player_resources)
@@ -159,6 +159,6 @@ def test_invalid_out_of_range_tile(
 def test_invalid_wrong_phase(robber_board: Board) -> None:
     board = set_phase(robber_board, GamePhase.MAIN)  # not MOVE_ROBBER
     before = np.asarray(board[1].player_resources)
-    state, result = MoveRobber()(board, (jnp.array([0]), jnp.array([1])))
+    state, result = move_robber_step(board, (jnp.array([0]), jnp.array([1])))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)

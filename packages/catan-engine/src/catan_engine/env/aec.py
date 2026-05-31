@@ -31,18 +31,17 @@ import jax.numpy as jnp
 import numpy as np
 from pettingzoo.utils.env import AECEnv
 
-from catan_engine.mechanics.action import ActionParams, ActionType
-from catan_engine.board import replicate
-from catan_engine.env.batched import (
+from catan_engine.mechanics.action import (
     _ATYPE,
-    _DISCARD_FLAT,
     _IDX,
     _N_FLAT,
     _TARGET,
-    BatchedCatanEnv,
+    ActionParams,
+    ActionType,
     _canonical_discard,
-    available,
+    _flat_available_b,
 )
+from catan_engine.env.batched import BatchedCatanEnv
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 
 __all__ = ["CatanAECEnv", "env"]
@@ -178,24 +177,8 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
 
     def _action_mask(self) -> np.ndarray:
         """Binary legality vector over the flat action set for the acting player."""
-        sel = int(self._env.agent_selection[0])
-        state = self._env._state
-        idx = _IDX.copy()
-        resources = np.zeros((_N_FLAT, N_RESOURCES), dtype=np.int32)
-        # The single DISCARD action targets the acting player with a canonical hand.
-        hand = np.asarray(state.player_resources[0, sel])
-        owed = int(np.asarray(state.pending_discard[0, sel]))
-        idx[_DISCARD_FLAT] = sel
-        resources[_DISCARD_FLAT] = _canonical_discard(hand, owed)
-
-        board = replicate((self._env._layout, self._env._state), _N_FLAT)
-        params = ActionParams(
-            idx=jnp.asarray(idx),
-            target=jnp.asarray(_TARGET),
-            resources=jnp.asarray(resources),
-        )
-        mask = available(board, jnp.asarray(_ATYPE), params)
-        return np.asarray(mask).astype(np.int8)
+        mask = _flat_available_b(self._env._layout, self._env._state)  # (1, N_FLAT)
+        return np.asarray(mask[0]).astype(np.int8)
 
     def _apply(self, flat: int) -> None:
         sel = int(self._env.agent_selection[0])

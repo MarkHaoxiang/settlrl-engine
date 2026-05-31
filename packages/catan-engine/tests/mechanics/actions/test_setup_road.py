@@ -6,7 +6,8 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import assert_expected_inline
 
-from catan_engine.mechanics.action import ActionResult, SetupRoad
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.setup import setup_road_step
 from catan_engine.board import Board, place_road, set_phase
 from catan_engine.board.layout import EDGE_V
 from catan_engine.mechanics.setup import N_SETUP
@@ -18,7 +19,7 @@ _E0 = int(np.where((np.asarray(EDGE_V) == 0).any(axis=1))[0][0])
 
 
 def test_success(setup_road_board: Board, render: Callable[..., str]) -> None:
-    state, result = SetupRoad()(setup_road_board, jnp.array([_E0]))
+    state, result = setup_road_step(setup_road_board, jnp.array([_E0]))
     assert_expected_inline(
         fmt(
             result,
@@ -83,7 +84,7 @@ current_player=1""",
 def test_setup_complete(setup_road_board: Board) -> None:
     layout, st = setup_road_board
     st = st._replace(setup_index=st.setup_index.at[0].set(N_SETUP - 1))
-    state, result = SetupRoad()((layout, st), jnp.array([_E0]))
+    state, result = setup_road_step((layout, st), jnp.array([_E0]))
     assert int(result[0]) == ActionResult.SUCCESS.value
     assert int(state.setup_index[0]) == N_SETUP
     assert int(state.phase[0]) == GamePhase.ROLL
@@ -93,7 +94,7 @@ def test_setup_complete(setup_road_board: Board) -> None:
 def test_invalid_wrong_phase(setup_road_board: Board) -> None:
     board = set_phase(setup_road_board, GamePhase.ROLL)
     before = np.asarray(board[1].edge_road)
-    state, result = SetupRoad()(board, jnp.array([_E0]))
+    state, result = setup_road_step(board, jnp.array([_E0]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.edge_road), before)
 
@@ -101,7 +102,7 @@ def test_invalid_wrong_phase(setup_road_board: Board) -> None:
 def test_invalid_edge_occupied(setup_road_board: Board) -> None:
     board = place_road(setup_road_board, 0, _E0)
     before = np.asarray(board[1].edge_road)
-    state, result = SetupRoad()(board, jnp.array([_E0]))
+    state, result = setup_road_step(board, jnp.array([_E0]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.edge_road), before)
 
@@ -111,6 +112,6 @@ def test_invalid_does_not_touch_settlement(setup_road_board: Board) -> None:
     edges = np.asarray(EDGE_V)
     far = int(np.where(~(edges == 0).any(axis=1))[0][0])
     before = np.asarray(setup_road_board[1].edge_road)
-    state, result = SetupRoad()(setup_road_board, jnp.array([far]))
+    state, result = setup_road_step(setup_road_board, jnp.array([far]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.edge_road), before)

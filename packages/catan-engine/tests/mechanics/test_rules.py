@@ -1,5 +1,5 @@
 """Equivalence tests: the traceable rule modules (``awards`` / ``dice`` / ``trade``
-and the ``action`` economy helpers) must match the trusted single-game oracle
+and the ``common`` economy helpers) must match the trusted single-game oracle
 (the ``catan-reference`` package, via ``tests.conversion``) across randomized
 boards."""
 
@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import TestCase
 
-from catan_engine.mechanics import action, awards, dice, trade
+from catan_engine.mechanics import awards, common, dice, trade
 from tests import conversion as reference
 from tests.mechanics._occupancy import random_occupancy, single as _single
 from catan_engine.board.layout import (
@@ -127,17 +127,17 @@ class TestProductionAndPorts(TestCase):
 class TestEconomyHelpers(TestCase):
     def test_can_afford(self) -> None:
         assert bool(
-            action.can_afford(
-                jnp.array([1, 1, 1, 1, 0], jnp.uint8), action.SETTLEMENT_COST_ARR
+            common.can_afford(
+                jnp.array([1, 1, 1, 1, 0], jnp.uint8), common.SETTLEMENT_COST_ARR
             )
         )
         assert not bool(
-            action.can_afford(
-                jnp.array([0, 1, 1, 1, 0], jnp.uint8), action.SETTLEMENT_COST_ARR
+            common.can_afford(
+                jnp.array([0, 1, 1, 1, 0], jnp.uint8), common.SETTLEMENT_COST_ARR
             )
         )
 
     def test_pay_clips_at_zero(self) -> None:
         pr = jnp.zeros((N_PLAYERS, N_RESOURCES), jnp.uint8)
-        out = action.pay(pr, jnp.int32(0), action.ROAD_COST_ARR)
+        out = common.pay(pr, jnp.int32(0), common.ROAD_COST_ARR)
         assert np.array_equal(np.asarray(out[0]), np.zeros(N_RESOURCES, np.uint8))
