@@ -40,7 +40,7 @@ from catan_engine.mechanics import (
 )
 from catan_engine.board import Board
 from catan_engine.board.dev_cards import DEV_CARD_COST, DevCard
-from catan_engine.board.layout import EDGE_V, N_EDGES, N_TILES, N_VERTICES, BoardLayout
+from catan_engine.board.layout import N_EDGES, N_TILES, N_VERTICES, BoardLayout
 from catan_engine.board.resources import (
     CITY_COST,
     N_PLAYERS,
@@ -50,9 +50,11 @@ from catan_engine.board.resources import (
     bank_stock,
 )
 from catan_engine.board.state import (
+    CITY,
     MAX_CITIES,
     MAX_ROADS,
     MAX_SETTLEMENTS,
+    SETTLEMENT,
     VICTORY_POINTS_TO_WIN,
     BoardState,
     GamePhase,
@@ -119,13 +121,17 @@ def roads_left(edge_road: jax.Array, player: jax.Array) -> jax.Array:
 def count_settlements(
     vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
 ) -> jax.Array:
-    return jnp.sum((vertex_owner == player + 1) & (vertex_type == 1)).astype(jnp.int32)
+    return jnp.sum((vertex_owner == player + 1) & (vertex_type == SETTLEMENT)).astype(
+        jnp.int32
+    )
 
 
 def count_cities(
     vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
 ) -> jax.Array:
-    return jnp.sum((vertex_owner == player + 1) & (vertex_type == 2)).astype(jnp.int32)
+    return jnp.sum((vertex_owner == player + 1) & (vertex_type == CITY)).astype(
+        jnp.int32
+    )
 
 
 def can_afford(resources_row: jax.Array, cost_arr: jax.Array) -> jax.Array:
@@ -206,14 +212,18 @@ def _build_road_apply(
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
     use_free = state.free_roads > 0
-    new_free = jnp.where(use_free, state.free_roads.astype(jnp.int32) - 1, 0).astype(
-        jnp.uint8
+    new_free = to_u8(
+        jnp.where(
+            use_free,
+            state.free_roads.astype(jnp.int32) - 1,
+            state.free_roads.astype(jnp.int32),
+        )
     )
     paid = pay(state.player_resources, player, ROAD_COST_ARR)
     new_res = jnp.where(use_free, state.player_resources, paid)
     cand = state._replace(
         edge_road=state.edge_road.at[e].set((player + 1).astype(jnp.uint8)),
-        free_roads=jnp.where(use_free, new_free, state.free_roads),
+        free_roads=new_free,
         player_resources=new_res,
     )
     cand = awards.recompute_longest_road(cand)
@@ -271,7 +281,7 @@ def _build_settlement_apply(
             state.player_resources, player, SETTLEMENT_COST_ARR
         ),
         vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
-        vertex_type=state.vertex_type.at[v].set(1),
+        vertex_type=state.vertex_type.at[v].set(SETTLEMENT),
         victory_points=state.victory_points.at[player].add(1),
     )
     cand = awards.recompute_longest_road(cand)
@@ -369,7 +379,7 @@ def _build_city_avail(
         count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
     )
     owns_settlement = (state.vertex_owner[v] == (player + 1).astype(jnp.uint8)) & (
-        state.vertex_type[v] == 1
+        state.vertex_type[v] == SETTLEMENT
     )
     afford = can_afford(state.player_resources[player], CITY_COST_ARR)
     return in_range & main & under_max & owns_settlement & afford
@@ -383,7 +393,7 @@ def _build_city_apply(
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
         player_resources=pay(state.player_resources, player, CITY_COST_ARR),
-        vertex_type=state.vertex_type.at[v].set(2),
+        vertex_type=state.vertex_type.at[v].set(CITY),
         victory_points=state.victory_points.at[player].add(1),
     )
     won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
@@ -758,6 +768,36 @@ class PlayRoadBuilding(VecAction[None]):
 
 
 # ===========================================================================
+# Robber helpers (shared by PlayKnight and MoveRobber)
+# ===========================================================================
+
+
+def _valid_robber_victim(
+    state: BoardState, tile: jax.Array, player: jax.Array, victim: IndexParam
+) -> Mask:
+    """Victim choice is legal for a robber move onto ``tile`` by ``player``.
+
+    If any opponent can be robbed on ``tile``, ``victim`` must name one of them;
+    otherwise the only legal choice is ``-1`` ("steal from no one").
+    """
+    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
+    mask = robber.robber_victim_mask(state, tile, player)
+    victims_exist = jnp.any(mask)
+    return jnp.where(
+        victims_exist,
+        (victim >= 0) & (victim < N_PLAYERS) & mask[vc],
+        victim == -1,
+    )
+
+
+def _apply_steal(state: BoardState, player: jax.Array, victim: IndexParam) -> BoardState:
+    """Steal a random card from ``victim`` when ``victim >= 0``; else leave state."""
+    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
+    stolen = robber.steal(state, player, vc)
+    return tree_select(victim >= 0, stolen, state)
+
+
+# ===========================================================================
 # PlayKnight
 # ===========================================================================
 
@@ -770,19 +810,12 @@ def _knight_avail(
     tile, victim = params
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
     phase_ok = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
     not_played = state.dev_played == 0
     has_card = development.playable_dev(state, player, DevCard.KNIGHT)
     tile_in_range = (tile >= 0) & (tile < N_TILES)
     tile_moves = tile != state.robber
-    mask = robber.robber_victim_mask(state, t, player)
-    victims_exist = jnp.any(mask)
-    valid_victim = jnp.where(
-        victims_exist,
-        (victim >= 0) & (victim < N_PLAYERS) & mask[vc],
-        victim == -1,
-    )
+    valid_victim = _valid_robber_victim(state, t, player, victim)
     return (
         phase_ok
         & not_played
@@ -802,7 +835,6 @@ def _knight_apply(
     available = _knight_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
     new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.KNIGHT].add(-1)
     new_knights = state.knights_played.astype(jnp.int32).at[player].add(1)
     cand = state._replace(
@@ -812,9 +844,7 @@ def _knight_apply(
         robber=t.astype(state.robber.dtype),
     )
     cand = awards.recompute_largest_army(cand)
-    stolen = robber.steal(cand, player, vc)
-    do_steal = victim >= 0
-    cand = tree_select(do_steal, stolen, cand)
+    cand = _apply_steal(cand, player, victim)
     won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
     return tree_select(available, cand, state), _outcome(available, won)
 
@@ -857,17 +887,10 @@ def _move_robber_avail(
     tile, victim = params
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
     phase_ok = state.phase == GamePhase.MOVE_ROBBER
     tile_in_range = (tile >= 0) & (tile < N_TILES)
     tile_moves = tile != state.robber
-    mask = robber.robber_victim_mask(state, t, player)
-    victims_exist = jnp.any(mask)
-    valid_victim = jnp.where(
-        victims_exist,
-        (victim >= 0) & (victim < N_PLAYERS) & mask[vc],
-        victim == -1,
-    )
+    valid_victim = _valid_robber_victim(state, t, player, victim)
     return phase_ok & tile_in_range & tile_moves & valid_victim
 
 
@@ -880,7 +903,6 @@ def _move_robber_apply(
     available = _move_robber_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
     # Knight-before-roll resumes ROLL; the post-7 robber move resumes MAIN.
     new_phase = jnp.where(
         state.has_rolled != 0, GamePhase.MAIN, GamePhase.ROLL
@@ -889,9 +911,7 @@ def _move_robber_apply(
         robber=t.astype(state.robber.dtype),
         phase=new_phase,
     )
-    stolen = robber.steal(cand, player, vc)
-    do_steal = victim >= 0
-    cand = tree_select(do_steal, stolen, cand)
+    cand = _apply_steal(cand, player, victim)
     return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
     )
@@ -1026,7 +1046,7 @@ def _setup_settlement_apply(
     player = state.current_player.astype(jnp.int32)
     placed = state._replace(
         vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
-        vertex_type=state.vertex_type.at[v].set(1),
+        vertex_type=state.vertex_type.at[v].set(SETTLEMENT),
         victory_points=state.victory_points.at[player].add(1),
     )
     # The second settlement (placed in the reverse pass) grants resources.
@@ -1073,24 +1093,11 @@ def _setup_road_avail(
     in_range = (edge >= 0) & (edge < N_EDGES)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
-    target = (player + 1).astype(state.vertex_owner.dtype)
     phase_ok = state.phase == GamePhase.SETUP_ROAD
     empty = state.edge_road[e] == 0
-
-    # Own roads incident to each vertex, by scattering over the edge_index.
-    own = (state.edge_road == target).astype(jnp.int32)
-    inc = (
-        jnp.zeros((N_VERTICES,), jnp.int32)
-        .at[EDGE_V[:, 0]]
-        .add(own)
-        .at[EDGE_V[:, 1]]
-        .add(own)
+    touches = placement.setup_road_placeable(
+        state.edge_road, state.vertex_owner, player, e
     )
-
-    def endpoint_ok(v: jax.Array) -> jax.Array:
-        return (state.vertex_owner[v] == target) & (inc[v] == 0)
-
-    touches = endpoint_ok(EDGE_V[e, 0]) | endpoint_ok(EDGE_V[e, 1])
     return in_range & phase_ok & empty & touches
 
 

@@ -41,6 +41,22 @@ def settlement_connected(
     return inc[vertex] > 0
 
 
+def setup_road_placeable(
+    edge_road: EdgeRoadVec,
+    vertex_owner: VertexOwnerVec,
+    player: IntScalar,
+    edge: IntScalar,
+) -> BoolScalar:
+    """Setup road: edge touches a player-owned vertex with no incident own road."""
+    target = player + 1
+    inc = _scatter_to_vertices((edge_road == target).astype(jnp.int32))
+
+    def end_ok(v: jax.Array) -> jax.Array:
+        return (vertex_owner[v] == target) & (inc[v] == 0)
+
+    return end_ok(EDGE_V[edge, 0]) | end_ok(EDGE_V[edge, 1])
+
+
 def road_placeable(
     edge_road: EdgeRoadVec,
     vertex_owner: VertexOwnerVec,

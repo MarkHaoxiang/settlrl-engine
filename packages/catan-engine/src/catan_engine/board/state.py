@@ -20,6 +20,10 @@ MAX_ROADS = 15
 MAX_SETTLEMENTS = 5
 MAX_CITIES = 4
 
+# vertex_type encoding: 0 = empty, then a settlement is upgraded to a city.
+SETTLEMENT = 1
+CITY = 2
+
 # Victory points needed to win.
 VICTORY_POINTS_TO_WIN = 10
 
@@ -73,7 +77,10 @@ class GamePhase(IntEnum):
     DISCARD = 3  # players with >7 cards discard half (after a 7)
     MOVE_ROBBER = 4  # current player moves robber and steals
     MAIN = 5  # build / trade / play dev card / end turn
-    GAME_OVER = 6  # a player has reached VICTORY_POINTS_TO_WIN
+    # Reserved/unused: the engine never assigns this phase. Game-over is detected
+    # out-of-band by the victory-point total (>= VICTORY_POINTS_TO_WIN) in
+    # env/batched.py, not by a phase transition.
+    GAME_OVER = 6
 
     def __str__(self) -> str:
         return (

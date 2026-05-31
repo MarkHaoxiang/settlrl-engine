@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from catan_engine.board.layout import N_TILES, TILE_V, BoardLayout
 from catan_engine.board.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
-from catan_engine.board.state import BoardState, IntScalar, KeyScalar
+from catan_engine.board.state import CITY, SETTLEMENT, BoardState, IntScalar, KeyScalar
 from catan_engine.board.tile import Tile
 
 
@@ -40,7 +40,10 @@ def distribute_resources(
 
     c_owner = owner[TILE_V]  # (N_TILES, 6)
     c_kind = kind[TILE_V]
-    amt = jnp.where(c_kind == 1, 1, jnp.where(c_kind == 2, 2, 0)) * produces[:, None]
+    amt = (
+        jnp.where(c_kind == SETTLEMENT, 1, jnp.where(c_kind == CITY, 2, 0))
+        * produces[:, None]
+    )
     amt = jnp.where(c_owner > 0, amt, 0).astype(jnp.int32)
     pl = jnp.clip(c_owner.astype(jnp.int32) - 1, 0, N_PLAYERS - 1)
     res_idx = jnp.broadcast_to(
@@ -55,6 +58,8 @@ def distribute_resources(
     n_claim = (gains > 0).sum(axis=0)  # (R,)
     enough = total <= bank
     single = n_claim == 1
+    # When `single`, capping every player row at `bank` is safe: only the one
+    # claimant has a nonzero `gains[:, r]`, so the others clip from 0 to 0.
     granted = jnp.where(enough, gains, jnp.where(single, jnp.minimum(gains, bank), 0))
     new_res = (res + granted).astype(jnp.uint8)
     return state._replace(player_resources=new_res)

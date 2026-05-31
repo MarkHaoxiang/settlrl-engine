@@ -526,7 +526,7 @@ class BatchedCatanEnv:
 
     def _obs_for(self, sel: jax.Array) -> Observation:
         """Observation with per-lane ``self`` index ``sel`` (``(B,)`` int array)."""
-        state, layout = self._state, self._layout
+        layout, state = self._layout, self._state
         res = state.player_resources
         self_res = jnp.take_along_axis(res, sel[:, None, None], axis=1)[:, 0, :]
         self_dev = jnp.take_along_axis(state.dev_hand, sel[:, None, None], axis=1)[
@@ -570,8 +570,10 @@ class BatchedCatanEnv:
     ) -> jax.Array:
         if self.reward_mode == "vp_delta":
             return (vps_after - vps_before).astype(jnp.float32)
+        # `done_lane` is the row-any of `winners`, so `winners & done_lane[:, None]`
+        # equals `winners` (no row can be a winner unless its lane is done).
         winners = vps_after >= VICTORY_POINTS_TO_WIN
-        return (winners & done_lane[:, None]).astype(jnp.float32)
+        return winners.astype(jnp.float32)
 
     def _auto_reset(
         self, layout: BoardLayout, state: BoardState, done_lane: jax.Array

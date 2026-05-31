@@ -15,7 +15,16 @@ from catan_engine.board.state import BoolScalar, BoardState, IntScalar, KeyScala
 
 
 def playable_dev(state: BoardState, player: IntScalar, card: int) -> BoolScalar:
-    """True if ``player`` holds a playable copy of ``card`` (not bought this turn)."""
+    """True if ``player`` holds a playable copy of ``card`` (not bought this turn).
+
+    Single-actor invariant: ``dev_hand`` is per-player ``(N_PLAYERS, N_DEV_CARD_TYPES)``
+    but ``dev_bought`` is per-GAME ``(N_DEV_CARD_TYPES,)``, so subtracting the
+    game-global ``dev_bought[card]`` from a specific player's hand is only correct
+    because exactly one player acts per turn (``current_player``) and ``dev_bought``
+    resets on EndTurn. Do not make ``dev_bought`` per-player without auditing every
+    caller -- this comparison relies on the acting player owning every "bought this
+    turn" card.
+    """
     held = state.dev_hand[player, card].astype(jnp.int32)
     bought = state.dev_bought[card].astype(jnp.int32)
     return held - bought > 0

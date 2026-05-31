@@ -9,7 +9,13 @@ import jax
 import jax.numpy as jnp
 
 from catan_engine.board.layout import BoardLayout, desert_tile, make_layout
-from catan_engine.board.state import BoardState, GamePhase, make_board_state
+from catan_engine.board.state import (
+    CITY,
+    SETTLEMENT,
+    BoardState,
+    GamePhase,
+    make_board_state,
+)
 
 Board = tuple[BoardLayout, BoardState]
 
@@ -72,7 +78,7 @@ def place_settlement(board: Board, player: int, vertex: int, lane: int = 0) -> B
     layout, state = board
     state = state._replace(
         vertex_owner=state.vertex_owner.at[lane, vertex].set(player + 1),
-        vertex_type=state.vertex_type.at[lane, vertex].set(1),
+        vertex_type=state.vertex_type.at[lane, vertex].set(SETTLEMENT),
         victory_points=state.victory_points.at[lane, player].add(1),
     )
     return (layout, state)
@@ -90,11 +96,11 @@ def place_road(board: Board, player: int, edge: int, lane: int = 0) -> Board:
 def place_city(board: Board, player: int, vertex: int, lane: int = 0) -> Board:
     """Directly place ``player``'s city at ``vertex`` (worth +2 building VP)."""
     layout, state = board
-    had = state.vertex_type[lane, vertex] == 1  # already a settlement here?
+    had = state.vertex_type[lane, vertex] == SETTLEMENT  # already a settlement here?
     gain = jnp.where(had, 1, 2).astype(state.victory_points.dtype)
     state = state._replace(
         vertex_owner=state.vertex_owner.at[lane, vertex].set(player + 1),
-        vertex_type=state.vertex_type.at[lane, vertex].set(2),
+        vertex_type=state.vertex_type.at[lane, vertex].set(CITY),
         victory_points=state.victory_points.at[lane, player].add(gain),
     )
     return (layout, state)

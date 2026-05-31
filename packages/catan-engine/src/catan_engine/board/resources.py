@@ -37,5 +37,8 @@ def compute_bank_resources(player_resources: jax.Array) -> jax.Array:
     Returns:
         uint8 array of shape (batch, resources).
     """
-    held = player_resources.sum(axis=-2, dtype=jnp.uint8)
-    return (jnp.full_like(held, BANK_INITIAL) - held).astype(jnp.uint8)
+    # Sum in int32 (uint8 wraps past 255) and saturating-cast the difference,
+    # matching the convention in state.to_u8 (not imported: resources is imported
+    # BY state, so importing back would create a cycle).
+    held = player_resources.sum(axis=-2, dtype=jnp.int32)
+    return jnp.clip(BANK_INITIAL - held, 0, 255).astype(jnp.uint8)
