@@ -13,20 +13,20 @@ from catan_engine.board.layout import N_EDGES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import BoardState, make_board_state
 from tests import conversion as reference
+from tests.mechanics._occupancy import random_occupancy
 
 _dist = jax.jit(placement.distance_rule_ok)
 _conn = jax.jit(placement.settlement_connected)
 _road = jax.jit(placement.road_placeable)
 
+_EDGE_P = [0.55, 0.15, 0.12, 0.1, 0.08]
+_VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
+
 
 def _state(seed: int) -> tuple[BoardState, np.ndarray, np.ndarray]:
-    rng = np.random.default_rng(seed)
-    edge_road = rng.choice(
-        [0, 1, 2, 3, 4], size=N_EDGES, p=[0.55, 0.15, 0.12, 0.1, 0.08]
-    ).astype(np.uint8)
-    vertex_owner = rng.choice(
-        [0, 1, 2, 3, 4], size=N_VERTICES, p=[0.7, 0.1, 0.08, 0.07, 0.05]
-    ).astype(np.uint8)
+    edge_road, vertex_owner = random_occupancy(
+        seed, edge_p=_EDGE_P, vertex_p=_VERTEX_P
+    )
     state = make_board_state(1, key=jax.random.key(0))._replace(
         edge_road=jnp.asarray(edge_road)[None],
         vertex_owner=jnp.asarray(vertex_owner)[None],

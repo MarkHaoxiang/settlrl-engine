@@ -57,6 +57,51 @@ def _edge_between(a: int, b: int) -> int:
     raise AssertionError(f"no edge between {a} and {b}")
 
 
+def edge_path_from(start: int, n_edges: int) -> list[int]:
+    """A simple (no repeated vertex) chain of ``n_edges`` edges from ``start``.
+
+    Returned in traversal order, so any prefix is itself a connected road chain
+    rooted at ``start`` -- handy for seeding longest-road / free-road tests.
+    """
+    adj: dict[int, list[tuple[int, int]]] = {}
+    for e in range(N_EDGES):
+        a, b = int(_EDGE_V[e, 0]), int(_EDGE_V[e, 1])
+        adj.setdefault(a, []).append((b, e))
+        adj.setdefault(b, []).append((a, e))
+
+    def dfs(v: int, seen: set[int], edges: list[int]) -> list[int] | None:
+        if len(edges) == n_edges:
+            return list(edges)
+        for w, e in adj[v]:
+            if w not in seen:
+                got = dfs(w, seen | {w}, edges + [e])
+                if got is not None:
+                    return got
+        return None
+
+    out = dfs(start, {start}, [])
+    assert out is not None, f"no length-{n_edges} path from vertex {start}"
+    return out
+
+
+def independent_vertices(n: int) -> list[int]:
+    """``n`` pairwise non-adjacent vertices (a distance-rule-legal settlement set)."""
+    adj: dict[int, set[int]] = {}
+    for e in range(N_EDGES):
+        a, b = int(_EDGE_V[e, 0]), int(_EDGE_V[e, 1])
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+    chosen: list[int] = []
+    banned: set[int] = set()
+    v = 0
+    while len(chosen) < n:
+        if v not in banned:
+            chosen.append(v)
+            banned |= adj.get(v, set()) | {v}
+        v += 1
+    return chosen
+
+
 def first_legal_edge(board: Board) -> int:
     """Lowest-index edge where BuildRoad is currently legal (single game)."""
     batched = replicate(board, N_EDGES)

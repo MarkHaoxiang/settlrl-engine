@@ -5,9 +5,8 @@ import numpy as np
 from expecttest import assert_expected_inline
 
 from catan_engine.mechanics.action import ActionResult, PlayYearOfPlenty
-from catan_engine.board import Board, make_board, set_phase, to_main
+from catan_engine.board import Board, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
-from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 
@@ -38,12 +37,8 @@ def test_success_same_resource(yop_board: Board) -> None:
     assert int(state.player_resources[0, 0, 0]) == 2
 
 
-def test_invalid_wrong_phase(yop_board: Board) -> None:
-    board = set_phase(yop_board, GamePhase.ROLL)
-    before = np.asarray(board[1].player_resources)
-    state, result = PlayYearOfPlenty()(board, (jnp.array([2]), jnp.array([3])))
-    assert int(result[0]) == ActionResult.INVALID.value
-    assert np.array_equal(np.asarray(state.player_resources), before)
+# Wrong-phase rejection is covered by the parametrized test in
+# test_invalid_paths.py.
 
 
 def test_invalid_no_card() -> None:

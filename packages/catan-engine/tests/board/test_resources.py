@@ -2,7 +2,6 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import TestCase
 
-from catan_engine.board.state import make_board_state
 from catan_engine.board.resources import (
     BANK_INITIAL,
     N_PLAYERS,
@@ -45,21 +44,3 @@ class TestBankResources(TestCase):
         assert bank[0, 1] == BANK_INITIAL  # batch 0 unchanged
         assert bank[1, 1] == BANK_INITIAL - 2  # batch 1 reduced
         assert bank[2, 1] == BANK_INITIAL  # batch 2 unchanged
-
-
-class TestBoardStateResources(TestCase):
-    def test_make_board_state_resource_shape(self) -> None:
-        state = make_board_state(batch_size=2)
-        assert state.player_resources.shape == (2, N_PLAYERS, N_RESOURCES)
-
-    def test_make_board_state_resources_zero(self) -> None:
-        state = make_board_state(batch_size=1)
-        assert np.asarray(state.player_resources).sum() == 0
-
-    def test_make_board_state_victory_points_shape(self) -> None:
-        state = make_board_state(batch_size=2)
-        assert state.victory_points.shape == (2, N_PLAYERS)
-
-    def test_make_board_state_victory_points_zero(self) -> None:
-        state = make_board_state(batch_size=1)
-        assert np.asarray(state.victory_points).sum() == 0

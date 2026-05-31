@@ -3,8 +3,6 @@ and the ``action`` economy helpers) must match the trusted single-game oracle
 (the ``catan-reference`` package, via ``tests.conversion``) across randomized
 boards."""
 
-from typing import TypeVar, cast
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -12,6 +10,7 @@ from expecttest import TestCase
 
 from catan_engine.mechanics import action, awards, dice, trade
 from tests import conversion as reference
+from tests.mechanics._occupancy import random_occupancy, single as _single
 from catan_engine.board.layout import (
     BoardLayout,
     N_EDGES,
@@ -22,11 +21,9 @@ from catan_engine.board.layout import (
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState, make_board_state
 
-_T = TypeVar("_T")
-
-
-def _single(tree: _T) -> _T:
-    return cast(_T, jax.tree_util.tree_map(lambda x: x[0], tree))
+# Bias towards empty so road networks stay realistically small.
+_EDGE_P = [0.55, 0.15, 0.12, 0.1, 0.08]
+_VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
 
 
 # Compile the single-game DFS once; reused across calls (static shapes).
@@ -34,16 +31,7 @@ _LRL = jax.jit(awards.longest_road_length)
 
 
 def _random_occupancy(seed: int) -> tuple[np.ndarray, np.ndarray]:
-    """Random (edge_road, vertex_owner): values 0=empty, 1..4 = player+1."""
-    rng = np.random.default_rng(seed)
-    # Bias towards empty so road networks stay realistically small.
-    edge_road = rng.choice(
-        [0, 1, 2, 3, 4], size=N_EDGES, p=[0.55, 0.15, 0.12, 0.1, 0.08]
-    ).astype(np.uint8)
-    vertex_owner = rng.choice(
-        [0, 1, 2, 3, 4], size=N_VERTICES, p=[0.7, 0.1, 0.08, 0.07, 0.05]
-    ).astype(np.uint8)
-    return edge_road, vertex_owner
+    return random_occupancy(seed, edge_p=_EDGE_P, vertex_p=_VERTEX_P)
 
 
 def _state_with(edge_road: np.ndarray, vertex_owner: np.ndarray) -> BoardState:

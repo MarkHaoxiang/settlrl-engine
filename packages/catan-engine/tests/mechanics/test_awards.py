@@ -6,23 +6,19 @@ selection (threshold + tie-to-holder), checked against the `catan-reference` ora
 
 from __future__ import annotations
 
-from typing import TypeVar, cast
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from catan_engine.mechanics import awards
-from catan_engine.board.layout import N_EDGES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import NO_INDEX, BoardState, make_board_state
 from tests import conversion as reference
+from tests.mechanics._occupancy import random_occupancy, single as _single
 
-_T = TypeVar("_T")
-
-
-def _single(tree: _T) -> _T:
-    return cast(_T, jax.tree_util.tree_map(lambda x: x[0], tree))
+# More roads than the other suites: stress the longest-road award selection.
+_EDGE_P = [0.4, 0.2, 0.16, 0.14, 0.1]
+_VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
 
 
 def _army_state(knights: list[int], owner: int) -> BoardState:
@@ -73,14 +69,10 @@ class TestLargestArmy:
 
 
 def _road_state(seed: int) -> BoardState:
-    rng = np.random.default_rng(seed)
-    edge_road = rng.choice(
-        [0, 1, 2, 3, 4], size=N_EDGES, p=[0.4, 0.2, 0.16, 0.14, 0.1]
-    ).astype(np.uint8)
-    vertex_owner = rng.choice(
-        [0, 1, 2, 3, 4], size=N_VERTICES, p=[0.7, 0.1, 0.08, 0.07, 0.05]
-    ).astype(np.uint8)
-    owner = int(rng.choice([NO_INDEX, 0, 1, 2, 3]))
+    edge_road, vertex_owner = random_occupancy(
+        seed, edge_p=_EDGE_P, vertex_p=_VERTEX_P
+    )
+    owner = int(np.random.default_rng(seed).choice([NO_INDEX, 0, 1, 2, 3]))
     return make_board_state(1, key=jax.random.key(0))._replace(
         edge_road=jnp.asarray(edge_road)[None],
         vertex_owner=jnp.asarray(vertex_owner)[None],

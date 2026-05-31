@@ -3,9 +3,8 @@
 from expecttest import assert_expected_inline
 
 from catan_engine.mechanics.action import ActionResult, PlayRoadBuilding
-from catan_engine.board import Board, make_board, set_phase, to_main
+from catan_engine.board import Board, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
-from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 
@@ -26,10 +25,8 @@ hand=0""",
     )
 
 
-def test_invalid_wrong_phase(road_building_board: Board) -> None:
-    board = set_phase(road_building_board, GamePhase.ROLL)
-    _, result = PlayRoadBuilding()(board, None)
-    assert int(result[0]) == ActionResult.INVALID.value
+# Wrong-phase rejection is covered by the parametrized test in
+# test_invalid_paths.py.
 
 
 def test_invalid_no_card() -> None:

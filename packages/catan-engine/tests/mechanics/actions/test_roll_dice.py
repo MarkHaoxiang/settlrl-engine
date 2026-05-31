@@ -1,10 +1,11 @@
 """Tests for the vectorized RollDice action."""
 
+import jax
 import numpy as np
 from expecttest import assert_expected_inline
 
 from catan_engine.mechanics.action import ActionResult, RollDice
-from catan_engine.board import Board, make_board, to_main
+from catan_engine.board import Board, give, make_board, to_main
 from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
@@ -32,6 +33,26 @@ def test_invalid_not_roll_phase() -> None:
     state, result = RollDice()(board, None)
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.phase), before)
+
+
+def test_seven_routes_to_discard_and_suppresses_production(roll_board: Board) -> None:
+    # PRNG key 0 yields a deterministic roll of 7 (see test_dice.roll_dice).
+    # Player 0 holds 10 cards, so on a 7 they owe 5 and the phase must route to
+    # DISCARD; production for the (irrelevant) tiles is suppressed.
+    layout, st = roll_board
+    st = st._replace(key=jax.random.key(0)[None])
+    board: Board = (layout, st)
+    board = give(board, 0, [4, 4, 1, 1, 0])  # 10 cards -> owes 5
+    before = np.asarray(board[1].player_resources)
+
+    state, result = RollDice()(board, None)
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.dice_roll[0]) == 7
+    assert int(state.phase[0]) == GamePhase.DISCARD
+    assert int(state.pending_discard[0, 0]) == 5  # 10 // 2
+    assert int(state.pending_discard[0].sum()) == 5  # only player 0 owes
+    # 7 suppresses all production: hands are unchanged.
+    assert np.array_equal(np.asarray(state.player_resources), before)
 
 
 def test_invalid_already_rolled(roll_board: Board) -> None:

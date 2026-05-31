@@ -5,6 +5,7 @@ from expecttest import assert_expected_inline
 
 from catan_engine.mechanics.action import ActionResult, EndTurn
 from catan_engine.board import Board, make_board, to_main
+from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
@@ -25,6 +26,25 @@ current_player=1
 phase=ROLL
 has_rolled=0""",
     )
+
+
+def test_resets_turn_local_dev_and_road_state() -> None:
+    # Set the per-turn flags EndTurn must clear: a dev card was played this turn,
+    # a Knight was bought this turn (dev_bought), and free roads remain. The
+    # dev_bought reset is what makes a just-bought card playable next turn.
+    layout, st = to_main(make_board())
+    st = st._replace(
+        dev_played=st.dev_played.at[0].set(1),
+        dev_bought=st.dev_bought.at[0, int(DevCard.KNIGHT)].set(1),
+        free_roads=st.free_roads.at[0].set(2),
+    )
+    board: Board = (layout, st)
+
+    state, result = EndTurn()(board, None)
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.dev_played[0]) == 0
+    assert int(np.asarray(state.dev_bought[0]).sum()) == 0
+    assert int(state.free_roads[0]) == 0
 
 
 def test_invalid_setup_phase() -> None:

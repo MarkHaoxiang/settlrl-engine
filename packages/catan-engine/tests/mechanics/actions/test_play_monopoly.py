@@ -7,9 +7,8 @@ import numpy as np
 from expecttest import assert_expected_inline
 
 from catan_engine.mechanics.action import ActionResult, PlayMonopoly
-from catan_engine.board import Board, give, make_board, set_phase, to_main
+from catan_engine.board import Board, give, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
-from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 
@@ -113,12 +112,8 @@ Robber: tile 8 (DST, desert)
     )
 
 
-def test_invalid_wrong_phase(monopoly_board: Board) -> None:
-    board = set_phase(monopoly_board, GamePhase.ROLL)
-    before = np.asarray(board[1].player_resources)
-    state, result = PlayMonopoly()(board, jnp.array([0]))
-    assert int(result[0]) == ActionResult.INVALID.value
-    assert np.array_equal(np.asarray(state.player_resources), before)
+# Wrong-phase rejection is covered by the parametrized test in
+# test_invalid_paths.py.
 
 
 def test_invalid_no_card() -> None:

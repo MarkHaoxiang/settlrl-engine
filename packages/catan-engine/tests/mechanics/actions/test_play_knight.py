@@ -9,14 +9,13 @@ from expecttest import assert_expected_inline
 from catan_engine.mechanics.action import ActionResult, PlayKnight
 from catan_engine.board import (
     Board,
-    give_dev_card,
     make_board,
     place_settlement,
     set_robber,
     to_main,
 )
-from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import TILE_V
+from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
 _TILE_V = np.asarray(TILE_V)
@@ -88,19 +87,9 @@ p1_sheep=0""",
     )
 
 
-def test_no_victim() -> None:
-    # A tile with no opponent buildings: move the robber, steal from no one.
-    board = to_main(make_board(seed=0))
-    board = give_dev_card(board, 0, DevCard.KNIGHT)
-    board = set_robber(board, 1 % _TILE_V.shape[0])
-    before = np.asarray(board[1].player_resources)
-    state, result = PlayKnight()(board, (jnp.array([0]), jnp.array([-1])))
-    assert int(result[0]) == ActionResult.SUCCESS.value
-    assert int(state.robber[0]) == 0
-    assert np.array_equal(np.asarray(state.player_resources), before)
-
-
 def test_invalid_no_knight() -> None:
+    # Knight-specific gate: no Knight in hand. (The robber-targeting invalid
+    # cases shared with MoveRobber live in test_move_robber.py.)
     board = to_main(make_board(seed=0))
     board = place_settlement(board, 1, int(_TILE_V[0, 0]))
     board = set_robber(board, 1 % _TILE_V.shape[0])
@@ -110,17 +99,14 @@ def test_invalid_no_knight() -> None:
     assert np.array_equal(np.asarray(state.player_resources), before)
 
 
-def test_invalid_tile_is_robber(knight_board: Board) -> None:
-    board = set_robber(knight_board, 0)  # robber already on tile 0
+def test_invalid_wrong_phase(knight_board: Board) -> None:
+    # Knight is playable only in ROLL/MAIN; not e.g. during MOVE_ROBBER.
+    layout, st = knight_board
+    board = (layout, st._replace(phase=st.phase.at[0].set(int(GamePhase.MOVE_ROBBER))))
     before = np.asarray(board[1].player_resources)
     state, result = PlayKnight()(board, (jnp.array([0]), jnp.array([1])))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
-
-
-def test_invalid_out_of_range_tile(knight_board: Board) -> None:
-    _, result = PlayKnight()(knight_board, (jnp.array([999]), jnp.array([1])))
-    assert int(result[0]) == ActionResult.INVALID.value
 
 
 def test_invalid_dev_already_played(knight_board: Board) -> None:

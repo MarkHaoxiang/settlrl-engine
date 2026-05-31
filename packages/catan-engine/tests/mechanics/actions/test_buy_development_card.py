@@ -4,8 +4,7 @@ import numpy as np
 from expecttest import assert_expected_inline
 
 from catan_engine.mechanics.action import ActionResult, BuyDevelopmentCard
-from catan_engine.board import Board, give, set_phase
-from catan_engine.board.state import GamePhase
+from catan_engine.board import Board
 from tests.mechanics.actions.fixtures import fmt
 
 
@@ -29,18 +28,8 @@ deck_total=24""",
     )
 
 
-def test_invalid_wrong_phase(buy_board: Board) -> None:
-    board = set_phase(buy_board, GamePhase.ROLL)
-    before = np.asarray(board[1].dev_deck)
-    state, result = BuyDevelopmentCard()(board, None)
-    assert int(result[0]) == ActionResult.INVALID.value
-    assert np.array_equal(np.asarray(state.dev_deck), before)
-
-
-def test_invalid_cannot_afford(buy_board: Board) -> None:
-    board = give(buy_board, 0, [0, 0, 0, 0, 0])
-    _, result = BuyDevelopmentCard()(board, None)
-    assert int(result[0]) == ActionResult.INVALID.value
+# Wrong-phase and cannot-afford rejections are covered by the parametrized
+# tests in test_invalid_paths.py.
 
 
 def test_invalid_empty_deck(buy_board: Board) -> None:
