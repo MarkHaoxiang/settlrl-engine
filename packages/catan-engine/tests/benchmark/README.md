@@ -46,3 +46,21 @@ are steady-state throughput, not first-call latency.
 ```
 
 See `pytest-benchmark --help` for the full set of `--benchmark-*` flags.
+
+## Profiling
+
+When a benchmark looks slow and you want to know *why* (not just *how fast*),
+use the profiler at `packages/catan-engine/tools/profile_env.py`. It runs the
+batched random-rollout loop under cProfile and prints the hottest frames, which
+localises the cost to a specific call (including hidden device→host syncs that a
+wall-clock timer would silently fold into `step`):
+
+```bash
+# cProfile breakdown of a batch-100 rollout
+uv run --package catan-engine python packages/catan-engine/tools/profile_env.py \
+    --batch-size 100 --steps 40
+
+# on-device (XLA op) trace for TensorBoard
+uv run --package catan-engine python packages/catan-engine/tools/profile_env.py \
+    --batch-size 100 --trace /tmp/catan-trace
+```
