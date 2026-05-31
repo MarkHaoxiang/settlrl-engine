@@ -18,10 +18,17 @@ from catan_engine.board.layout import EDGE_V, MAX_VERTEX_DEGREE, N_EDGES, N_VERT
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import (
     NO_INDEX,
+    VICTORY_POINTS_TO_WIN,
     BoardState,
+    BoolScalar,
     EdgeRoadVec,
     IntScalar,
     VertexOwnerVec,
+)
+from catan_engine.mechanics.common import (
+    GAME_COMPLETE,
+    SUCCESS,
+    player_total_vp,
 )
 
 # int32 "unclaimed" award marker (the uint8 NO_INDEX as stored on BoardState).
@@ -171,3 +178,49 @@ def recompute_largest_army(state: BoardState) -> BoardState:
         state.knights_played.astype(jnp.int32), state.largest_army_owner, 3
     )
     return state._replace(largest_army_owner=new_owner)
+
+
+# ===========================================================================
+# Step resolution (stage 2 of an action)
+#
+# The award reassignment + win check are factored out of the per-action cores so
+# the expensive Longest Road sweep runs *once* per step rather than once per
+# ``jax.lax.switch`` branch -- every branch executes under ``vmap``, so leaving
+# ``recompute_longest_road`` inside the BuildRoad / BuildSettlement branches paid
+# the DFS for both on every action. ``apply_action`` calls this once after the
+# switch; the standalone ``*_step`` wrappers whose action can change an award or
+# win the game route their core output through it.
+# ===========================================================================
+
+
+def recompute_awards(state: BoardState) -> BoardState:
+    """Recompute both award holders (Longest Road, then Largest Army)."""
+    return recompute_largest_army(recompute_longest_road(state))
+
+
+def _any_player_won(state: BoardState) -> BoolScalar:
+    """True if any player's total VP has reached the win threshold."""
+    vps = jnp.stack(
+        [player_total_vp(state, jnp.int32(p)) for p in range(N_PLAYERS)]
+    )
+    return jnp.any(vps >= VICTORY_POINTS_TO_WIN)
+
+
+def resolve_step(
+    state: BoardState, result: IntScalar
+) -> tuple[BoardState, IntScalar]:
+    """Stage 2 of an action: recompute awards, then resolve the win.
+
+    Recomputes the Longest Road / Largest Army holders for the post-core state
+    and upgrades a ``SUCCESS`` result to ``GAME_COMPLETE`` when the move brought a
+    player to the win threshold (an ``INVALID`` move left the board unchanged, so
+    the recompute is a no-op and the code is preserved).
+    """
+    state = recompute_awards(state)
+    won = _any_player_won(state)
+    upgraded = jnp.where((result == SUCCESS) & won, GAME_COMPLETE, result)
+    return state, upgraded
+
+
+resolve_step_b = jax.jit(jax.vmap(resolve_step))
+"""Batched (per-lane) :func:`resolve_step` for the standalone ``*_step`` wrappers."""

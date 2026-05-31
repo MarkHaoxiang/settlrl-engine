@@ -6,7 +6,8 @@ The playability / weighted-draw primitives are separate from ``dev_cards.py``
 create an import cycle. The lower half holds the dev-card action cores:
 ``BuyDevelopmentCard``, ``PlayMonopoly``, ``PlayYearOfPlenty``,
 ``PlayRoadBuilding``, and ``PlayKnight`` (which composes the robber helpers in
-``robber`` and the Largest Army award in ``awards``).
+``robber``). The cores apply only the core state change; the Largest Army award
+and win check are resolved once per step by ``awards.resolve_step``.
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from catan_engine.board.dev_cards import DevCard, DevDeckVec, N_DEV_CARD_TYPES
 from catan_engine.board.layout import N_TILES, BoardLayout
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES, bank_stock
 from catan_engine.board.state import (
-    VICTORY_POINTS_TO_WIN,
     BoardState,
     BoolScalar,
     GamePhase,
@@ -42,9 +42,7 @@ from catan_engine.mechanics.common import (
     can_afford,
     main_after_roll,
     main_no_dev_played,
-    outcome,
     pay,
-    player_total_vp,
     roads_left,
 )
 
@@ -115,8 +113,9 @@ def _buy_dev_apply(
         dev_bought=to_u8(new_bought),
         key=key,
     )
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), outcome(available, won)
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
 
 
 _buy_dev_avail_b = jax.jit(jax.vmap(_buy_dev_avail, in_axes=(0, 0, None)))
@@ -131,10 +130,13 @@ def buy_development_card_available(board: Board, params: None = None) -> Mask:
 def buy_development_card_step(
     board: Board, params: None = None
 ) -> tuple[BoardState, ResultCode]:
-    """Buy a development card per game. Draws from ``state.dev_deck``."""
-    return cast(
-        "tuple[BoardState, ResultCode]", _buy_dev_apply_b(board[0], board[1], None)
-    )
+    """Buy a development card per game. Draws from ``state.dev_deck``.
+
+    Resolves any win (a drawn Victory Point card can reach the threshold) via
+    :func:`awards.resolve_step`.
+    """
+    state, result = _buy_dev_apply_b(board[0], board[1], None)
+    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
 
 
 # ===========================================================================
@@ -351,10 +353,10 @@ def _knight_apply(
         knights_played=to_u8(new_knights),
         robber=t.astype(state.robber.dtype),
     )
-    cand = awards.recompute_largest_army(cand)
     cand = robber.apply_steal(cand, player, victim)
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), outcome(available, won)
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
 
 
 _knight_avail_b = jax.jit(jax.vmap(_knight_avail))
@@ -371,8 +373,8 @@ def play_knight_step(
 ) -> tuple[BoardState, ResultCode]:
     """Play a Knight (params: (tile, victim)); ``victim == -1`` steals from no one.
 
-    Moves the robber and steals; can win via the Largest Army award (+2 VP).
+    Moves the robber and steals; the Largest Army award and any win it brings are
+    resolved via :func:`awards.resolve_step`.
     """
-    return cast(
-        "tuple[BoardState, ResultCode]", _knight_apply_b(board[0], board[1], params)
-    )
+    state, result = _knight_apply_b(board[0], board[1], params)
+    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))

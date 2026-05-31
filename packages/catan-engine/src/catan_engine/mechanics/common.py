@@ -7,8 +7,9 @@ and ``common`` -- no import cycle through ``action`` (which depends on every
 core for its dispatch / flattening layer).
 
 Contents: the action-layer jaxtyping aliases and core-signature types, the
-``ActionResult`` codes and the ``outcome`` helper, the MAIN-phase predicates,
-and the resource/building *economy* helpers (cost vectors, affordability,
+``ActionResult`` codes (and the ``SUCCESS`` / ``INVALID`` / ``GAME_COMPLETE``
+scalars), the MAIN-phase predicates, and the resource/building *economy* helpers
+(cost vectors, affordability,
 payment, building counts, total victory points) plus ``agent_selection_single``
 (the acting player for one game).
 """
@@ -84,11 +85,6 @@ class ActionResult(IntEnum):
 SUCCESS = jnp.int32(ActionResult.SUCCESS.value)
 INVALID = jnp.int32(ActionResult.INVALID.value)
 GAME_COMPLETE = jnp.int32(ActionResult.GAME_COMPLETE.value)
-
-
-def outcome(available: Mask, won: Mask) -> ResultCode:
-    """ActionResult code from the legality / win flags of a single transition."""
-    return jnp.where(available, jnp.where(won, GAME_COMPLETE, SUCCESS), INVALID)
 
 
 def main_after_roll(state: BoardState) -> jax.Array:

@@ -41,6 +41,7 @@ from catan_engine.board.layout import (
 )
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState, GamePhase
+from catan_engine.mechanics.awards import resolve_step
 from catan_engine.mechanics.common import (
     ActionResult,
     ActionTypeArray,
@@ -199,11 +200,18 @@ def apply_action(
     action_type: ActionTypeArray,
     params: ActionParams,
 ) -> tuple[BoardState, ResultCode]:
-    """Apply ``action_type`` (single game) and return (new state, ActionResult code)."""
-    return cast(
-        "tuple[BoardState, ResultCode]",
-        jax.lax.switch(action_type, _APPLY_BRANCHES, layout, state, params),
+    """Apply ``action_type`` (single game) and return (new state, ActionResult code).
+
+    Two stages: the ``lax.switch`` applies the chosen action's *core* state change
+    (stage 1), then :func:`awards.resolve_step` recomputes the awards and resolves
+    the win *once* (stage 2). Keeping the award sweep out of the per-action
+    branches avoids running the expensive Longest Road DFS in every branch -- under
+    ``vmap`` all branches execute regardless of which action was chosen.
+    """
+    state, result = jax.lax.switch(
+        action_type, _APPLY_BRANCHES, layout, state, params
     )
+    return resolve_step(state, result)
 
 
 def action_available(

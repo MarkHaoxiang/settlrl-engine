@@ -6,7 +6,9 @@ vertex->edge reverse maps -- the JAX analogue of PyG message passing.
 
 The lower half holds the ``BuildRoad`` / ``BuildSettlement`` / ``BuildCity``
 action cores, which compose the placement-legality predicates above with the
-economy helpers in ``common`` and the Longest Road award in ``awards``.
+economy helpers in ``common``. The cores apply only the core state change; the
+Longest Road award and win check are resolved once per step by
+``awards.resolve_step`` (run after dispatch, not inside each core).
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ from catan_engine.board.state import (
     MAX_CITIES,
     MAX_SETTLEMENTS,
     SETTLEMENT,
-    VICTORY_POINTS_TO_WIN,
     BoardState,
     BoolScalar,
     EdgeRoadVec,
@@ -35,8 +36,10 @@ from catan_engine.board.state import (
 from catan_engine.mechanics import awards
 from catan_engine.mechanics.common import (
     CITY_COST_ARR,
+    INVALID,
     ROAD_COST_ARR,
     SETTLEMENT_COST_ARR,
+    SUCCESS,
     IndexParam,
     Mask,
     ResultCode,
@@ -44,9 +47,7 @@ from catan_engine.mechanics.common import (
     count_cities,
     count_settlements,
     main_after_roll,
-    outcome,
     pay,
-    player_total_vp,
     roads_left,
 )
 
@@ -156,9 +157,9 @@ def _build_road_apply(
         free_roads=new_free,
         player_resources=new_res,
     )
-    cand = awards.recompute_longest_road(cand)
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), outcome(available, won)
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
 
 
 _build_road_avail_b = jax.jit(jax.vmap(_build_road_avail))
@@ -171,10 +172,12 @@ def build_road_available(board: Board, edge: IndexParam) -> Mask:
 
 
 def build_road_step(board: Board, edge: IndexParam) -> tuple[BoardState, ResultCode]:
-    """Apply BuildRoad on ``edge`` per game. Free if free_roads > 0."""
-    return cast(
-        "tuple[BoardState, ResultCode]", _build_road_apply_b(board[0], board[1], edge)
-    )
+    """Apply BuildRoad on ``edge`` per game. Free if free_roads > 0.
+
+    Resolves the Longest Road award and any win via :func:`awards.resolve_step`.
+    """
+    state, result = _build_road_apply_b(board[0], board[1], edge)
+    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
 
 
 # ===========================================================================
@@ -213,9 +216,9 @@ def _build_settlement_apply(
         vertex_type=state.vertex_type.at[v].set(SETTLEMENT),
         victory_points=state.victory_points.at[player].add(1),
     )
-    cand = awards.recompute_longest_road(cand)
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), outcome(available, won)
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
 
 
 _build_settlement_avail_b = jax.jit(jax.vmap(_build_settlement_avail))
@@ -230,11 +233,13 @@ def build_settlement_available(board: Board, vertex: IndexParam) -> Mask:
 def build_settlement_step(
     board: Board, vertex: IndexParam
 ) -> tuple[BoardState, ResultCode]:
-    """Apply BuildSettlement on ``vertex`` per game."""
-    return cast(
-        "tuple[BoardState, ResultCode]",
-        _build_settlement_apply_b(board[0], board[1], vertex),
-    )
+    """Apply BuildSettlement on ``vertex`` per game.
+
+    Resolves the Longest Road award (a settlement can cut an opponent's road) and
+    any win via :func:`awards.resolve_step`.
+    """
+    state, result = _build_settlement_apply_b(board[0], board[1], vertex)
+    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
 
 
 # ===========================================================================
@@ -270,8 +275,9 @@ def _build_city_apply(
         vertex_type=state.vertex_type.at[v].set(CITY),
         victory_points=state.victory_points.at[player].add(1),
     )
-    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
-    return tree_select(available, cand, state), outcome(available, won)
+    return tree_select(available, cand, state), jnp.where(
+        available, SUCCESS, INVALID
+    )
 
 
 _build_city_avail_b = jax.jit(jax.vmap(_build_city_avail))
@@ -284,7 +290,10 @@ def build_city_available(board: Board, vertex: IndexParam) -> Mask:
 
 
 def build_city_step(board: Board, vertex: IndexParam) -> tuple[BoardState, ResultCode]:
-    """Apply BuildCity (upgrade an own settlement) on ``vertex`` per game."""
-    return cast(
-        "tuple[BoardState, ResultCode]", _build_city_apply_b(board[0], board[1], vertex)
-    )
+    """Apply BuildCity (upgrade an own settlement) on ``vertex`` per game.
+
+    Resolves any win (the +1 VP can reach the threshold) via
+    :func:`awards.resolve_step`.
+    """
+    state, result = _build_city_apply_b(board[0], board[1], vertex)
+    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
