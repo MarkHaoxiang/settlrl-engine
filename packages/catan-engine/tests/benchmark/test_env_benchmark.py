@@ -53,6 +53,7 @@ def _aec_rollout(seed: int, steps: int) -> None:
         e.step(int(rng.choice(legal)))
 
 
+@pytest.mark.benchmark
 @pytest.mark.parametrize("batch_size", [1, 10, 100])
 def test_batched_env_random_rollout(benchmark: Any, batch_size: int) -> None:
     """Throughput of a batch of games stepped with random legal actions.
@@ -66,6 +67,7 @@ def test_batched_env_random_rollout(benchmark: Any, batch_size: int) -> None:
     benchmark(lambda: _batched_rollout(seed=0, batch_size=batch_size, steps=steps))
 
 
+@pytest.mark.benchmark
 def test_aec_env_random_rollout(benchmark: Any) -> None:
     """Throughput of a single PettingZoo-AEC game under random legal play."""
     steps = 80

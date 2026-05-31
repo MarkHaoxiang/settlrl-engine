@@ -14,6 +14,10 @@ measured:
 Both pick only *legal* moves (screened by the engine's own action mask), so every
 action type is exercised, including the forced discard / move-robber after a 7.
 
+These tests carry the `benchmark` marker and are **deselected from the default
+`pytest` run** (`-m 'not benchmark'` in `addopts`), since they dominate
+wall-clock and aren't correctness tests. The wrapper below re-selects them.
+
 ## Running
 
 From the repo root (`uv sync` first if you haven't), use the wrapper script:
@@ -22,15 +26,10 @@ From the repo root (`uv sync` first if you haven't), use the wrapper script:
 ./run_benchmarks.sh
 ```
 
-It runs `pytest packages/catan-engine/tests/benchmark` with:
-
-- `--benchmark-only` — skips the regular test suite and runs just the benchmarks.
-- `--no-cov` — turns off coverage (on by default via `addopts`), which otherwise
-  instruments the hot loop and distorts the timings.
-
-Any extra arguments are passed straight through to pytest-benchmark (see below).
-JIT compilation is warmed up before each timed region, so the reported numbers
-are steady-state throughput, not first-call latency.
+It runs only the benchmarks with coverage off (coverage would instrument the hot
+loop and distort timings). Extra arguments pass straight through to
+pytest-benchmark (see below). JIT is warmed up before each timed region, so the
+numbers are steady-state throughput, not first-call latency.
 
 ## Useful options
 
