@@ -27,3 +27,6 @@ A game is driven by repeatedly asking which actions are available and applying o
 ```bash
 uv run --package catan-engine pytest
 ```
+
+Performance benchmarks for the environments live in `tests/benchmark/` — see
+[its README](tests/benchmark/README.md) for how to run and compare them.
