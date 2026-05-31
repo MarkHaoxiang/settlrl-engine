@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { hexToPixel, cubeToPixel } from "../lib/hex";
+import { hexToPixel, cubeToPixel, hexCorners, type Cube, type Hex } from "../lib/hex";
 import type { Board } from "../lib/boardData";
 import HexTile from "./HexTile";
 import Road from "./Road";
@@ -7,6 +7,21 @@ import Building from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
 import PlayerPanel from "./PlayerPanel";
+
+// Legal click targets to overlay on the board (for the Play view). When present,
+// the matching elements are highlighted and clickable; the handler receives the
+// clicked target so the caller can map it back to an engine action.
+export interface BoardInteraction {
+  vertices: Cube[];
+  edges: { a: Cube; b: Cube }[];
+  tiles: Hex[];
+  onVertex?: (vertex: Cube) => void;
+  onEdge?: (edge: { a: Cube; b: Cube }) => void;
+  onTile?: (tile: Hex) => void;
+}
+
+const HIGHLIGHT = "#FCE38A";
+const HIGHLIGHT_STROKE = "#C99A2E";
 
 const HEX_SIZE = 72;
 const PADDING = 90;
@@ -21,13 +36,14 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 interface Props {
   board: Board;
+  interaction?: BoardInteraction;
 }
 
 // Renders a Catan board (tiles, ports, roads, buildings, robber) as a zoomable
 // SVG, with per-player stat panels anchored to the viewport corners. It fills
 // its parent container, so a parent can overlay mode-specific controls on top
 // (the replay scrubber, the play action bar, a back button, …).
-export default function BoardView({ board }: Props) {
+export default function BoardView({ board, interaction }: Props) {
   const [zoom, setZoom] = useState(1);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -196,6 +212,78 @@ export default function BoardView({ board }: Props) {
               />
             );
           })}
+
+          {/* Interaction overlay: legal click targets (Play view) sit on top */}
+          {interaction && (
+            <g>
+              {/* Legal tiles (robber / knight): a translucent hex with a ring */}
+              {interaction.tiles.map((tile, i) => {
+                const { x, y } = hexToPixel(tile, HEX_SIZE);
+                const pts = hexCorners(x + offsetX, y + offsetY, HEX_SIZE * 0.94)
+                  .map(([px, py]) => `${px},${py}`)
+                  .join(" ");
+                return (
+                  <polygon
+                    key={`itile-${i}`}
+                    points={pts}
+                    fill={HIGHLIGHT}
+                    fillOpacity={0.22}
+                    stroke={HIGHLIGHT}
+                    strokeWidth={3}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => interaction.onTile?.(tile)}
+                  />
+                );
+              })}
+
+              {/* Legal edges (roads): a thick clickable line */}
+              {interaction.edges.map((edge, i) => {
+                const a = cubeToPixel(edge.a, HEX_SIZE);
+                const b = cubeToPixel(edge.b, HEX_SIZE);
+                return (
+                  <line
+                    key={`iedge-${i}`}
+                    x1={a.x + offsetX}
+                    y1={a.y + offsetY}
+                    x2={b.x + offsetX}
+                    y2={b.y + offsetY}
+                    stroke={HIGHLIGHT}
+                    strokeOpacity={0.75}
+                    strokeWidth={HEX_SIZE * 0.16}
+                    strokeLinecap="round"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => interaction.onEdge?.(edge)}
+                  />
+                );
+              })}
+
+              {/* Legal vertices (settlements / cities): a pulsing dot */}
+              {interaction.vertices.map((vertex, i) => {
+                const { x, y } = cubeToPixel(vertex, HEX_SIZE);
+                return (
+                  <circle
+                    key={`ivert-${i}`}
+                    cx={x + offsetX}
+                    cy={y + offsetY}
+                    r={HEX_SIZE * 0.22}
+                    fill={HIGHLIGHT}
+                    fillOpacity={0.55}
+                    stroke={HIGHLIGHT_STROKE}
+                    strokeWidth={2}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => interaction.onVertex?.(vertex)}
+                  >
+                    <animate
+                      attributeName="r"
+                      values={`${HEX_SIZE * 0.18};${HEX_SIZE * 0.26};${HEX_SIZE * 0.18}`}
+                      dur="1.4s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                );
+              })}
+            </g>
+          )}
         </svg>
       </div>
 

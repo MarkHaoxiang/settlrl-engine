@@ -20,13 +20,13 @@ from jaxtyping import install_import_hook
 
 install_import_hook(
     [
-        "catan_engine.placement",
-        "catan_engine.awards",
-        "catan_engine.dice",
-        "catan_engine.robber",
-        "catan_engine.setup",
-        "catan_engine.trade",
-        "catan_engine.development",
+        "catan_engine.mechanics.placement",
+        "catan_engine.mechanics.awards",
+        "catan_engine.mechanics.dice",
+        "catan_engine.mechanics.robber",
+        "catan_engine.mechanics.setup",
+        "catan_engine.mechanics.trade",
+        "catan_engine.mechanics.development",
     ],
     "beartype.beartype",
 )

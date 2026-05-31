@@ -4,10 +4,18 @@ Web-based renderer for catan-engine. FastAPI serves board state over a JSON API;
 
 A menu lets you choose between two modes, each at its own URL:
 
-- **Play** (`/play`) — a live game board with a control bar showing your hand (resources + dev cards by type) and the turn action buttons.
-- **Replay** (`/replay`, or `/replay/:gameId`) — a recorded game with playback controls.
+- **Play** (`/play`) — a live, playable game against random bots. You play seat 0 (Red); the
+  backend auto-plays the other three seats. Input is hybrid: click highlighted vertices / edges
+  / tiles on the board for placements and the robber, use the bottom control-bar buttons for
+  parameterless moves (roll, end turn, buy dev card), and pick from a popover for resource moves
+  (monopoly / year-of-plenty / maritime trade). The bar also shows your hand (resources + dev
+  cards by type).
+- **Replay** (`/replay`, or `/replay/:gameId`) — a recorded game with playback controls. The
+  playback controls are still presentation stubs.
 
-The mode controls are currently presentation stubs; both views render the same board served by the API.
+The game is driven through `catan-engine`'s single-game PettingZoo-AEC env
+(`catan_engine.env.aec`): the server holds one live game and applies your moves, then plays
+random legal moves for the bots until it is your turn again or the game ends.
 
 ## Requirements
 
@@ -48,7 +56,15 @@ Open http://localhost:8000.
 | Endpoint | Description |
 |---|---|
 | `GET /api/board` | Returns the current board as JSON |
+| `GET /api/game` | Live game snapshot: board + turn status + your legal moves |
+| `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot (bots have already replied). `409` if the move is illegal |
+| `POST /api/game/reset` | Start a fresh game `{ "seed": <int> }` |
 | `GET /docs` | Interactive API docs (Swagger UI) |
+
+Each legal move in `GET /api/game` is a decoded action descriptor carrying its `flat` index
+(post it back to apply it), a `type`, a human `label`, and — depending on the type — the board
+target (`vertex` / `edge` / `tile` + `victim`) or resources involved, in the same cube/axial
+coordinates the board uses.
 
 Example response:
 ```json
@@ -69,22 +85,27 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/catan-render/
 ├── src/catan_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
-│   ├── server.py        # FastAPI app and /api/board
+│   ├── server.py        # FastAPI app: /api/board + /api/game* endpoints
+│   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
+│   ├── actions.py       # Decode AEC flat actions -> wire ActionModels
 │   ├── convert.py       # catan-engine Board -> BoardModel
-│   └── models.py        # Pydantic board / tile models
+│   └── models.py        # Pydantic board / game / action models
 └── frontend/
     └── src/
         ├── App.tsx          # Routes: menu, /play, /replay/:gameId
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math
-        ├── lib/boardData.ts  # Fetches the board from /api/board; shared colours
+        ├── lib/boardData.ts  # Board types + adaptBoard; fetches /api/board
         ├── lib/useBoard.ts   # Hook that loads the board for a view
+        ├── lib/game.ts       # Live-game API client (/api/game*)
+        ├── lib/useGame.ts    # Hook driving the live game (act / reset)
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play or Replay
-        │   ├── PlayView.tsx   # Play mode: board + action bar
+        │   ├── PlayView.tsx   # Play mode: interactive board + live action bar
         │   └── ReplayView.tsx # Replay mode: board + playback scrubber
         └── components/
-            ├── GameShell.tsx    # Shared frame: board + back link + controls slot
-            ├── BoardView.tsx    # SVG viewport, ocean background, scroll/pinch zoom
+            ├── GameShell.tsx    # Shared frame (Replay): board + back link + controls slot
+            ├── TopBar.tsx       # Back-to-menu + mode label bar
+            ├── BoardView.tsx    # SVG viewport, zoom, optional click/highlight interaction
             ├── HexTile.tsx      # Hex polygon, terrain colour, number token
             ├── Road.tsx         # Player road along an edge
             ├── Building.tsx     # Settlement / city on a vertex

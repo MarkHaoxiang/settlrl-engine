@@ -102,3 +102,55 @@ class BoardModel(BaseModel):
     players: list[PlayerModel] = []
     # Tile the robber currently occupies (axial coordinate), if any.
     robber: HexModel | None = None
+
+
+class EdgeModel(BaseModel):
+    """A board edge between two vertices (in cube coordinates)."""
+
+    a: CubeModel
+    b: CubeModel
+
+
+class ActionModel(BaseModel):
+    """One legal move for the acting player, decoded from the AEC flat action set.
+
+    ``flat`` is the engine's flat action index (post it back to apply the move).
+    ``type`` is the lowercased :class:`ActionType` name. Depending on the type, at
+    most one geometry/resource group below is populated; the rest stay ``None``.
+    """
+
+    flat: int
+    type: str
+    label: str
+    # Placement target: a vertex (settlement/city), an edge (road), or a tile
+    # (robber / knight, with the optional victim player to steal from).
+    vertex: CubeModel | None = None
+    edge: EdgeModel | None = None
+    tile: HexModel | None = None
+    victim: int | None = None
+    # Resource choices: monopoly (one), year-of-plenty (two), maritime trade.
+    resource: str | None = None
+    resources: list[str] | None = None
+    give: str | None = None
+    receive: str | None = None
+
+
+class GameStatusModel(BaseModel):
+    """Turn-flow snapshot for the live game."""
+
+    phase: str
+    current_player: int
+    acting_player: int
+    dice_roll: int
+    has_rolled: bool
+    your_turn: bool
+    terminal: bool
+    winner: int | None = None
+
+
+class GameModel(BaseModel):
+    """Everything the Play view needs after a move: board + status + legal moves."""
+
+    board: BoardModel
+    status: GameStatusModel
+    actions: list[ActionModel] = []

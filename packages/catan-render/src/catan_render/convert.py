@@ -6,7 +6,7 @@ module bridges the two so the FastAPI server can serve a board produced by the
 engine.
 
 Geometry note: the engine assigns tile / vertex / edge indices implicitly by the
-order it generates them in ``catan_engine.layout._generate_mappings``. Those maps
+order it generates them in ``catan_engine.board.layout._generate_mappings``. Those maps
 are private, so we reproduce the same deterministic construction here to recover
 the index -> coordinate tables the renderer needs. The asserts below pin our
 reconstruction to the engine's published counts.
@@ -15,9 +15,9 @@ reconstruction to the engine's published counts.
 from typing import Literal
 
 from catan_engine.board import Board
-from catan_engine.layout import N_EDGES, N_PORTS, N_TILES, N_VERTICES
-from catan_engine.port import Port
-from catan_engine.tile import Tile
+from catan_engine.board.layout import N_EDGES, N_PORTS, N_TILES, N_VERTICES
+from catan_engine.board.port import Port
+from catan_engine.board.tile import Tile
 
 from .models import (
     BoardModel,
@@ -35,10 +35,10 @@ from .models import (
 
 PortResource = Literal["sheep", "wheat", "wood", "brick", "ore"]
 
-# -- Geometry (mirrors catan_engine.layout) --------------------------------
+# -- Geometry (mirrors catan_engine.board.layout) --------------------------------
 
 # Directions from a tile centre to its six corner vertices, and the three
-# edge-difference vectors, exactly as in catan_engine.layout.
+# edge-difference vectors, exactly as in catan_engine.board.layout.
 _VERTEX_DIRS = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 _EDGE_DIFFS = ((1, 1, 0), (1, 0, 1), (0, 1, 1))
 
@@ -94,7 +94,7 @@ assert len(EDGE_VERTICES) == N_EDGES
 TILE_COORDS: tuple[tuple[int, int], ...] = tuple((q, r) for q, r, _ in _TILE_CUBES)
 
 # The two coastal vertices of each port, in port-index order. Copied verbatim
-# from catan_engine.layout._generate_mappings; port_allocation[i] -> here.
+# from catan_engine.board.layout._generate_mappings; port_allocation[i] -> here.
 PORT_VERTEX_COORDS: tuple[tuple[Cube, Cube], ...] = (
     ((3, 0, -2), (2, 0, -3)),
     ((-3, 2, 0), (-2, 3, 0)),

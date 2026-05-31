@@ -139,13 +139,13 @@ name = "catan-render"
 version = "0.1.0"
 source = { editable = "packages/catan-render" }
 dependencies = [
-    { name = "catan-engine" },
+    { name = "catan-engine", extra = ["rl"] },
     { name = "fastapi", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "catan-engine", editable = "packages/catan-engine" },
+    { name = "catan-engine", extras = ["rl"], editable = "packages/catan-engine" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
 ]
 

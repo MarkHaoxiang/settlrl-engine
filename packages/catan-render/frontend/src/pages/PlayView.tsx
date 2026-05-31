@@ -1,4 +1,8 @@
-import GameShell from "../components/GameShell";
+import { useEffect, useMemo, useState } from "react";
+import BoardView, { type BoardInteraction } from "../components/BoardView";
+import TopBar from "../components/TopBar";
+import { useGame } from "../lib/useGame";
+import type { GameAction } from "../lib/game";
 import {
   PLAYER_COLORS,
   PLAYER_STROKES,
@@ -8,13 +12,11 @@ import {
   type Player,
   type ResourceKind,
 } from "../lib/boardData";
+import type { Cube, Hex } from "../lib/hex";
 
-// The player controlled from this view. There's no turn flow yet, so the local
-// player is fixed to seat 0 for now.
-const LOCAL_PLAYER = 0;
 const PLAYER_NAMES = ["Red", "Blue", "White", "Orange"];
+const LOCAL_PLAYER = 0;
 
-// Resources shown left-to-right, with the label under each chip.
 const RESOURCES: { key: ResourceKind; label: string }[] = [
   { key: "wood", label: "Wood" },
   { key: "brick", label: "Brick" },
@@ -23,7 +25,6 @@ const RESOURCES: { key: ResourceKind; label: string }[] = [
   { key: "ore", label: "Ore" },
 ];
 
-// Dev cards use a shared parchment-purple chip; labels kept short to fit.
 const DEV_CARDS: { key: DevCardKind; label: string }[] = [
   { key: "knight", label: "Knight" },
   { key: "road_building", label: "Roads" },
@@ -35,19 +36,68 @@ const DEV_CARDS: { key: DevCardKind; label: string }[] = [
 const DEV_FILL = "#5B4B8A";
 const DEV_STROKE = "#3C3160";
 
+// Action types that are placed by clicking the board (vs. fired by a button or
+// chosen from a resource popover).
+const BOARD_TYPES = new Set([
+  "setup_settlement",
+  "build_settlement",
+  "build_city",
+  "setup_road",
+  "build_road",
+  "move_robber",
+  "play_knight",
+]);
+// Action types whose concrete variants are chosen from a popover list.
+const RESOURCE_TYPES = new Set(["play_monopoly", "play_year_of_plenty", "maritime_trade"]);
+
+// Button label per action type (board / parameterless / resource group buttons).
+const TYPE_LABEL: Record<string, string> = {
+  setup_settlement: "Place settlement",
+  build_settlement: "Settlement",
+  build_city: "City",
+  setup_road: "Place road",
+  build_road: "Road",
+  move_robber: "Move robber",
+  play_knight: "Knight",
+  roll_dice: "Roll dice",
+  end_turn: "End turn",
+  buy_development_card: "Buy dev card",
+  play_road_building: "Road building",
+  discard: "Discard",
+  play_monopoly: "Monopoly",
+  play_year_of_plenty: "Year of plenty",
+  maritime_trade: "Trade",
+};
+
+const PHASE_LABEL: Record<string, string> = {
+  setup_settlement: "Setup — place a settlement",
+  setup_road: "Setup — place a road",
+  roll: "Roll the dice",
+  discard: "Discard cards",
+  move_robber: "Move the robber",
+  main: "Main phase",
+  game_over: "Game over",
+};
+
+const cubeEq = (a: Cube, b: Cube) => a.q === b.q && a.r === b.r && a.s === b.s;
+const hexEq = (a: Hex, b: Hex) => a.q === b.q && a.r === b.r;
+const edgeEq = (a: { a: Cube; b: Cube }, b: { a: Cube; b: Cube }) =>
+  (cubeEq(a.a, b.a) && cubeEq(a.b, b.b)) || (cubeEq(a.a, b.b) && cubeEq(a.b, b.a));
+
 const barStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 12,
   padding: "14px 18px",
   borderRadius: 16,
-  background: "rgba(12, 28, 46, 0.9)",
+  background: "rgba(12, 28, 46, 0.92)",
   border: "1px solid rgba(255,255,255,0.15)",
   color: "#F2EFE6",
   fontFamily: "Georgia, serif",
   backdropFilter: "blur(2px)",
   userSelect: "none",
   boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
+  maxWidth: "92vw",
 };
 
 const actionStyle: React.CSSProperties = {
@@ -61,8 +111,6 @@ const actionStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-// A single hand chip: large count over a small label, on a coloured swatch.
-// Dimmed when the player holds none of that card.
 function Chip({ count, label, fill, stroke }: { count: number; label: string; fill: string; stroke: string }) {
   const empty = count === 0;
   return (
@@ -95,50 +143,46 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-// The big play control bar: the local player's hand (resources + dev cards)
-// above the turn action buttons. Action buttons are presentation stubs until
-// the engine action endpoint is wired up.
-function PlayControls({ player }: { player: Player }) {
-  const actions = ["Build", "Buy dev card", "Trade", "Roll dice", "End turn"];
+// The local player's hand: resources + dev cards by type.
+function Hand({ player }: { player: Player }) {
   const color = PLAYER_COLORS[player.player] ?? "#888";
   const stroke = PLAYER_STROKES[player.player] ?? "#444";
   const name = PLAYER_NAMES[player.player] ?? `Player ${player.player + 1}`;
-
   return (
-    <div style={barStyle}>
-      {/* Hand: who you are + resources + dev cards */}
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 }}>
-          <span
-            style={{ width: 16, height: 16, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }}
-          />
-          <span style={{ fontWeight: 700, fontSize: 14 }}>{name} (you)</span>
-        </div>
-
-        <Group title="Resources">
-          {RESOURCES.map((r) => (
-            <Chip
-              key={r.key}
-              count={player.resources[r.key]}
-              label={r.label}
-              fill={TERRAIN_FILL[r.key]}
-              stroke={TERRAIN_STROKE[r.key]}
-            />
-          ))}
-        </Group>
-
-        <Group title="Dev cards">
-          {DEV_CARDS.map((d) => (
-            <Chip key={d.key} count={player.devCardTypes[d.key]} label={d.label} fill={DEV_FILL} stroke={DEV_STROKE} />
-          ))}
-        </Group>
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 }}>
+        <span style={{ width: 16, height: 16, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }} />
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{name} (you)</span>
       </div>
+      <Group title="Resources">
+        {RESOURCES.map((r) => (
+          <Chip key={r.key} count={player.resources[r.key]} label={r.label} fill={TERRAIN_FILL[r.key]} stroke={TERRAIN_STROKE[r.key]} />
+        ))}
+      </Group>
+      <Group title="Dev cards">
+        {DEV_CARDS.map((d) => (
+          <Chip key={d.key} count={player.devCardTypes[d.key]} label={d.label} fill={DEV_FILL} stroke={DEV_STROKE} />
+        ))}
+      </Group>
+    </div>
+  );
+}
 
-      {/* Turn actions */}
-      <div style={{ display: "flex", gap: 10, justifyContent: "center", borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 12 }}>
+// A popover listing concrete actions to pick from (resource trades, or the
+// victim choice when a robber tile has several stealable players).
+function ChoicePopover({ actions, onPick, onClose }: { actions: GameAction[]; onPick: (flat: number) => void; onClose: () => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>Choose</span>
+        <button style={{ ...actionStyle, padding: "2px 10px", fontSize: 12 }} onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", maxWidth: 640 }}>
         {actions.map((a) => (
-          <button key={a} style={actionStyle} disabled>
-            {a}
+          <button key={a.flat} style={actionStyle} onClick={() => onPick(a.flat)}>
+            {a.label}
           </button>
         ))}
       </div>
@@ -147,5 +191,161 @@ function PlayControls({ player }: { player: Player }) {
 }
 
 export default function PlayView() {
-  return <GameShell mode="Play" controls={(board) => <PlayControls player={board.players[LOCAL_PLAYER]} />} />;
+  const { snapshot, error, busy, act, reset } = useGame();
+  const [armed, setArmed] = useState<string | null>(null);
+  const [choice, setChoice] = useState<GameAction[] | null>(null);
+
+  const actions = snapshot?.actions ?? [];
+
+  // Reset transient UI when a new snapshot arrives: drop any popover, keep the
+  // armed type only if it's still available, and auto-arm setup placements.
+  useEffect(() => {
+    if (!snapshot) return;
+    setChoice(null);
+    const types = new Set(snapshot.actions.map((a) => a.type));
+    setArmed((prev) => {
+      if (prev && types.has(prev)) return prev;
+      if (types.has("setup_settlement")) return "setup_settlement";
+      if (types.has("setup_road")) return "setup_road";
+      return null;
+    });
+  }, [snapshot]);
+
+  // Esc disarms / closes the popover.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setArmed(null);
+        setChoice(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const byType = (type: string) => actions.filter((a) => a.type === type);
+  const availableTypes = useMemo(() => Array.from(new Set(actions.map((a) => a.type))), [actions]);
+
+  // Either apply the single matching action, or pop a chooser for the rest.
+  const actOrChoose = (matches: GameAction[]) => {
+    if (matches.length === 1) act(matches[0].flat);
+    else if (matches.length > 1) setChoice(matches);
+  };
+
+  // Board click targets for the armed action type.
+  const interaction: BoardInteraction | undefined = useMemo(() => {
+    if (!armed || !BOARD_TYPES.has(armed)) return undefined;
+    const armedActions = byType(armed);
+    const tiles: Hex[] = [];
+    for (const a of armedActions) if (a.tile && !tiles.some((t) => hexEq(t, a.tile!))) tiles.push(a.tile);
+    return {
+      vertices: armedActions.filter((a) => a.vertex).map((a) => a.vertex as Cube),
+      edges: armedActions.filter((a) => a.edge).map((a) => a.edge as { a: Cube; b: Cube }),
+      tiles,
+      onVertex: (v) => actOrChoose(armedActions.filter((a) => a.vertex && cubeEq(a.vertex, v))),
+      onEdge: (e) => actOrChoose(armedActions.filter((a) => a.edge && edgeEq(a.edge, e))),
+      onTile: (t) => actOrChoose(armedActions.filter((a) => a.tile && hexEq(a.tile, t))),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armed, actions]);
+
+  if (error) return <div style={{ color: "#fff", padding: 24, fontFamily: "Georgia, serif" }}>{error}</div>;
+  if (!snapshot) return <div style={{ color: "#fff", padding: 24, fontFamily: "Georgia, serif" }}>Loading game…</div>;
+
+  const { status, board } = snapshot;
+  const me = board.players[LOCAL_PLAYER];
+
+  // The action buttons, derived from the distinct legal action types.
+  const onTypeButton = (type: string) => {
+    if (BOARD_TYPES.has(type)) setArmed((prev) => (prev === type ? null : type));
+    else if (RESOURCE_TYPES.has(type)) setChoice(byType(type));
+    else act(byType(type)[0].flat); // parameterless: a single flat action
+  };
+
+  return (
+    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
+      <BoardView board={board} interaction={interaction} />
+      <TopBar mode="Play" />
+
+      {status.terminal && (
+        <div
+          style={{
+            position: "absolute",
+            top: 70,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "10px 20px",
+            borderRadius: 12,
+            background: "rgba(12,28,46,0.92)",
+            border: "1px solid rgba(255,255,255,0.2)",
+            color: "#FCE38A",
+            fontFamily: "Georgia, serif",
+            fontWeight: 700,
+            zIndex: 10,
+          }}
+        >
+          {status.winner === LOCAL_PLAYER ? "You win! 🎉" : `${PLAYER_NAMES[status.winner ?? 0]} wins`}
+        </div>
+      )}
+
+      <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)" }}>
+        <div style={barStyle}>
+          <Hand player={me} />
+
+          {/* Status + actions */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 13, opacity: 0.85 }}>
+              <span style={{ fontWeight: 700 }}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
+              {status.dice_roll > 0 && <span>🎲 {status.dice_roll}</span>}
+              <span style={{ opacity: 0.7 }}>
+                {busy ? "Bots thinking…" : status.your_turn ? "Your turn" : status.terminal ? "Game over" : "Waiting…"}
+              </span>
+              {armed && BOARD_TYPES.has(armed) && !busy && (
+                <span style={{ color: "#FCE38A" }}>Click a highlighted spot to place ({TYPE_LABEL[armed]})</span>
+              )}
+              <button
+                style={{ ...actionStyle, marginLeft: "auto", padding: "5px 12px", fontSize: 12 }}
+                onClick={() => reset(Math.floor(Math.random() * 65536))}
+              >
+                New game
+              </button>
+            </div>
+
+            {!status.terminal && (
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                {availableTypes.length === 0 && <span style={{ fontSize: 13, opacity: 0.6 }}>No moves available.</span>}
+                {availableTypes.map((type) => {
+                  const isArmed = armed === type;
+                  return (
+                    <button
+                      key={type}
+                      style={{
+                        ...actionStyle,
+                        ...(isArmed ? { background: "rgba(252,227,138,0.25)", borderColor: "#FCE38A" } : {}),
+                      }}
+                      disabled={busy}
+                      onClick={() => onTypeButton(type)}
+                    >
+                      {TYPE_LABEL[type] ?? type}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {choice && (
+              <ChoicePopover
+                actions={choice}
+                onPick={(flat) => {
+                  setChoice(null);
+                  act(flat);
+                }}
+                onClose={() => setChoice(null)}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

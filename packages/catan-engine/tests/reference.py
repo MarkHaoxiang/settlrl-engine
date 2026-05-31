@@ -25,8 +25,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from catan_engine.dev_cards import DevCard
-from catan_engine.layout import (
+from catan_engine.board.dev_cards import DevCard
+from catan_engine.board.layout import (
     EDGE_V,
     MAX_VERTEX_DEGREE,
     N_EDGES,
@@ -35,10 +35,10 @@ from catan_engine.layout import (
     TILE_V,
     BoardLayout,
 )
-from catan_engine.port import Port
-from catan_engine.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
-from catan_engine.state import NO_INDEX, BoardState, MAX_ROADS
-from catan_engine.tile import Tile
+from catan_engine.board.port import Port
+from catan_engine.board.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
+from catan_engine.board.state import NO_INDEX, BoardState, MAX_ROADS
+from catan_engine.board.tile import Tile
 
 # Static geometry as NumPy for fast indexing in the helpers below.
 _EDGE_V = np.asarray(EDGE_V)  # (N_EDGES, 2)

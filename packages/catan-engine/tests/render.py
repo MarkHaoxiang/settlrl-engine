@@ -24,8 +24,8 @@ import jax.numpy as jnp
 import numpy as np
 from tabulate import tabulate
 
-from catan_engine.dev_cards import N_DEV_CARD_TYPES, DevCard
-from catan_engine.layout import (
+from catan_engine.board.dev_cards import N_DEV_CARD_TYPES, DevCard
+from catan_engine.board.layout import (
     EDGE_V,
     N_PORTS,
     N_TILES,
@@ -35,10 +35,10 @@ from catan_engine.layout import (
     tile_cube,
     vertex_cube,
 )
-from catan_engine.port import Port
-from catan_engine.resources import N_PLAYERS, compute_bank_resources
-from catan_engine.state import NO_INDEX, BoardState, GamePhase
-from catan_engine.tile import Tile
+from catan_engine.board.port import Port
+from catan_engine.board.resources import N_PLAYERS, compute_bank_resources
+from catan_engine.board.state import NO_INDEX, BoardState, GamePhase
+from catan_engine.board.tile import Tile
 from tests.reference import player_total_vp
 
 # Cube coordinates per tile / vertex, taken from the engine's canonical index
