@@ -200,3 +200,8 @@ node_modules/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# pytest-benchmark saved runs (local profiling artifacts)
+.benchmarks/
+
+# Claude Code runtime lock
+.claude/scheduled_tasks.lock
