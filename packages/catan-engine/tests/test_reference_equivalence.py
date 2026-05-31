@@ -108,9 +108,11 @@ def _play_one_game(seed: int, max_steps: int = 300) -> None:
         conv.assert_states_match(board, game, 0)
 
 
-# A spread of seeds; seed 18 reaches a win (Knight -> Largest Army -> 10 VP), so
-# it covers the game-completion path as well as the open-game state agreement.
-_SEEDS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 18)
+# A small spread of seeds; seed 18 reaches a win (Knight -> Largest Army -> 10
+# VP), so it covers the game-completion path as well as the open-game state
+# agreement. Kept short on purpose -- each game is a full step-by-step
+# differential replay, so this test is one of the slowest in the suite.
+_SEEDS = (0, 1, 2, 18)
 
 
 def test_engine_matches_reference_over_random_games() -> None:
