@@ -3,7 +3,8 @@
 The longest-road length is the hard piece: it is the longest *trail* (no repeated
 edge) in the player's road subgraph that may not pass *through* an opponent-owned
 vertex (it may start or end there). It is implemented as an explicit-stack
-iterative DFS via ``lax.while_loop`` so it stays fully traceable / vmappable.
+iterative DFS via ``lax.while_loop`` so it stays fully traceable / vmappable;
+each frame carries its used-edge set as a packed int32 bitmask.
 """
 
 from __future__ import annotations
@@ -77,16 +78,23 @@ def longest_road_length(
     target = player + 1
     mine = edge_road == target  # (N_EDGES,) bool
 
-    # Seed frames: for each edge in each direction, land on the far vertex.
-    onehot = jnp.eye(N_EDGES, dtype=jnp.bool_) & mine[:, None]  # empty if not mine
+    # The used-edge set rides each frame as a packed int32 bitmask. A player owns
+    # at most MAX_ROADS (=15) edges, so a running count over `mine` maps the owned
+    # edges to bit positions 0.. -- a single int32 word always suffices (15 < 32).
+    # Non-owned edges get a clamped junk index that the `mine[e]` guard never reads.
+    local_of = jnp.clip(jnp.cumsum(mine.astype(jnp.int32)) - 1, 0, 31)  # (N_EDGES,)
+
+    # Seed frames: for each edge in each direction, land on the far vertex with
+    # only that edge's bit set (a length-1 trail); non-owned edges seed mask 0.
+    seed_word = jnp.where(mine, jnp.int32(1) << local_of, jnp.int32(0))  # (N_EDGES,)
     seed_vertex = jnp.concatenate([EDGE_V[:, 1], EDGE_V[:, 0]])  # (2N,)
     seed_len = jnp.concatenate([mine, mine]).astype(jnp.int32)  # 1 if mine else 0
-    seed_mask = jnp.concatenate([onehot, onehot], axis=0)  # (2N, N_EDGES)
+    seed_mask = jnp.concatenate([seed_word, seed_word])  # (2N,) int32
     n_seed = 2 * N_EDGES
 
     stack_v = jnp.zeros((STACK_CAP,), jnp.int32).at[:n_seed].set(seed_vertex)
     stack_len = jnp.zeros((STACK_CAP,), jnp.int32).at[:n_seed].set(seed_len)
-    stack_mask = jnp.zeros((STACK_CAP, N_EDGES), jnp.bool_).at[:n_seed].set(seed_mask)
+    stack_mask = jnp.zeros((STACK_CAP,), jnp.int32).at[:n_seed].set(seed_mask)
     sp = jnp.int32(n_seed)
     best = jnp.int32(0)
 
@@ -111,8 +119,9 @@ def longest_road_length(
             idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
             e = _ADJ_EDGE[idx]
             w = _ADJ_NBR[idx]
-            valid = (slot < deg) & can & mine[e] & ~m[e]
-            new_mask = m.at[e].set(True)
+            bit = jnp.int32(1) << local_of[e]
+            valid = (slot < deg) & can & mine[e] & ((m & bit) == 0)
+            new_mask = m | bit
             sv = sv.at[sp_i].set(jnp.where(valid, w, sv[sp_i]))
             sl = sl.at[sp_i].set(jnp.where(valid, length + 1, sl[sp_i]))
             sm = sm.at[sp_i].set(jnp.where(valid, new_mask, sm[sp_i]))
