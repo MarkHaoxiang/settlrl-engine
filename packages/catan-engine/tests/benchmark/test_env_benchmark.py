@@ -3,7 +3,8 @@
 Two rollouts driven by uniformly-random *legal* actions:
 
 - ``BatchedCatanEnv`` -- a batch of games stepped in lockstep (the vectorised
-  surface); one random legal action per lane per step.
+  surface); one random legal action per lane per step. Swept over batch sizes
+  (1 / 10 / 100) to show how the per-step cost amortises across the batch.
 - ``CatanAECEnv`` -- a single game, turn at a time (the PettingZoo surface).
 
 Legality comes from the engine itself: the batched rollout samples via
@@ -21,6 +22,7 @@ from typing import Any
 
 import jax
 import numpy as np
+import pytest
 
 from catan_engine.env.aec import CatanAECEnv
 from catan_engine.env.batched import BatchedCatanEnv
@@ -51,9 +53,15 @@ def _aec_rollout(seed: int, steps: int) -> None:
         e.step(int(rng.choice(legal)))
 
 
-def test_batched_env_random_rollout(benchmark: Any) -> None:
-    """Throughput of a batch of games stepped with random legal actions."""
-    batch_size, steps = 8, 40
+@pytest.mark.parametrize("batch_size", [1, 10, 100])
+def test_batched_env_random_rollout(benchmark: Any, batch_size: int) -> None:
+    """Throughput of a batch of games stepped with random legal actions.
+
+    Swept across batch sizes to show how the vectorised surface amortises the
+    per-step cost: wall-clock for a fixed number of steps grows far slower than
+    the batch (more games stepped per unit time)."""
+    steps = 40
+    benchmark.group = "batched_env_random_rollout"
     _batched_rollout(seed=0, batch_size=batch_size, steps=steps)  # warm up JIT
     benchmark(lambda: _batched_rollout(seed=0, batch_size=batch_size, steps=steps))
 

@@ -4,9 +4,10 @@ Throughput benchmarks for the RL environments under random legal play, built on
 [pytest-benchmark](https://pytest-benchmark.readthedocs.io/). Two rollouts are
 measured:
 
-- **`test_batched_env_random_rollout`** — a batch of games stepped in lockstep
+- **`test_batched_env_random_rollout[N]`** — a batch of games stepped in lockstep
   through `BatchedCatanEnv` (the vectorised surface), one random legal action per
-  lane per step.
+  lane per step. Swept over batch sizes `N` ∈ {1, 10, 100} (grouped together in
+  the output) to show how the per-step cost amortises across the batch.
 - **`test_aec_env_random_rollout`** — a single game played turn-at-a-time through
   the PettingZoo `CatanAECEnv`.
 
