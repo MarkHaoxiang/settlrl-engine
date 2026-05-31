@@ -36,10 +36,12 @@ from catan_engine.mechanics.common import (
 # This is the award-holder sentinel, unrelated to any geometry padding.
 _NONE = jnp.int32(NO_INDEX)
 
-# Generous bound for the longest-road DFS stack. We seed 2 * N_EDGES frames
-# (both directions of every edge) and the live DFS frontier adds only
-# depth * (maxdeg - 1) ~= 15 * 2 on top; this leaves a wide margin.
+# Generous bound for the longest-road DFS stack. We seed at most 2 * MAX_ROADS
+# (=30) owned-edge frames and the live DFS frontier adds only depth * (maxdeg-1)
+# ~= 15 * 2 on top; this leaves a wide margin. _DUMP is a scratch slot above any
+# live frame where non-owned edges park their (never-popped) seeds.
 STACK_CAP = 2 * N_EDGES + 128
+_DUMP = STACK_CAP - 1
 
 # Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built
 # once at import. Each undirected edge is listed under both endpoints; entries
@@ -69,33 +71,56 @@ def longest_road_length(
     by an opponent (it may start or end there). Implemented as an explicit-stack
     iterative DFS so it is fully traceable / vmappable.
 
-    Seeding both directions of every edge (a length-1 frame having already
-    traversed that edge, landing at the far vertex) and only *expanding* from
-    passable vertices handles the opponent-as-endpoint rule and lets a trail
-    pass through an empty interior vertex whose two endpoints are opponents.
-    Non-owned edges are seeded as harmless length-0 frames.
+    Each *owned* edge is seeded in both directions (a length-1 frame having
+    already traversed that edge, landing on the far vertex); the DFS then only
+    *expands* from passable vertices, which handles the opponent-as-endpoint rule
+    and lets a trail pass through an empty interior vertex whose two endpoints are
+    opponents. Non-owned edges need no seed: every trail begins with an owned
+    edge, so that edge's own directional seed already starts it -- seeding the
+    rest would only re-explore the same trails from each interior vertex.
     """
     target = player + 1
     mine = edge_road == target  # (N_EDGES,) bool
 
-    # The used-edge set rides each frame as a packed int32 bitmask. A player owns
-    # at most MAX_ROADS (=15) edges, so a running count over `mine` maps the owned
-    # edges to bit positions 0.. -- a single int32 word always suffices (15 < 32).
-    # Non-owned edges get a clamped junk index that the `mine[e]` guard never reads.
+    # Compact rank of each owned edge (a running count over `mine`): doubles as
+    # both its bit position in the int32 used-edge mask and its seed slot. A
+    # player owns at most MAX_ROADS (=15) edges, so one int32 word always suffices
+    # (15 < 32). Non-owned edges get a clamped junk rank the `mine[e]` guard never
+    # reads, and seed into a throwaway slot that is never popped.
     local_of = jnp.clip(jnp.cumsum(mine.astype(jnp.int32)) - 1, 0, 31)  # (N_EDGES,)
+    n_owned = jnp.sum(mine.astype(jnp.int32))
 
-    # Seed frames: for each edge in each direction, land on the far vertex with
-    # only that edge's bit set (a length-1 trail); non-owned edges seed mask 0.
-    seed_word = jnp.where(mine, jnp.int32(1) << local_of, jnp.int32(0))  # (N_EDGES,)
-    seed_vertex = jnp.concatenate([EDGE_V[:, 1], EDGE_V[:, 0]])  # (2N,)
-    seed_len = jnp.concatenate([mine, mine]).astype(jnp.int32)  # 1 if mine else 0
-    seed_mask = jnp.concatenate([seed_word, seed_word])  # (2N,) int32
-    n_seed = 2 * N_EDGES
+    # Seed only owned edges, compacted to the front: forward seeds (land on
+    # EDGE_V[:, 1]) fill slots [0, n_owned), backward (land on EDGE_V[:, 0]) fill
+    # [n_owned, 2 * n_owned); each starts a length-1 trail with only its own bit
+    # set. Non-owned edges scatter to slot _DUMP (> any live frame, never popped).
+    seed_word = jnp.where(mine, jnp.int32(1) << local_of, jnp.int32(0))
+    seed_len = jnp.where(mine, jnp.int32(1), jnp.int32(0))
+    fwd_slot = jnp.where(mine, local_of, _DUMP)
+    bwd_slot = jnp.where(mine, n_owned + local_of, _DUMP)
 
-    stack_v = jnp.zeros((STACK_CAP,), jnp.int32).at[:n_seed].set(seed_vertex)
-    stack_len = jnp.zeros((STACK_CAP,), jnp.int32).at[:n_seed].set(seed_len)
-    stack_mask = jnp.zeros((STACK_CAP,), jnp.int32).at[:n_seed].set(seed_mask)
-    sp = jnp.int32(n_seed)
+    stack_v = (
+        jnp.zeros((STACK_CAP,), jnp.int32)
+        .at[fwd_slot]
+        .set(EDGE_V[:, 1])
+        .at[bwd_slot]
+        .set(EDGE_V[:, 0])
+    )
+    stack_len = (
+        jnp.zeros((STACK_CAP,), jnp.int32)
+        .at[fwd_slot]
+        .set(seed_len)
+        .at[bwd_slot]
+        .set(seed_len)
+    )
+    stack_mask = (
+        jnp.zeros((STACK_CAP,), jnp.int32)
+        .at[fwd_slot]
+        .set(seed_word)
+        .at[bwd_slot]
+        .set(seed_word)
+    )
+    sp = jnp.int32(2) * n_owned
     best = jnp.int32(0)
 
     def cond(carry: tuple) -> jax.Array:
