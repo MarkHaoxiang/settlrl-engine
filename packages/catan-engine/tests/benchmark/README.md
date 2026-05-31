@@ -15,16 +15,19 @@ action type is exercised, including the forced discard / move-robber after a 7.
 
 ## Running
 
-From the repo root (`uv sync` first if you haven't):
+From the repo root (`uv sync` first if you haven't), use the wrapper script:
 
 ```bash
-uv run --package catan-engine pytest tests/benchmark --benchmark-only --no-cov
+./run_benchmarks.sh
 ```
 
-- `--benchmark-only` skips the regular test suite and runs just the benchmarks.
-- `--no-cov` turns off coverage (on by default via `addopts`), which otherwise
+It runs `pytest packages/catan-engine/tests/benchmark` with:
+
+- `--benchmark-only` — skips the regular test suite and runs just the benchmarks.
+- `--no-cov` — turns off coverage (on by default via `addopts`), which otherwise
   instruments the hot loop and distorts the timings.
 
+Any extra arguments are passed straight through to pytest-benchmark (see below).
 JIT compilation is warmed up before each timed region, so the reported numbers
 are steady-state throughput, not first-call latency.
 
@@ -32,16 +35,13 @@ are steady-state throughput, not first-call latency.
 
 ```bash
 # Save this run as a named baseline ...
-uv run --package catan-engine pytest tests/benchmark --benchmark-only --no-cov \
-    --benchmark-save=baseline
+./run_benchmarks.sh --benchmark-save=baseline
 
 # ... then compare a later run against it (fails if it regresses past 5%).
-uv run --package catan-engine pytest tests/benchmark --benchmark-only --no-cov \
-    --benchmark-compare --benchmark-compare-fail=mean:5%
+./run_benchmarks.sh --benchmark-compare --benchmark-compare-fail=mean:5%
 
 # Run a single benchmark.
-uv run --package catan-engine pytest tests/benchmark --benchmark-only --no-cov \
-    -k batched
+./run_benchmarks.sh -k batched
 ```
 
 See `pytest-benchmark --help` for the full set of `--benchmark-*` flags.
