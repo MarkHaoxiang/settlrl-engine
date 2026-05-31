@@ -6,16 +6,29 @@ module bridges the two so the FastAPI server can serve a board produced by the
 engine.
 
 Geometry note: the engine assigns tile / vertex / edge indices implicitly by the
-order it generates them in ``catan_engine.board.layout._generate_mappings``. Those maps
-are private, so we reproduce the same deterministic construction here to recover
-the index -> coordinate tables the renderer needs. The asserts below pin our
-reconstruction to the engine's published counts.
+order it generates them in ``catan_engine.board.layout._generate_mappings``. The
+engine exposes authoritative host-side index <-> cube lookups
+(``vertex_cube`` / ``edge_cubes`` / ``tile_cube`` and the ``PORT_V`` map), so we
+build the renderer's coordinate tables directly from those rather than
+re-deriving the geometry. The asserts below pin our tables to the engine's
+published counts.
 """
 
 from typing import Literal
 
 from catan_engine.board import Board
-from catan_engine.board.layout import N_EDGES, N_PORTS, N_TILES, N_VERTICES
+from catan_engine.board.layout import (
+    N_EDGES,
+    N_PORTS,
+    N_TILES,
+    N_VERTICES,
+    PORT_V,
+    edge_cubes,
+    tile_cube,
+    vertex_cube,
+    vertex_index,
+)
+from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.port import Port
 from catan_engine.board.tile import Tile
 
@@ -35,95 +48,54 @@ from .models import (
 
 PortResource = Literal["sheep", "wheat", "wood", "brick", "ore"]
 
-# -- Geometry (mirrors catan_engine.board.layout) --------------------------------
-
-# Directions from a tile centre to its six corner vertices, and the three
-# edge-difference vectors, exactly as in catan_engine.board.layout.
-_VERTEX_DIRS = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
-_EDGE_DIFFS = ((1, 1, 0), (1, 0, 1), (0, 1, 1))
-
 Cube = tuple[int, int, int]
 
+# -- Resource ordering (single source) -------------------------------------------
+# The engine indexes resource arrays (hands, costs, ports, monopoly / trade
+# targets) by the ``Tile`` enum, skipping the non-resource desert. Derive the
+# ordered resource names from the enum once and reuse everywhere the renderer
+# indexes positionally (here and in ``catan_render.actions``); this is also the
+# order ``models.ResourceCounts`` / ``PortModel`` declare their fields in.
+_RESOURCE_NAMES: tuple[PortResource, ...] = tuple(
+    t.name.lower() for t in Tile if t is not Tile.DESERT  # type: ignore[misc]
+)
 
-def _build_geometry() -> tuple[list[Cube], list[Cube], list[tuple[int, int]]]:
-    """Recreate the engine's tile / vertex / edge index tables.
+# Dev-card hand ordering, by the ``DevCard`` enum (matches ``DevCardCounts``
+# fields). Used to read ``dev_hand`` positionally.
+_DEV_CARD_NAMES: tuple[str, ...] = tuple(d.name.lower() for d in DevCard)
 
-    Returns:
-        tile_coords: tile index -> axial (q, r, s) tile centre.
-        vertex_coords: vertex index -> cube (q, r, s) corner coordinate.
-        edge_vertices: edge index -> (vertex index, vertex index).
-    """
-    tile_coords: list[Cube] = []
-    vertices: dict[Cube, int] = {}
-    i = 0
-    for q in range(-2, 3):
-        for r in range(-2, 3):
-            s = -q - r
-            if abs(s) <= 2:
-                tile_coords.append((q, r, s))
-                for dq, dr, ds in _VERTEX_DIRS:
-                    v = (q + dq, r + dr, s + ds)
-                    if v not in vertices:
-                        vertices[v] = i
-                        i += 1
+# -- Geometry (from catan_engine.board.layout's authoritative lookups) -----------
 
-    edge_set: set[tuple[int, int]] = set()
-    for cube, idx in vertices.items():
-        if sum(cube) == 1:
-            for dq, dr, ds in _EDGE_DIFFS:
-                other = (cube[0] - dq, cube[1] - dr, cube[2] - ds)
-                if other in vertices:
-                    a, b = idx, vertices[other]
-                    edge_set.add((min(a, b), max(a, b)))
-    edge_vertices = sorted(edge_set)
+# Vertex index -> cube (q, r, s) corner coordinate.
+VERTEX_COORDS: tuple[Cube, ...] = tuple(vertex_cube(i) for i in range(N_VERTICES))
 
-    vertex_coords: list[Cube] = [(0, 0, 0)] * len(vertices)
-    for cube, idx in vertices.items():
-        vertex_coords[idx] = cube
+# Edge index -> the two endpoint vertex indices (resolved back through the same
+# cube coords the renderer uses for vertices).
+EDGE_VERTICES: tuple[tuple[int, int], ...] = tuple(
+    tuple(vertex_index(c) for c in edge_cubes(e)) for e in range(N_EDGES)  # type: ignore[misc]
+)
 
-    return tile_coords, vertex_coords, edge_vertices
-
-
-_TILE_CUBES, VERTEX_COORDS, EDGE_VERTICES = _build_geometry()
-assert len(_TILE_CUBES) == N_TILES
-assert len(VERTEX_COORDS) == N_VERTICES
-assert len(EDGE_VERTICES) == N_EDGES
-
-# Axial (q, r) coordinate of every tile, in the engine's tile-index order
+# Tile index -> centre cube coord; ``TILE_COORDS`` is its axial (q, r) projection
 # (pointy-top, hexagon of radius 2). tile_resource[i] / tile_number[i] -> here.
+_TILE_CUBES: tuple[Cube, ...] = tuple(tile_cube(i) for i in range(N_TILES))
 TILE_COORDS: tuple[tuple[int, int], ...] = tuple((q, r) for q, r, _ in _TILE_CUBES)
 
-# The two coastal vertices of each port, in port-index order. Copied verbatim
-# from catan_engine.board.layout._generate_mappings; port_allocation[i] -> here.
-PORT_VERTEX_COORDS: tuple[tuple[Cube, Cube], ...] = (
-    ((3, 0, -2), (2, 0, -3)),
-    ((-3, 2, 0), (-2, 3, 0)),
-    ((0, -2, 3), (0, -3, 2)),
-    ((-1, -1, 3), (-2, -1, 2)),
-    ((-2, 1, 2), (-3, 1, 1)),
-    ((1, -3, 1), (2, -2, 1)),
-    ((2, -2, -1), (3, -1, -1)),
-    ((1, 2, -2), (1, 1, -3)),
-    ((-1, 2, -2), (-1, 3, -1)),
+# Port index -> the cube coords of its two coastal vertices, from ``PORT_V``.
+PORT_VERTEX_COORDS: tuple[tuple[Cube, Cube], ...] = tuple(
+    (vertex_cube(int(a)), vertex_cube(int(b))) for a, b in PORT_V.tolist()
 )
+
+assert len(VERTEX_COORDS) == N_VERTICES
+assert len(EDGE_VERTICES) == N_EDGES
+assert len(_TILE_CUBES) == N_TILES
 assert len(PORT_VERTEX_COORDS) == N_PORTS
 
+# 2:1 resource ports map to their resource name; the 3:1 GENERAL port has none.
 _RESOURCE_BY_PORT: dict[Port, PortResource] = {
-    Port.SHEEP: "sheep",
-    Port.WHEAT: "wheat",
-    Port.WOOD: "wood",
-    Port.BRICK: "brick",
-    Port.ORE: "ore",
+    Port[name.upper()]: name for name in _RESOURCE_NAMES
 }
 
-_TERRAIN_BY_TILE: dict[Tile, Terrain] = {
-    Tile.SHEEP: Terrain.sheep,
-    Tile.WHEAT: Terrain.wheat,
-    Tile.WOOD: Terrain.wood,
-    Tile.BRICK: Terrain.brick,
-    Tile.ORE: Terrain.ore,
-    Tile.DESERT: Terrain.desert,
-}
+_TERRAIN_BY_TILE: dict[Tile, Terrain] = {t: Terrain[t.name.lower()] for t in Tile}
 
 
 def _cube(coord: Cube) -> CubeModel:
@@ -215,9 +187,8 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
     victory_points = state.victory_points[batch_index]
     players: list[PlayerModel] = []
     for p in range(player_resources.shape[0]):
-        # Resource order: sheep, wheat, wood, brick, ore (Tile enum 0-4).
+        # Indexed positionally in enum order (see _RESOURCE_NAMES / _DEV_CARD_NAMES).
         res = player_resources[p]
-        # Dev-card order: knight, road building, year of plenty, monopoly, VP.
         dev = dev_hand[p]
         players.append(
             PlayerModel(
@@ -226,18 +197,10 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
                 dev_cards=int(dev.sum()),
                 victory_points=int(victory_points[p]),
                 resources=ResourceCounts(
-                    sheep=int(res[0]),
-                    wheat=int(res[1]),
-                    wood=int(res[2]),
-                    brick=int(res[3]),
-                    ore=int(res[4]),
+                    **{name: int(res[i]) for i, name in enumerate(_RESOURCE_NAMES)}
                 ),
                 dev_card_types=DevCardCounts(
-                    knight=int(dev[0]),
-                    road_building=int(dev[1]),
-                    year_of_plenty=int(dev[2]),
-                    monopoly=int(dev[3]),
-                    victory_point=int(dev[4]),
+                    **{name: int(dev[i]) for i, name in enumerate(_DEV_CARD_NAMES)}
                 ),
             )
         )

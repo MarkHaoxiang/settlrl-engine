@@ -53,10 +53,13 @@ Open http://localhost:8000.
 
 ## Tests
 
-The renderer mirrors several engine internals (board index ordering, the AEC flat
-action table, resource / dev-card / terrain orderings). The test suite pins those
-reconstructions against the engine's own authoritative lookups so they can't drift
-silently — if the engine reindexes the board or reorders an enum, these tests fail.
+The renderer builds its board coordinate tables directly from the engine's
+authoritative geometry lookups, and derives resource / dev-card orderings from
+the engine enums, so those can't drift. It still mirrors the AEC flat action
+table; the test suite pins that decode against the engine's own lookups, checks
+the enum-derived orderings, and exercises the conversion and HTTP layers — if the
+engine reindexes the board, reorders an enum, or changes the action table, these
+tests fail.
 
 ```bash
 uv run pytest packages/catan-render/tests

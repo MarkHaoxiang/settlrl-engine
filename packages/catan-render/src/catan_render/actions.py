@@ -13,11 +13,10 @@ from __future__ import annotations
 from catan_engine.mechanics.action import ActionType
 from catan_engine.env.aec import _ATYPE, _IDX, _TARGET
 
-from .convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _cube
+from .convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _RESOURCE_NAMES, _cube
 from .models import ActionModel, EdgeModel, HexModel
 
-# Resource index order matches the Tile enum (0-4): sheep, wheat, wood, brick, ore.
-_RESOURCE_NAMES = ("sheep", "wheat", "wood", "brick", "ore")
+__all__ = ["decode_actions", "_decode", "_RESOURCE_NAMES"]
 
 # Action types grouped by the kind of board target they carry.
 _VERTEX_TYPES = {
