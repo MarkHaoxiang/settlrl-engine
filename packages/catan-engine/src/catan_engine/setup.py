@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import jax
 import jax.numpy as jnp
 
 from catan_engine.layout import TILE_V, BoardLayout
 from catan_engine.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
-from catan_engine.state import BoardState
+from catan_engine.state import BoardState, IntScalar
 from catan_engine.tile import Tile
 
 # Setup placement order over 2 * N_PLAYERS settlements (snake / boustrophedon),
@@ -18,7 +17,7 @@ N_SETUP = len(SETUP_ORDER)
 
 
 def grant_setup_resources(
-    layout: BoardLayout, state: BoardState, vertex: jax.Array, player: jax.Array
+    layout: BoardLayout, state: BoardState, vertex: IntScalar, player: IntScalar
 ) -> BoardState:
     """Grant one resource per (non-desert) tile adjacent to a 2nd settlement."""
     res = state.player_resources.astype(jnp.int32)

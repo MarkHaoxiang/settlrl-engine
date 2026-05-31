@@ -16,7 +16,13 @@ import numpy as np
 
 from catan_engine.layout import EDGE_V, MAX_VERTEX_DEGREE, N_EDGES, N_VERTICES
 from catan_engine.resources import N_PLAYERS
-from catan_engine.state import NO_INDEX, BoardState
+from catan_engine.state import (
+    NO_INDEX,
+    BoardState,
+    EdgeRoadVec,
+    IntScalar,
+    VertexOwnerVec,
+)
 
 # int32 "unclaimed" award marker (the uint8 NO_INDEX as stored on BoardState).
 # This is the award-holder sentinel, unrelated to any geometry padding.
@@ -47,8 +53,8 @@ _ADJ_NBR = jnp.asarray(
 
 
 def longest_road_length(
-    edge_road: jax.Array, vertex_owner: jax.Array, player: jax.Array
-) -> jax.Array:
+    edge_road: EdgeRoadVec, vertex_owner: VertexOwnerVec, player: IntScalar
+) -> IntScalar:
     """Length of the player's longest continuous road (trail).
 
     A trail may not reuse an edge and may not pass *through* a vertex occupied

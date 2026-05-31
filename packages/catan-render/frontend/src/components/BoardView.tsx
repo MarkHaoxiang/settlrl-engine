@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { hexToPixel, cubeToPixel } from "../lib/hex";
-import { fetchBoard, type Board } from "../lib/boardData";
+import type { Board } from "../lib/boardData";
 import HexTile from "./HexTile";
 import Road from "./Road";
 import Building from "./Building";
@@ -19,9 +19,15 @@ const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as cons
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-export default function CatanBoard() {
-  const [board, setBoard] = useState<Board | null>(null);
-  const [error, setError] = useState<string | null>(null);
+interface Props {
+  board: Board;
+}
+
+// Renders a Catan board (tiles, ports, roads, buildings, robber) as a zoomable
+// SVG, with per-player stat panels anchored to the viewport corners. It fills
+// its parent container, so a parent can overlay mode-specific controls on top
+// (the replay scrubber, the play action bar, a back button, …).
+export default function BoardView({ board }: Props) {
   const [zoom, setZoom] = useState(1);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -31,15 +37,8 @@ export default function CatanBoard() {
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
-  useEffect(() => {
-    fetchBoard()
-      .then(setBoard)
-      .catch((e) => setError(String(e)));
-  }, []);
-
   // Wheel + pinch zoom. Attached natively so we can preventDefault (React's
-  // onWheel is passive and would still scroll/zoom the page). Re-runs once the
-  // board loads and the container element actually exists.
+  // onWheel is passive and would still scroll/zoom the page).
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -81,14 +80,7 @@ export default function CatanBoard() {
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
     };
-  }, [board]);
-
-  if (error) {
-    return <div style={{ color: "#fff", padding: 24 }}>{error}</div>;
-  }
-  if (!board) {
-    return <div style={{ color: "#fff", padding: 24 }}>Loading board…</div>;
-  }
+  }, []);
 
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
 
@@ -106,9 +98,8 @@ export default function CatanBoard() {
     <div
       ref={containerRef}
       style={{
-        position: "relative",
-        width: "100vw",
-        height: "100vh",
+        position: "absolute",
+        inset: 0,
         overflow: "hidden",
         display: "flex",
         justifyContent: "center",

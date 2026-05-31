@@ -7,7 +7,11 @@ from catan_engine.layout import BoardLayout, make_layout
 from catan_engine.state import BoardState, make_board_state
 from catan_engine.tile import Tile
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from .convert import EDGE_VERTICES, board_to_model
 from .models import BoardModel
@@ -96,7 +100,25 @@ def get_board() -> BoardModel:
     return board_to_model(_BOARD)
 
 
+class _SPAStaticFiles(StaticFiles):
+    """StaticFiles that falls back to index.html for unknown paths.
+
+    The frontend uses client-side routing (/play, /replay/:id), so a deep link
+    or a refresh on those paths must still return the SPA entry point rather
+    than a 404. Only extension-less paths fall back; a request for a missing
+    file (e.g. a stale /assets/*.js) still returns 404.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
+                return FileResponse(_dist / "index.html")
+            raise
+
+
 # Serve built frontend when it exists (src/catan_render/server.py -> package root)
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 if _dist.exists():
-    app.mount("/", StaticFiles(directory=_dist, html=True), name="static")
+    app.mount("/", _SPAStaticFiles(directory=_dist, html=True), name="static")

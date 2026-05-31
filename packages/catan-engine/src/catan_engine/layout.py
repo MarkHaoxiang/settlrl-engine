@@ -19,6 +19,9 @@ TileResourceArray = UInt8[Array, f"batch tiles={N_TILES}"]
 TileNumberArray = UInt8[Array, f"batch tiles={N_TILES}"]
 PortAllocationArray = UInt8[Array, f"batch ports={N_PORTS}"]
 
+# Single-game (un-batched) view of port_allocation, used by the rule modules.
+PortAllocVec = UInt8[Array, f"ports={N_PORTS}"]
+
 
 class BoardLayout(NamedTuple):
     """Immutable board geometry: tile resources, number tokens, and port types."""

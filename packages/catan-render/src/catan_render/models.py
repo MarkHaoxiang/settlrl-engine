@@ -63,6 +63,26 @@ class PortModel(BaseModel):
     resource: Literal["sheep", "wheat", "wood", "brick", "ore"] | None
 
 
+class ResourceCounts(BaseModel):
+    """Resource cards in hand, by type (Tile resource order)."""
+
+    sheep: int
+    wheat: int
+    wood: int
+    brick: int
+    ore: int
+
+
+class DevCardCounts(BaseModel):
+    """Unplayed development cards in hand, by type (DevCard order)."""
+
+    knight: int
+    road_building: int
+    year_of_plenty: int
+    monopoly: int
+    victory_point: int
+
+
 class PlayerModel(BaseModel):
     """Summary stats for one (0-indexed) player, shown in the corner panels."""
 
@@ -70,6 +90,8 @@ class PlayerModel(BaseModel):
     resource_cards: int  # total resource cards in hand
     dev_cards: int  # total unplayed development cards in hand
     victory_points: int  # building victory points (settlement=1, city=2)
+    resources: ResourceCounts  # per-type breakdown of resource_cards
+    dev_card_types: DevCardCounts  # per-type breakdown of dev_cards
 
 
 class BoardModel(BaseModel):

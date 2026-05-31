@@ -10,18 +10,20 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from catan_engine.dev_cards import N_DEV_CARD_TYPES
-from catan_engine.state import BoardState
+from catan_engine.dev_cards import DevDeckVec, N_DEV_CARD_TYPES
+from catan_engine.state import BoolScalar, BoardState, IntScalar, KeyScalar
 
 
-def playable_dev(state: BoardState, player: jax.Array, card: int) -> jax.Array:
+def playable_dev(state: BoardState, player: IntScalar, card: int) -> BoolScalar:
     """True if ``player`` holds a playable copy of ``card`` (not bought this turn)."""
     held = state.dev_hand[player, card].astype(jnp.int32)
     bought = state.dev_bought[card].astype(jnp.int32)
     return held - bought > 0
 
 
-def draw_dev_card(key: jax.Array, dev_deck: jax.Array) -> tuple[jax.Array, jax.Array]:
+def draw_dev_card(
+    key: KeyScalar, dev_deck: DevDeckVec
+) -> tuple[KeyScalar, IntScalar]:
     """Draw one card type from ``dev_deck`` weighted by remaining counts.
 
     Returns ``(advanced key, card index)``. The probabilities fall back to

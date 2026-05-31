@@ -3,7 +3,7 @@ from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Key, UInt8
+from jaxtyping import Array, Bool, Int, Key, UInt8
 
 from catan_engine.dev_cards import (
     DEV_CARD_COUNTS,
@@ -49,6 +49,20 @@ PlayerDiscardArray = UInt8[Array, f"batch players={N_PLAYERS}"]  # cards still o
 GameScalarArray = UInt8[Array, "batch"]
 KeyArray = Key[Array, "batch"]
 
+# Single-game (un-batched) aliases. The rule modules (placement / awards / dice /
+# robber / setup / trade / development) run on one game at a time -- under
+# jax.vmap the leading `batch` axis is stripped -- so they annotate their array
+# params with these batch-free shapes. tests/conftest.py installs a jaxtyping
+# import hook that turns these annotations into enforced runtime shape/dtype
+# checks (each call and each jit trace) for those modules.
+EdgeRoadVec = UInt8[Array, f"edges={N_EDGES}"]
+VertexOwnerVec = UInt8[Array, f"vertices={N_VERTICES}"]
+VertexTypeVec = UInt8[Array, f"vertices={N_VERTICES}"]
+PlayerMaskVec = Bool[Array, f"players={N_PLAYERS}"]
+IntScalar = Int[Array, ""]  # a single int index / count (player, vertex, roll, ...)
+BoolScalar = Bool[Array, ""]  # a single legality / flag
+KeyScalar = Key[Array, ""]  # a single PRNG key
+
 
 class GamePhase(IntEnum):
     """The step of the turn/game that decides which actions are available."""
@@ -79,7 +93,7 @@ class BoardState(NamedTuple):
     Players are 0-indexed except in vertex_owner / edge_road (player + 1, 0=empty).
     victory_points holds *building* points only (settlement=1, city=2); Longest
     Road, Largest Army and hidden Victory Point cards are added on top when a
-    total is needed (see catan_engine.economy.player_total_vp).
+    total is needed (see catan_engine.action.player_total_vp).
     """
 
     # -- Board occupancy ----------------------------------------------------
@@ -113,6 +127,15 @@ class BoardState(NamedTuple):
 
     # -- Randomness ---------------------------------------------------------
     key: KeyArray  # PRNG keys for dice rolls and steals
+
+
+def to_u8(x: jax.Array) -> jax.Array:
+    """Saturating cast to uint8 (clip to ``[0, 255]``).
+
+    The state arrays are uint8; integer arithmetic is done in int32 and committed
+    back through this clip so over/underflows saturate instead of wrapping.
+    """
+    return jnp.clip(x, 0, 255).astype(jnp.uint8)
 
 
 def tree_select(mask: jax.Array, a: BoardState, b: BoardState) -> BoardState:

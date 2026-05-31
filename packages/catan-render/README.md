@@ -2,6 +2,13 @@
 
 Web-based renderer for catan-engine. FastAPI serves board state over a JSON API; a Vite + React + TypeScript frontend renders the board as SVG.
 
+A menu lets you choose between two modes, each at its own URL:
+
+- **Play** (`/play`) — a live game board with a control bar showing your hand (resources + dev cards by type) and the turn action buttons.
+- **Replay** (`/replay`, or `/replay/:gameId`) — a recorded game with playback controls.
+
+The mode controls are currently presentation stubs; both views render the same board served by the API.
+
 ## Requirements
 
 - Python ≥ 3.12 with [uv](https://docs.astral.sh/uv/)
@@ -67,10 +74,17 @@ packages/catan-render/
 │   └── models.py        # Pydantic board / tile models
 └── frontend/
     └── src/
+        ├── App.tsx          # Routes: menu, /play, /replay/:gameId
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math
         ├── lib/boardData.ts  # Fetches the board from /api/board; shared colours
+        ├── lib/useBoard.ts   # Hook that loads the board for a view
+        ├── pages/
+        │   ├── Menu.tsx       # Landing page: choose Play or Replay
+        │   ├── PlayView.tsx   # Play mode: board + action bar
+        │   └── ReplayView.tsx # Replay mode: board + playback scrubber
         └── components/
-            ├── CatanBoard.tsx   # SVG viewport, ocean background, scroll/pinch zoom
+            ├── GameShell.tsx    # Shared frame: board + back link + controls slot
+            ├── BoardView.tsx    # SVG viewport, ocean background, scroll/pinch zoom
             ├── HexTile.tsx      # Hex polygon, terrain colour, number token
             ├── Road.tsx         # Player road along an edge
             ├── Building.tsx     # Settlement / city on a vertex

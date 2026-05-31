@@ -14,6 +14,18 @@ CITY_COST: tuple[int, ...] = (0, 2, 0, 0, 3)
 PlayerResourcesArray = UInt8[
     Array, f"batch players={N_PLAYERS} resources={N_RESOURCES}"
 ]
+# Single-game (un-batched) view, used by the rule modules.
+PlayerResourcesVec = UInt8[Array, f"players={N_PLAYERS} resources={N_RESOURCES}"]
+
+
+def bank_stock(player_resources: jax.Array, resource: jax.Array) -> jax.Array:
+    """Remaining bank stock of a single ``resource`` (single, unbatched game).
+
+    ``player_resources`` is the ``(players, resources)`` holdings row; the bank
+    holds ``BANK_INITIAL`` minus what the players collectively own.
+    """
+    held = player_resources[:, resource].astype(jnp.int32).sum()
+    return BANK_INITIAL - held
 
 
 def compute_bank_resources(player_resources: jax.Array) -> jax.Array:

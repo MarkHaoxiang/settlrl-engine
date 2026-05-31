@@ -1,9 +1,9 @@
 """Vectorized (JAX-native) Catan actions -- the engine's action layer.
 
 Each action's core is a pure transition on a **single, unbatched game** written
-in traceable JAX, composed from the focused rule modules (``economy``,
-``placement``, ``awards``, ``trade``, ``dice``, ``robber``, ``setup``,
-``development``) over the static geometry maps in ``layout``. The public
+in traceable JAX, composed from the focused rule modules (``placement``,
+``awards``, ``trade``, ``dice``, ``robber``, ``setup``, ``development``) and the
+local economy helpers below, over the static geometry maps in ``layout``. The public
 ``is_available`` / ``__call__`` are
 ``jax.jit(jax.vmap(...))`` over those cores, so they operate on a whole batch at
 once: ``params`` are batched arrays and the outcome is a ``(batch,)`` array of
@@ -33,22 +33,30 @@ from catan_engine import (
     awards,
     development,
     dice,
-    economy,
     placement,
     robber,
     setup,
     trade,
 )
 from catan_engine.board import Board
-from catan_engine.dev_cards import DevCard
+from catan_engine.dev_cards import DEV_CARD_COST, DevCard
 from catan_engine.layout import EDGE_V, N_EDGES, N_TILES, N_VERTICES, BoardLayout
-from catan_engine.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.resources import (
+    CITY_COST,
+    N_PLAYERS,
+    N_RESOURCES,
+    ROAD_COST,
+    SETTLEMENT_COST,
+    bank_stock,
+)
 from catan_engine.state import (
     MAX_CITIES,
+    MAX_ROADS,
     MAX_SETTLEMENTS,
     VICTORY_POINTS_TO_WIN,
     BoardState,
     GamePhase,
+    to_u8,
     tree_select,
 )
 
@@ -85,6 +93,61 @@ class ActionResult(IntEnum):
 SUCCESS = jnp.int32(ActionResult.SUCCESS.value)
 INVALID = jnp.int32(ActionResult.INVALID.value)
 GAME_COMPLETE = jnp.int32(ActionResult.GAME_COMPLETE.value)
+
+
+# ===========================================================================
+# Economy helpers
+#
+# Single-game, traceable cost / affordability / payment / building-count /
+# victory-point helpers operating on the BoardState arrays, used throughout the
+# action cores below. (Generic uint8 saturation lives on state.to_u8; bank stock
+# on resources.bank_stock.)
+# ===========================================================================
+
+# Build-cost vectors in resource order [sheep, wheat, wood, brick, ore].
+ROAD_COST_ARR = jnp.array(ROAD_COST, dtype=jnp.int32)
+SETTLEMENT_COST_ARR = jnp.array(SETTLEMENT_COST, dtype=jnp.int32)
+CITY_COST_ARR = jnp.array(CITY_COST, dtype=jnp.int32)
+DEV_CARD_COST_ARR = jnp.array(DEV_CARD_COST, dtype=jnp.int32)
+
+
+def roads_left(edge_road: jax.Array, player: jax.Array) -> jax.Array:
+    built = jnp.sum(edge_road == player + 1).astype(jnp.int32)
+    return MAX_ROADS - built
+
+
+def count_settlements(
+    vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
+) -> jax.Array:
+    return jnp.sum((vertex_owner == player + 1) & (vertex_type == 1)).astype(jnp.int32)
+
+
+def count_cities(
+    vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
+) -> jax.Array:
+    return jnp.sum((vertex_owner == player + 1) & (vertex_type == 2)).astype(jnp.int32)
+
+
+def can_afford(resources_row: jax.Array, cost_arr: jax.Array) -> jax.Array:
+    """True if a single player's resource row covers ``cost_arr``."""
+    return jnp.all(resources_row.astype(jnp.int32) >= cost_arr)
+
+
+def pay(
+    player_resources: jax.Array, player: jax.Array, cost_arr: jax.Array
+) -> jax.Array:
+    """Subtract ``cost_arr`` from ``player``'s row (clipped at 0), returning uint8."""
+    updated = player_resources.astype(jnp.int32).at[player].add(-cost_arr)
+    return to_u8(updated)
+
+
+def player_total_vp(state: BoardState, player: jax.Array) -> jax.Array:
+    """Building VP + awards + hidden Victory Point cards for ``player``."""
+    total = state.victory_points[player].astype(jnp.int32)
+    total += jnp.where(state.longest_road_owner == player, 2, 0)
+    total += jnp.where(state.largest_army_owner == player, 2, 0)
+    total += state.dev_hand[player, DevCard.VICTORY_POINT].astype(jnp.int32)
+    return total
 
 
 class VecAction(ABC, Generic[ParamsT]):
@@ -129,10 +192,10 @@ def _build_road_avail(
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
     main = _main_after_roll(state)
-    has_road = economy.roads_left(state.edge_road, player) > 0
+    has_road = roads_left(state.edge_road, player) > 0
     placeable = placement.road_placeable(state.edge_road, state.vertex_owner, player, e)
     free = state.free_roads > 0
-    afford = economy.can_afford(state.player_resources[player], economy.ROAD_COST_ARR)
+    afford = can_afford(state.player_resources[player], ROAD_COST_ARR)
     return in_range & main & has_road & placeable & (free | afford)
 
 
@@ -146,7 +209,7 @@ def _build_road_apply(
     new_free = jnp.where(use_free, state.free_roads.astype(jnp.int32) - 1, 0).astype(
         jnp.uint8
     )
-    paid = economy.pay(state.player_resources, player, economy.ROAD_COST_ARR)
+    paid = pay(state.player_resources, player, ROAD_COST_ARR)
     new_res = jnp.where(use_free, state.player_resources, paid)
     cand = state._replace(
         edge_road=state.edge_road.at[e].set((player + 1).astype(jnp.uint8)),
@@ -154,7 +217,7 @@ def _build_road_apply(
         player_resources=new_res,
     )
     cand = awards.recompute_longest_road(cand)
-    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
     return tree_select(available, cand, state), _outcome(available, won)
 
 
@@ -188,10 +251,10 @@ def _build_settlement_avail(
     player = state.current_player.astype(jnp.int32)
     main = _main_after_roll(state)
     under_max = (
-        economy.count_settlements(state.vertex_owner, state.vertex_type, player)
+        count_settlements(state.vertex_owner, state.vertex_type, player)
         < MAX_SETTLEMENTS
     )
-    afford = economy.can_afford(state.player_resources[player], economy.SETTLEMENT_COST_ARR)
+    afford = can_afford(state.player_resources[player], SETTLEMENT_COST_ARR)
     dist = placement.distance_rule_ok(state.vertex_owner, v)
     conn = placement.settlement_connected(state.edge_road, player, v)
     return in_range & main & under_max & afford & dist & conn
@@ -204,15 +267,15 @@ def _build_settlement_apply(
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
-        player_resources=economy.pay(
-            state.player_resources, player, economy.SETTLEMENT_COST_ARR
+        player_resources=pay(
+            state.player_resources, player, SETTLEMENT_COST_ARR
         ),
         vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
         vertex_type=state.vertex_type.at[v].set(1),
         victory_points=state.victory_points.at[player].add(1),
     )
     cand = awards.recompute_longest_road(cand)
-    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
     return tree_select(available, cand, state), _outcome(available, won)
 
 
@@ -303,12 +366,12 @@ def _build_city_avail(
     player = state.current_player.astype(jnp.int32)
     main = _main_after_roll(state)
     under_max = (
-        economy.count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
+        count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
     )
     owns_settlement = (state.vertex_owner[v] == (player + 1).astype(jnp.uint8)) & (
         state.vertex_type[v] == 1
     )
-    afford = economy.can_afford(state.player_resources[player], economy.CITY_COST_ARR)
+    afford = can_afford(state.player_resources[player], CITY_COST_ARR)
     return in_range & main & under_max & owns_settlement & afford
 
 
@@ -319,11 +382,11 @@ def _build_city_apply(
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
-        player_resources=economy.pay(state.player_resources, player, economy.CITY_COST_ARR),
+        player_resources=pay(state.player_resources, player, CITY_COST_ARR),
         vertex_type=state.vertex_type.at[v].set(2),
         victory_points=state.victory_points.at[player].add(1),
     )
-    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
     return tree_select(available, cand, state), _outcome(available, won)
 
 
@@ -353,7 +416,7 @@ def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask
     player = state.current_player.astype(jnp.int32)
     main = _main_after_roll(state)
     deck_nonempty = state.dev_deck.astype(jnp.int32).sum() > 0
-    afford = economy.can_afford(state.player_resources[player], economy.DEV_CARD_COST_ARR)
+    afford = can_afford(state.player_resources[player], DEV_CARD_COST_ARR)
     return main & deck_nonempty & afford
 
 
@@ -367,15 +430,15 @@ def _buy_dev_apply(
     new_hand = state.dev_hand.astype(jnp.int32).at[player, card].add(1)
     new_bought = state.dev_bought.astype(jnp.int32).at[card].add(1)
     cand = state._replace(
-        player_resources=economy.pay(
-            state.player_resources, player, economy.DEV_CARD_COST_ARR
+        player_resources=pay(
+            state.player_resources, player, DEV_CARD_COST_ARR
         ),
-        dev_deck=economy.to_u8(new_deck),
-        dev_hand=economy.to_u8(new_hand),
-        dev_bought=economy.to_u8(new_bought),
+        dev_deck=to_u8(new_deck),
+        dev_hand=to_u8(new_hand),
+        dev_bought=to_u8(new_bought),
         key=key,
     )
-    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
     return tree_select(available, cand, state), _outcome(available, won)
 
 
@@ -463,7 +526,7 @@ def _maritime_avail(
     distinct = give != receive
     ratio = trade.port_ratio(state.vertex_owner, layout.port_allocation, player, g)
     has_give = state.player_resources[player, g].astype(jnp.int32) >= ratio
-    bank_ok = economy.bank_stock(state.player_resources, r) >= 1
+    bank_ok = bank_stock(state.player_resources, r) >= 1
     return main & give_ok & recv_ok & distinct & has_give & bank_ok
 
 
@@ -482,7 +545,7 @@ def _maritime_apply(
     res = res.at[player, g].add(-ratio)
     res = res.at[player, r].add(1)
     cand = state._replace(
-        player_resources=economy.to_u8(res)
+        player_resources=to_u8(res)
     )
     return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
@@ -538,8 +601,8 @@ def _monopoly_apply(
     new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.MONOPOLY].add(-1)
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=economy.to_u8(new_hand),
-        player_resources=economy.to_u8(res),
+        dev_hand=to_u8(new_hand),
+        player_resources=to_u8(res),
     )
     return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
@@ -586,8 +649,8 @@ def _yop_avail(
     b_ok = (resource_b >= 0) & (resource_b < N_RESOURCES)
     same = resource_a == resource_b
     need_a = 1 + same.astype(jnp.int32)
-    bank_a = economy.bank_stock(state.player_resources, ca) >= need_a
-    bank_b = same | (economy.bank_stock(state.player_resources, cb) >= 1)
+    bank_a = bank_stock(state.player_resources, ca) >= need_a
+    bank_b = same | (bank_stock(state.player_resources, cb) >= 1)
     return main & has_card & a_ok & b_ok & bank_a & bank_b
 
 
@@ -609,8 +672,8 @@ def _yop_apply(
     res = res.at[player, cb].add(1)
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=economy.to_u8(new_hand),
-        player_resources=economy.to_u8(res),
+        dev_hand=to_u8(new_hand),
+        player_resources=to_u8(res),
     )
     return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
@@ -660,15 +723,15 @@ def _road_building_apply(
 ) -> tuple[BoardState, ResultCode]:
     available = _road_building_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
-    grant = jnp.minimum(2, economy.roads_left(state.edge_road, player))
+    grant = jnp.minimum(2, roads_left(state.edge_road, player))
     new_hand = (
         state.dev_hand.astype(jnp.int32).at[player, DevCard.ROAD_BUILDING].add(-1)
     )
     new_free = state.free_roads.astype(jnp.int32) + grant
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=economy.to_u8(new_hand),
-        free_roads=economy.to_u8(new_free),
+        dev_hand=to_u8(new_hand),
+        free_roads=to_u8(new_free),
     )
     return tree_select(available, cand, state), jnp.where(
         available, SUCCESS, INVALID
@@ -744,15 +807,15 @@ def _knight_apply(
     new_knights = state.knights_played.astype(jnp.int32).at[player].add(1)
     cand = state._replace(
         dev_played=jnp.uint8(1),
-        dev_hand=economy.to_u8(new_hand),
-        knights_played=economy.to_u8(new_knights),
+        dev_hand=to_u8(new_hand),
+        knights_played=to_u8(new_knights),
         robber=t.astype(state.robber.dtype),
     )
     cand = awards.recompute_largest_army(cand)
     stolen = robber.steal(cand, player, vc)
     do_steal = victim >= 0
     cand = tree_select(do_steal, stolen, cand)
-    won = economy.player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
+    won = player_total_vp(cand, player) >= VICTORY_POINTS_TO_WIN
     return tree_select(available, cand, state), _outcome(available, won)
 
 

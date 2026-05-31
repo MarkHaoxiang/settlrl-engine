@@ -7,10 +7,10 @@ import jax.numpy as jnp
 
 from catan_engine.layout import TILE_V
 from catan_engine.resources import N_PLAYERS, N_RESOURCES
-from catan_engine.state import BoardState
+from catan_engine.state import BoardState, IntScalar, PlayerMaskVec
 
 
-def steal(state: BoardState, thief: jax.Array, victim: jax.Array) -> BoardState:
+def steal(state: BoardState, thief: IntScalar, victim: IntScalar) -> BoardState:
     """Move one random resource card from ``victim`` to ``thief`` (no-op if empty)."""
     res = state.player_resources.astype(jnp.int32)
     hand = res[victim]  # (R,)
@@ -29,8 +29,8 @@ def steal(state: BoardState, thief: jax.Array, victim: jax.Array) -> BoardState:
 
 
 def robber_victim_mask(
-    state: BoardState, tile: jax.Array, current: jax.Array
-) -> jax.Array:
+    state: BoardState, tile: IntScalar, current: IntScalar
+) -> PlayerMaskVec:
     """(N_PLAYERS,) bool: players != current with a building on ``tile`` and cards."""
     o = state.vertex_owner[TILE_V[tile]]  # (6,)
     pl = jnp.clip(o.astype(jnp.int32) - 1, 0, N_PLAYERS - 1)

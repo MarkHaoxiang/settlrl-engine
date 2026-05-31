@@ -23,9 +23,11 @@ from .models import (
     BoardModel,
     BuildingModel,
     CubeModel,
+    DevCardCounts,
     HexModel,
     PlayerModel,
     PortModel,
+    ResourceCounts,
     RoadModel,
     Terrain,
     TileModel,
@@ -213,12 +215,30 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
     victory_points = state.victory_points[batch_index]
     players: list[PlayerModel] = []
     for p in range(player_resources.shape[0]):
+        # Resource order: sheep, wheat, wood, brick, ore (Tile enum 0-4).
+        res = player_resources[p]
+        # Dev-card order: knight, road building, year of plenty, monopoly, VP.
+        dev = dev_hand[p]
         players.append(
             PlayerModel(
                 player=p,
-                resource_cards=int(player_resources[p].sum()),
-                dev_cards=int(dev_hand[p].sum()),
+                resource_cards=int(res.sum()),
+                dev_cards=int(dev.sum()),
                 victory_points=int(victory_points[p]),
+                resources=ResourceCounts(
+                    sheep=int(res[0]),
+                    wheat=int(res[1]),
+                    wood=int(res[2]),
+                    brick=int(res[3]),
+                    ore=int(res[4]),
+                ),
+                dev_card_types=DevCardCounts(
+                    knight=int(dev[0]),
+                    road_building=int(dev[1]),
+                    year_of_plenty=int(dev[2]),
+                    monopoly=int(dev[3]),
+                    victory_point=int(dev[4]),
+                ),
             )
         )
 

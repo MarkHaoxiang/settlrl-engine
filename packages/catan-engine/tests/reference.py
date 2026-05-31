@@ -2,7 +2,8 @@
 
 This is the original NumPy single-game rule implementation, kept in the test
 suite as the differential reference that ``test_rules.py`` validates the
-JAX-native rule modules (``awards`` / ``dice`` / ``trade`` / ``economy`` / ...)
+JAX-native rule modules (``awards`` / ``dice`` / ``trade`` / the ``action``
+economy helpers / ...)
 against. It is intentionally NOT part of the shipped package -- the engine uses
 those traceable modules exclusively.
 

@@ -12,6 +12,14 @@ dependencies = [
     "jaxtyping>=0.3.10",
 ]
 
+[project.optional-dependencies]
+# The PettingZoo-AEC wrapper (catan_engine.aec) needs these; the core engine and
+# the batched env (catan_engine.env) do not.
+rl = [
+    "gymnasium>=0.29",
+    "pettingzoo>=1.24",
+]
+
 [project.scripts]
 catan-engine = "catan_engine:main"
 

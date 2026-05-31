@@ -12,11 +12,11 @@ map / sentinel is needed.
 
 from __future__ import annotations
 
-import jax
 import jax.numpy as jnp
 
-from catan_engine.layout import N_VERTICES, PORT_V
+from catan_engine.layout import N_VERTICES, PORT_V, PortAllocVec
 from catan_engine.port import Port
+from catan_engine.state import IntScalar, VertexOwnerVec
 
 # Static port geometry, flattened to one slot per (port, vertex) pair.
 _PORT_VERTS = PORT_V.reshape(-1)  # (2 * N_PORTS,) port-vertex ids
@@ -25,11 +25,11 @@ _IS_PORT_VERTEX = jnp.zeros((N_VERTICES,), jnp.bool_).at[_PORT_VERTS].set(True)
 
 
 def port_ratio(
-    vertex_owner: jax.Array,
-    port_allocation: jax.Array,
-    player: jax.Array,
-    give: jax.Array,
-) -> jax.Array:
+    vertex_owner: VertexOwnerVec,
+    port_allocation: PortAllocVec,
+    player: IntScalar,
+    give: IntScalar,
+) -> IntScalar:
     """Best maritime ratio for giving ``give``: 4, or 3 (general), or 2 (match)."""
     # Scatter each port's (per-game) type onto its two vertices; the boolean
     # ``_IS_PORT_VERTEX`` mask, not a fill sentinel, marks non-port vertices.

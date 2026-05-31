@@ -7,11 +7,11 @@ import jax.numpy as jnp
 
 from catan_engine.layout import N_TILES, TILE_V, BoardLayout
 from catan_engine.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
-from catan_engine.state import BoardState
+from catan_engine.state import BoardState, IntScalar, KeyScalar
 from catan_engine.tile import Tile
 
 
-def roll_dice(key: jax.Array) -> tuple[jax.Array, jax.Array]:
+def roll_dice(key: KeyScalar) -> tuple[KeyScalar, IntScalar]:
     """Return (advanced key, two-dice sum 2..12)."""
     key, k1, k2 = jax.random.split(key, 3)
     d1 = jax.random.randint(k1, (), 1, 7)
@@ -20,7 +20,7 @@ def roll_dice(key: jax.Array) -> tuple[jax.Array, jax.Array]:
 
 
 def distribute_resources(
-    layout: BoardLayout, state: BoardState, roll: jax.Array
+    layout: BoardLayout, state: BoardState, roll: IntScalar
 ) -> BoardState:
     """Pay out resources for ``roll`` to building owners, honouring the bank.
 

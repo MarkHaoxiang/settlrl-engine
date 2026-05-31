@@ -11,6 +11,7 @@ import jax
 import jax.numpy as jnp
 
 from catan_engine.layout import EDGE_V, N_VERTICES
+from catan_engine.state import BoolScalar, EdgeRoadVec, IntScalar, VertexOwnerVec
 
 # COO edge_index endpoints (static graph connectivity).
 _SRC = EDGE_V[:, 0]
@@ -23,7 +24,7 @@ def _scatter_to_vertices(per_edge: jax.Array) -> jax.Array:
     return acc.at[_SRC].add(per_edge).at[_DST].add(per_edge)
 
 
-def distance_rule_ok(vertex_owner: jax.Array, vertex: jax.Array) -> jax.Array:
+def distance_rule_ok(vertex_owner: VertexOwnerVec, vertex: IntScalar) -> BoolScalar:
     """Vertex empty and no adjacent vertex carries a building."""
     occ = (vertex_owner != 0).astype(jnp.int32)  # (N_VERTICES,)
     # Scatter each edge's endpoint occupancy onto the opposite endpoint.
@@ -32,8 +33,8 @@ def distance_rule_ok(vertex_owner: jax.Array, vertex: jax.Array) -> jax.Array:
 
 
 def settlement_connected(
-    edge_road: jax.Array, player: jax.Array, vertex: jax.Array
-) -> jax.Array:
+    edge_road: EdgeRoadVec, player: IntScalar, vertex: IntScalar
+) -> BoolScalar:
     """Player owns a road incident to ``vertex`` (required outside setup)."""
     mine = (edge_road == player + 1).astype(jnp.int32)  # (N_EDGES,)
     inc = _scatter_to_vertices(mine)  # roads-of-mine touching each vertex
@@ -41,8 +42,11 @@ def settlement_connected(
 
 
 def road_placeable(
-    edge_road: jax.Array, vertex_owner: jax.Array, player: jax.Array, edge: jax.Array
-) -> jax.Array:
+    edge_road: EdgeRoadVec,
+    vertex_owner: VertexOwnerVec,
+    player: IntScalar,
+    edge: IntScalar,
+) -> BoolScalar:
     """Edge empty and connects to the player's network at a non-blocked end."""
     target = player + 1
     empty = edge_road[edge] == 0
