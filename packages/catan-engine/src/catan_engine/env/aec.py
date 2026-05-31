@@ -33,80 +33,22 @@ from pettingzoo.utils.env import AECEnv
 
 from catan_engine.mechanics.action import ActionParams, ActionType
 from catan_engine.board import replicate
-from catan_engine.env.batched import BatchedCatanEnv, available
-from catan_engine.board.layout import N_EDGES, N_TILES, N_VERTICES
+from catan_engine.env.batched import (
+    _ATYPE,
+    _DISCARD_FLAT,
+    _IDX,
+    _N_FLAT,
+    _TARGET,
+    BatchedCatanEnv,
+    _canonical_discard,
+    available,
+)
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 
 __all__ = ["CatanAECEnv", "env"]
 
-
-def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
-    """Flat action index -> (ActionType, primary index, secondary target).
-
-    Returns the three lookup arrays plus the flat index of the single DISCARD
-    action (whose resource amounts the wrapper computes on the fly).
-    """
-    atype: list[int] = []
-    idx: list[int] = []
-    target: list[int] = []
-
-    def add(t: ActionType, i: int = 0, tg: int = 0) -> None:
-        atype.append(int(t))
-        idx.append(i)
-        target.append(tg)
-
-    for v in range(N_VERTICES):
-        add(ActionType.SETUP_SETTLEMENT, v)
-    for e in range(N_EDGES):
-        add(ActionType.SETUP_ROAD, e)
-    add(ActionType.ROLL_DICE)
-    discard_flat = len(atype)
-    add(ActionType.DISCARD)
-    for t in range(N_TILES):
-        for victim in range(-1, N_PLAYERS):
-            add(ActionType.MOVE_ROBBER, t, victim)
-    for e in range(N_EDGES):
-        add(ActionType.BUILD_ROAD, e)
-    for v in range(N_VERTICES):
-        add(ActionType.BUILD_SETTLEMENT, v)
-    for v in range(N_VERTICES):
-        add(ActionType.BUILD_CITY, v)
-    add(ActionType.BUY_DEVELOPMENT_CARD)
-    for t in range(N_TILES):
-        for victim in range(-1, N_PLAYERS):
-            add(ActionType.PLAY_KNIGHT, t, victim)
-    add(ActionType.PLAY_ROAD_BUILDING)
-    for a in range(N_RESOURCES):
-        for b in range(N_RESOURCES):
-            add(ActionType.PLAY_YEAR_OF_PLENTY, a, b)
-    for r in range(N_RESOURCES):
-        add(ActionType.PLAY_MONOPOLY, r)
-    for g in range(N_RESOURCES):
-        for r in range(N_RESOURCES):
-            add(ActionType.MARITIME_TRADE, g, r)
-    add(ActionType.END_TURN)
-
-    return (
-        np.asarray(atype, dtype=np.int32),
-        np.asarray(idx, dtype=np.int32),
-        np.asarray(target, dtype=np.int32),
-        discard_flat,
-    )
-
-
-_ATYPE, _IDX, _TARGET, _DISCARD_FLAT = _build_action_table()
-_N_FLAT = int(_ATYPE.shape[0])
-
-
-def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
-    """A valid discard of ``owed`` cards, taken greedily in resource order."""
-    out = np.zeros(N_RESOURCES, dtype=np.int32)
-    remaining = owed
-    for r in range(N_RESOURCES):
-        take = min(int(hand[r]), remaining)
-        out[r] = take
-        remaining -= take
-    return out
+# The flat action table (index -> (ActionType, ActionParams)) and canonical
+# discard live in ``env/batched.py`` -- shared with ``BatchedCatanEnv.random_actions``.
 
 
 class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any base)

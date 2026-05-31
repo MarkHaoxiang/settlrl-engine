@@ -42,6 +42,7 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from catan_engine.mechanics.action import (
     ActionParams,
@@ -260,6 +261,116 @@ _INDEX_MASKS = {
     ActionType.MOVE_ROBBER: _robber_tile_mask_factory(_move_robber_avail),
     ActionType.PLAY_KNIGHT: _robber_tile_mask_factory(_knight_avail),
 }
+
+
+# ---------------------------------------------------------------------------
+# Flat action table: one enumerated index per concrete move.
+#
+# A single flat enumeration of every concrete action (each vertex/edge/tile/
+# resource choice plus the parameterless moves), decoded to the engine's
+# ``(ActionType, ActionParams)``. DISCARD collapses to one entry whose
+# per-resource amounts are filled in canonically per lane. This is the table
+# behind both :meth:`BatchedCatanEnv.random_actions` and the single-game AEC
+# wrapper's flat ``Discrete`` action space (see ``env/aec.py``).
+# ---------------------------------------------------------------------------
+def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Flat action index -> (ActionType, primary index, secondary target).
+
+    Returns the three lookup arrays plus the flat index of the single DISCARD
+    action (whose resource amounts are computed on the fly).
+    """
+    atype: list[int] = []
+    idx: list[int] = []
+    target: list[int] = []
+
+    def add(t: ActionType, i: int = 0, tg: int = 0) -> None:
+        atype.append(int(t))
+        idx.append(i)
+        target.append(tg)
+
+    for v in range(N_VERTICES):
+        add(ActionType.SETUP_SETTLEMENT, v)
+    for e in range(N_EDGES):
+        add(ActionType.SETUP_ROAD, e)
+    add(ActionType.ROLL_DICE)
+    discard_flat = len(atype)
+    add(ActionType.DISCARD)
+    for t in range(N_TILES):
+        for victim in range(-1, N_PLAYERS):
+            add(ActionType.MOVE_ROBBER, t, victim)
+    for e in range(N_EDGES):
+        add(ActionType.BUILD_ROAD, e)
+    for v in range(N_VERTICES):
+        add(ActionType.BUILD_SETTLEMENT, v)
+    for v in range(N_VERTICES):
+        add(ActionType.BUILD_CITY, v)
+    add(ActionType.BUY_DEVELOPMENT_CARD)
+    for t in range(N_TILES):
+        for victim in range(-1, N_PLAYERS):
+            add(ActionType.PLAY_KNIGHT, t, victim)
+    add(ActionType.PLAY_ROAD_BUILDING)
+    for a in range(N_RESOURCES):
+        for b in range(N_RESOURCES):
+            add(ActionType.PLAY_YEAR_OF_PLENTY, a, b)
+    for r in range(N_RESOURCES):
+        add(ActionType.PLAY_MONOPOLY, r)
+    for g in range(N_RESOURCES):
+        for r in range(N_RESOURCES):
+            add(ActionType.MARITIME_TRADE, g, r)
+    add(ActionType.END_TURN)
+
+    return (
+        np.asarray(atype, dtype=np.int32),
+        np.asarray(idx, dtype=np.int32),
+        np.asarray(target, dtype=np.int32),
+        discard_flat,
+    )
+
+
+_ATYPE, _IDX, _TARGET, _DISCARD_FLAT = _build_action_table()
+_N_FLAT = int(_ATYPE.shape[0])
+# Device-side copies for the batched random-action sweep.
+_ATYPE_J = jnp.asarray(_ATYPE)
+_IDX_J = jnp.asarray(_IDX)
+_TARGET_J = jnp.asarray(_TARGET)
+
+
+def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
+    """A valid discard of ``owed`` cards, taken greedily in resource order."""
+    out = np.zeros(N_RESOURCES, dtype=np.int32)
+    remaining = owed
+    for r in range(N_RESOURCES):
+        take = min(int(hand[r]), remaining)
+        out[r] = take
+        remaining -= take
+    return out
+
+
+def _canonical_discard_b(hands: jax.Array, owed: jax.Array) -> jax.Array:
+    """Batched canonical discard: ``(B, R)`` hands, ``(B,)`` owed -> ``(B, R)`` takes.
+
+    The vectorised form of :func:`_canonical_discard` -- greedily take in resource
+    order until ``owed`` is met: resource ``r`` contributes ``owed`` minus all it
+    already covered (the prefix sum), clamped to ``[0, hand[r]]``.
+    """
+    prev = jnp.cumsum(hands, axis=1) - hands  # cards covered by earlier resources
+    return jnp.clip(owed[:, None] - prev, 0, hands)
+
+
+def _repeat_lanes(board: Board, repeats: int) -> Board:
+    """Repeat each lane ``repeats`` times along the batch axis (B -> B * repeats)."""
+    layout, state = board
+    layout_r = BoardLayout(*(jnp.repeat(x, repeats, axis=0) for x in layout))
+    fields: dict[str, jax.Array] = {}
+    for name in state._fields:
+        v = getattr(state, name)
+        if name == "key":
+            fields[name] = jax.random.wrap_key_data(
+                jnp.repeat(jax.random.key_data(v), repeats, axis=0)
+            )
+        else:
+            fields[name] = jnp.repeat(v, repeats, axis=0)
+    return layout_r, BoardState(**fields)
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +625,56 @@ class BatchedCatanEnv:
                 "use action_mask() or available()"
             )
         return fn(self._layout, self._state)
+
+    def random_actions(
+        self, key: jax.Array
+    ) -> tuple[ActionTypeArray, ActionParams]:
+        """A uniformly-random *legal* action per lane (the random-rollout driver).
+
+        Evaluates the whole flat action table against every lane with one batched
+        :func:`available` sweep, then samples one legal action per lane. A lane
+        with no legal action yields an INVALID action and simply stalls until its
+        next auto-reset. ``key`` is a JAX PRNG key for the per-lane choice.
+
+        Intended for random play / smoke tests, not throughput-critical paths --
+        the sweep evaluates every flat action against every lane.
+        """
+        layout, state = self.board
+        B = self.batch_size
+        rows = jnp.arange(B)
+        sel = self.agent_selection  # (B,) acting player per lane
+
+        # Flat params are state-independent except DISCARD, whose player / amounts
+        # depend on the acting lane -- override that single column per lane.
+        hands = state.player_resources[rows, sel]  # (B, R)
+        owed = state.pending_discard[rows, sel]  # (B,)
+        discard = _canonical_discard_b(hands, owed)  # (B, R)
+        idx = jnp.broadcast_to(_IDX_J, (B, _N_FLAT)).at[:, _DISCARD_FLAT].set(sel)
+        target = jnp.broadcast_to(_TARGET_J, (B, _N_FLAT))
+        resources = (
+            jnp.zeros((B, _N_FLAT, N_RESOURCES), jnp.int32)
+            .at[:, _DISCARD_FLAT, :]
+            .set(discard)
+        )
+
+        rep = _repeat_lanes((layout, state), _N_FLAT)
+        atype_flat = jnp.broadcast_to(_ATYPE_J, (B, _N_FLAT)).reshape(-1)
+        params_flat = ActionParams(
+            idx=idx.reshape(-1),
+            target=target.reshape(-1),
+            resources=resources.reshape(B * _N_FLAT, N_RESOURCES),
+        )
+        mask = available(rep, atype_flat, params_flat).reshape(B, _N_FLAT)
+
+        # Random legal action per lane: score legal moves with uniform noise and
+        # take the argmax (illegal scored -1, so only picked if a lane has none).
+        noise = jax.random.uniform(key, (B, _N_FLAT))
+        chosen = jnp.argmax(jnp.where(mask, noise, -1.0), axis=1)  # (B,)
+        return _ATYPE_J[chosen], ActionParams(
+            idx=idx[rows, chosen],
+            target=target[rows, chosen],
+            resources=resources[rows, chosen],
+        )
 
     # -- Internals --------------------------------------------------------
 
