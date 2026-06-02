@@ -30,9 +30,8 @@ def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> Mas
 
 
 def _end_turn_apply(
-    layout: BoardLayout, state: BoardState, params: None
+    layout: BoardLayout, state: BoardState, params: None, available: Mask
 ) -> tuple[BoardState, ResultCode]:
-    available = _end_turn_avail(layout, state, params)
     nxt = (state.current_player.astype(jnp.int32) + 1) % N_PLAYERS
     cand = state._replace(
         dice_roll=jnp.uint8(0),
@@ -49,7 +48,7 @@ def _end_turn_apply(
 
 
 _end_turn_avail_b = jax.jit(jax.vmap(_end_turn_avail, in_axes=(0, 0, None)))
-_end_turn_apply_b = jax.jit(jax.vmap(_end_turn_apply, in_axes=(0, 0, None)))
+_end_turn_apply_b = jax.jit(jax.vmap(_end_turn_apply, in_axes=(0, 0, None, 0)))
 
 
 def end_turn_available(board: Board, params: None = None) -> Mask:
@@ -59,6 +58,8 @@ def end_turn_available(board: Board, params: None = None) -> Mask:
 
 def end_turn_step(board: Board, params: None = None) -> tuple[BoardState, ResultCode]:
     """End the current player's turn per game. Advances to the next player."""
+    available = _end_turn_avail_b(board[0], board[1], None)
     return cast(
-        "tuple[BoardState, ResultCode]", _end_turn_apply_b(board[0], board[1], None)
+        "tuple[BoardState, ResultCode]",
+        _end_turn_apply_b(board[0], board[1], None, available),
     )

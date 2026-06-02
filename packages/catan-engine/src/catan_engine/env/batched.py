@@ -55,10 +55,11 @@ from catan_engine.mechanics.action import (
     _N_FLAT,
     _TARGET_J,
     _acting_discard,
-    _action_type_mask_b,
-    _flat_available_single,
+    _flat_available_b,
+    _flat_available_for,
     action_available,
     apply_action,
+    flat_legality,
 )
 from catan_engine.mechanics.common import (
     ActionTypeArray,
@@ -107,15 +108,23 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Functional core: one batched (ActionType, ActionParams) action per game.
 # ---------------------------------------------------------------------------
-_step = jax.jit(jax.vmap(apply_action, in_axes=(0, 0, 0, 0)))
+_step = jax.jit(jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0)))
 _available = jax.jit(jax.vmap(action_available, in_axes=(0, 0, 0, 0)))
 
 
 def step(
     board: Board, action_type: ActionTypeArray, params: ActionParams
 ) -> tuple[BoardState, ResultCode]:
-    """Apply one (batched) action per game; return (new state, ActionResult codes)."""
-    new_state, result = _step(board[0], board[1], action_type, params)
+    """Apply one (batched) action per game; return (new state, ActionResult codes).
+
+    Computes the per-action legality once (via the switch-based
+    :func:`action_available`, exact for any params) and hands it to ``apply_action``
+    -- no branch recomputes avail. ``BatchedCatanEnv`` instead reads legality from
+    its cached flat-legality sweep; this functional entry stays self-validating for
+    callers (tests / the reference oracle) that pass arbitrary actions.
+    """
+    available = _available(board[0], board[1], action_type, params)
+    new_state, result = _step(board[0], board[1], action_type, params, available)
     return new_state, result
 
 
@@ -143,18 +152,18 @@ _agent_selection_b = jax.jit(jax.vmap(agent_selection_single))
 
 
 def _random_action_single(
-    layout: BoardLayout, state: BoardState, key: jax.Array
+    state: BoardState, avail_flat: jax.Array, key: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Sample a uniformly-random *legal* flat action for one game.
 
-    The single-game core behind :meth:`BatchedCatanEnv.random_actions`: takes
-    the switch-free flat legality mask (:func:`_flat_available_single`) and the
-    argmax of uniform noise over its legal entries. Returns the chosen action's
-    ``(action_type, idx, target, resources)``.
+    The single-game core behind :meth:`BatchedCatanEnv.random_actions`: takes the
+    lane's cached flat legality mask ``avail_flat`` (``(N_FLAT,)``) and the argmax
+    of uniform noise over its legal entries. Returns the chosen action's
+    ``(action_type, idx, target, resources)``. The mask is read from the env's
+    cache (computed once per step), not recomputed here.
     """
     sel = agent_selection_single(state)  # acting player this lane
     discard = _acting_discard(state, sel)  # (R,) -- DISCARD entry amounts
-    mask = _flat_available_single(layout, state, sel, discard)  # (N_FLAT,)
 
     # Flat params are state-independent except DISCARD, whose player / amounts
     # depend on the acting lane -- override that single column.
@@ -166,22 +175,35 @@ def _random_action_single(
     # Random legal action: score legal moves with uniform noise and take the
     # argmax (illegal scored -1, so only picked if the lane has no legal move).
     noise = jax.random.uniform(key, (_N_FLAT,))
-    chosen = jnp.argmax(jnp.where(mask, noise, -1.0))
+    chosen = jnp.argmax(jnp.where(avail_flat, noise, -1.0))
     return _ATYPE_J[chosen], idx[chosen], _TARGET_J[chosen], resources[chosen]
 
 
 @jax.jit
 def _random_actions_b(
-    layout: BoardLayout, state: BoardState, key: jax.Array
+    state: BoardState, avail_flat: jax.Array, key: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Sample a random legal action per lane: ``(action_type, idx, target, resources)``.
 
     Splits ``key`` per lane *inside* the trace (so the split fuses into the XLA
     graph rather than dispatching eagerly every step) and maps
-    :func:`_random_action_single` over the batch.
+    :func:`_random_action_single` over the batch. ``avail_flat`` is the cached
+    ``(B, N_FLAT)`` flat-legality sweep -- no avail is recomputed here.
     """
     keys = jax.random.split(key, state.phase.shape[0])
-    return jax.vmap(_random_action_single, in_axes=(0, 0, 0))(layout, state, keys)
+    return jax.vmap(_random_action_single, in_axes=(0, 0, 0))(state, avail_flat, keys)
+
+
+@jax.jit
+def _type_mask_from_flat(avail_flat: jax.Array) -> jax.Array:
+    """``(B, N_ACTION_TYPES)`` per-action-type legality, reduced from the cache.
+
+    OR the cached ``(B, N_FLAT)`` flat mask over each action type's rows (its
+    concrete moves): an action type is legal iff some concrete move of that type
+    is. This is the single legality source -- no separate per-type avail sweep.
+    """
+    b = avail_flat.shape[0]
+    return jnp.zeros((b, N_ACTION_TYPES), jnp.bool_).at[:, _ATYPE_J].max(avail_flat)
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +293,10 @@ class BatchedCatanEnv:
         self._truncations = jnp.zeros((B, P), dtype=jnp.bool_)
         self._result = jnp.full((B,), int(ActionResult.SUCCESS), dtype=jnp.int32)
         self._vps = cast(jax.Array, _total_vp_b(self._state))
+        # Flat legality of every action for each lane's acting player, computed
+        # once and reused by step (to gate the chosen action), random_actions, and
+        # action_mask -- the single legality source. Refreshed after every step.
+        self._avail = cast(jax.Array, _flat_available_b(self._layout, self._state))
         self.agents = list(self.possible_agents)
 
     def step(self, action_type: ActionTypeArray, params: ActionParams) -> None:
@@ -282,19 +308,32 @@ class BatchedCatanEnv:
         that just happened, while the next observation is the reset game's.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
-        new_state, result = _step(self._layout, self._state, at, params)
-        vps_after = cast(jax.Array, _total_vp_b(new_state))
-        done_lane = jnp.any(vps_after >= VICTORY_POINTS_TO_WIN, axis=1)  # (B,)
-
-        self._reward = self._compute_reward(self._vps, vps_after, done_lane)
-        self._terminations = jnp.broadcast_to(
-            done_lane[:, None], (self.batch_size, N_PLAYERS)
+        # The whole step -- gate the chosen action with the cached legality, apply,
+        # score reward / termination, auto-reset finished lanes, and refresh the vps
+        # and legality cache for the next step -- is one fused jit dispatch (small
+        # batches are dispatch-bound, so collapsing ~5 kernels into 1 is the win).
+        (
+            self._layout,
+            self._state,
+            self._reward,
+            self._terminations,
+            self._truncations,
+            self._result,
+            self._vps,
+            self._avail,
+            self._key,
+        ) = _env_step_core(
+            self._layout,
+            self._state,
+            at,
+            params,
+            self._avail,
+            self._vps,
+            self._key,
+            self.batch_size,
+            self.reward_mode,
+            self.auto_reset,
         )
-        self._truncations = jnp.zeros((self.batch_size, N_PLAYERS), dtype=jnp.bool_)
-        self._result = result
-
-        self._layout, self._state = self._auto_reset(self._layout, new_state, done_lane)
-        self._vps = cast(jax.Array, _total_vp_b(self._state))
 
     def last(
         self,
@@ -413,8 +452,12 @@ class BatchedCatanEnv:
         return self._obs_for(sel)
 
     def action_mask(self) -> jax.Array:
-        """``(B, N_ACTION_TYPES)`` -- which action types the acting player can use."""
-        return cast(jax.Array, _action_type_mask_b(self._layout, self._state))
+        """``(B, N_ACTION_TYPES)`` -- which action types the acting player can use.
+
+        Reduced from the cached flat-legality sweep (:attr:`_avail`) -- no separate
+        per-type avail computation.
+        """
+        return cast(jax.Array, _type_mask_from_flat(self._avail))
 
     def available_indices(self, action_type: int | ActionType) -> jax.Array:
         """``(B, D)`` legality over the primary index of an index-parameterized action.
@@ -439,15 +482,14 @@ class BatchedCatanEnv:
     ) -> tuple[ActionTypeArray, ActionParams]:
         """A uniformly-random *legal* action per lane (the random-rollout driver).
 
-        Sweeps the whole flat action table against every lane -- one
-        ``jit(vmap(...))`` over :func:`_random_action_single`, which evaluates
-        the table against each lane's own board (closed over, not replicated) --
-        then samples one legal action per lane. A lane with no legal action
-        yields an INVALID action and simply stalls until its next auto-reset.
-        ``key`` is a JAX PRNG key, split per lane for the choice.
+        Reads the cached flat-legality sweep (:attr:`_avail`, computed once per
+        step) and samples one legal action per lane via a per-lane masked argmax --
+        no avail is recomputed here. A lane with no legal action yields an INVALID
+        action and simply stalls until its next auto-reset. ``key`` is a JAX PRNG
+        key, split per lane for the choice.
         """
         atype, idx, target, resources = _random_actions_b(
-            self._layout, self._state, key
+            self._state, self._avail, key
         )
         return atype, ActionParams(idx=idx, target=target, resources=resources)
 
@@ -500,27 +542,6 @@ class BatchedCatanEnv:
             "self_dev_hand": self_dev,
             "self_pending_discard": self_pending,
         }
-
-    def _compute_reward(
-        self, vps_before: jax.Array, vps_after: jax.Array, done_lane: jax.Array
-    ) -> jax.Array:
-        if self.reward_mode == "vp_delta":
-            return (vps_after - vps_before).astype(jnp.float32)
-        # `done_lane` is the row-any of `winners`, so `winners & done_lane[:, None]`
-        # equals `winners` (no row can be a winner unless its lane is done).
-        winners = vps_after >= VICTORY_POINTS_TO_WIN
-        return winners.astype(jnp.float32)
-
-    def _auto_reset(
-        self, layout: BoardLayout, state: BoardState, done_lane: jax.Array
-    ) -> tuple[BoardLayout, BoardState]:
-        if not self.auto_reset:
-            return layout, state
-        self._key, subkey = jax.random.split(self._key)
-        return cast(
-            "tuple[BoardLayout, BoardState]",
-            _auto_reset_core(layout, state, done_lane, subkey, self.batch_size),
-        )
 
 
 def _where_lane(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
@@ -586,4 +607,88 @@ def _auto_reset_core(
     return cast(
         "tuple[BoardLayout, BoardState]",
         jax.lax.cond(jnp.any(done_lane), do_reset, no_reset, (layout, state)),
+    )
+
+
+@functools.partial(
+    jax.jit, static_argnames=("batch_size", "reward_mode", "auto_reset")
+)
+def _env_step_core(
+    layout: BoardLayout,
+    state: BoardState,
+    action_type: jax.Array,
+    params: ActionParams,
+    avail_flat: jax.Array,
+    vps_before: jax.Array,
+    key: jax.Array,
+    batch_size: int,
+    reward_mode: str,
+    auto_reset: bool,
+) -> tuple[
+    BoardLayout,
+    BoardState,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    ResultCode,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+]:
+    """One whole ``BatchedCatanEnv.step`` as a single fused ``jit`` dispatch.
+
+    Gates the chosen action with the cached flat legality, applies the avail-free
+    core, scores reward / termination, auto-resets finished lanes, and refreshes the
+    per-player VPs and the legality cache for the next step. Returns the new
+    ``(layout, state, reward, terminations, truncations, result, vps, avail, key)``.
+    Collapsing what were ~5 separate kernels (gate+apply, two VP sweeps, auto-reset,
+    legality refresh) into one removes the per-step dispatch overhead that dominates
+    small-batch throughput; the cache refresh rides along for free.
+
+    ``reward_mode`` (``"sparse"`` / ``"vp_delta"``) and ``auto_reset`` are static, so
+    their Python branches are resolved at trace time. ``key`` is threaded (split for
+    auto-reset, returned unchanged when ``auto_reset`` is False).
+    """
+    # Gate: read the chosen action's legality from the cache (no avail recompute).
+    rows = jnp.arange(batch_size)
+    legal = flat_legality(avail_flat, action_type, params.idx, params.target)
+    # DISCARD keys on the collapsed flat row (its amounts are not in the key); read
+    # the canonical-discard bit the cache holds for the acting discarder.
+    legal = jnp.where(
+        action_type == int(ActionType.DISCARD), avail_flat[rows, _DISCARD_FLAT], legal
+    )
+    applied, result = jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0))(
+        layout, state, action_type, params, legal
+    )
+
+    vps_after = jax.vmap(_total_vp_single)(applied)
+    done_lane = jnp.any(vps_after >= VICTORY_POINTS_TO_WIN, axis=1)  # (B,)
+
+    if reward_mode == "vp_delta":
+        reward = (vps_after - vps_before).astype(jnp.float32)
+    else:  # "sparse": +1 to each winner on the terminal step (only a done lane wins).
+        reward = (vps_after >= VICTORY_POINTS_TO_WIN).astype(jnp.float32)
+    terminations = jnp.broadcast_to(done_lane[:, None], (batch_size, N_PLAYERS))
+    truncations = jnp.zeros((batch_size, N_PLAYERS), dtype=jnp.bool_)
+
+    if auto_reset:
+        key, subkey = jax.random.split(key)
+        new_layout, new_state = _auto_reset_core(
+            layout, applied, done_lane, subkey, batch_size
+        )
+    else:
+        new_layout, new_state = layout, applied
+
+    new_vps = jax.vmap(_total_vp_single)(new_state)
+    new_avail = jax.vmap(_flat_available_for)(new_layout, new_state)
+    return (
+        new_layout,
+        new_state,
+        reward,
+        terminations,
+        truncations,
+        result,
+        new_vps,
+        new_avail,
+        key,
     )

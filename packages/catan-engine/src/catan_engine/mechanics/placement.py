@@ -137,9 +137,8 @@ def _build_road_avail(
 
 
 def _build_road_apply(
-    layout: BoardLayout, state: BoardState, edge: IntScalar
+    layout: BoardLayout, state: BoardState, edge: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _build_road_avail(layout, state, edge)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
     use_free = state.free_roads > 0
@@ -176,7 +175,8 @@ def build_road_step(board: Board, edge: IndexParam) -> tuple[BoardState, ResultC
 
     Resolves the Longest Road award and any win via :func:`awards.resolve_step`.
     """
-    state, result = _build_road_apply_b(board[0], board[1], edge)
+    available = _build_road_avail_b(board[0], board[1], edge)
+    state, result = _build_road_apply_b(board[0], board[1], edge, available)
     return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
 
 
@@ -203,9 +203,8 @@ def _build_settlement_avail(
 
 
 def _build_settlement_apply(
-    layout: BoardLayout, state: BoardState, vertex: IntScalar
+    layout: BoardLayout, state: BoardState, vertex: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _build_settlement_avail(layout, state, vertex)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
@@ -238,7 +237,8 @@ def build_settlement_step(
     Resolves the Longest Road award (a settlement can cut an opponent's road) and
     any win via :func:`awards.resolve_step`.
     """
-    state, result = _build_settlement_apply_b(board[0], board[1], vertex)
+    available = _build_settlement_avail_b(board[0], board[1], vertex)
+    state, result = _build_settlement_apply_b(board[0], board[1], vertex, available)
     return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
 
 
@@ -265,9 +265,8 @@ def _build_city_avail(
 
 
 def _build_city_apply(
-    layout: BoardLayout, state: BoardState, vertex: IntScalar
+    layout: BoardLayout, state: BoardState, vertex: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _build_city_avail(layout, state, vertex)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
@@ -295,5 +294,6 @@ def build_city_step(board: Board, vertex: IndexParam) -> tuple[BoardState, Resul
     Resolves any win (the +1 VP can reach the threshold) via
     :func:`awards.resolve_step`.
     """
-    state, result = _build_city_apply_b(board[0], board[1], vertex)
+    available = _build_city_avail_b(board[0], board[1], vertex)
+    state, result = _build_city_apply_b(board[0], board[1], vertex, available)
     return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))

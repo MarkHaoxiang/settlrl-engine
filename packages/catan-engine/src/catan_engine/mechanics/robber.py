@@ -113,10 +113,12 @@ def _move_robber_avail(
 
 
 def _move_robber_apply(
-    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+    layout: BoardLayout,
+    state: BoardState,
+    params: tuple[IntScalar, IntScalar],
+    available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
     tile, victim = params
-    available = _move_robber_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
     # Knight-before-roll resumes ROLL; the post-7 robber move resumes MAIN.
@@ -149,9 +151,10 @@ def move_robber_step(
 
     Resolves the post-7 (or knight-before-roll) robber move; never wins.
     """
+    available = _move_robber_avail_b(board[0], board[1], params)
     return cast(
         "tuple[BoardState, ResultCode]",
-        _move_robber_apply_b(board[0], board[1], params),
+        _move_robber_apply_b(board[0], board[1], params, available),
     )
 
 
@@ -178,10 +181,12 @@ def _discard_avail(
 
 
 def _discard_apply(
-    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, SingleResources]
+    layout: BoardLayout,
+    state: BoardState,
+    params: tuple[IntScalar, SingleResources],
+    available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
     player, resources = params
-    available = _discard_avail(layout, state, params)
     p = jnp.clip(player, 0, N_PLAYERS - 1)
     req = resources.astype(jnp.int32)
     new_row = jnp.clip(
@@ -219,6 +224,8 @@ def discard_step(board: Board, params: DiscardParams) -> tuple[BoardState, Resul
     When every player has finished discarding, the phase advances to
     MOVE_ROBBER. Never wins.
     """
+    available = _discard_avail_b(board[0], board[1], params)
     return cast(
-        "tuple[BoardState, ResultCode]", _discard_apply_b(board[0], board[1], params)
+        "tuple[BoardState, ResultCode]",
+        _discard_apply_b(board[0], board[1], params, available),
     )

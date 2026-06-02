@@ -66,9 +66,8 @@ def _setup_settlement_avail(
 
 
 def _setup_settlement_apply(
-    layout: BoardLayout, state: BoardState, vertex: IntScalar
+    layout: BoardLayout, state: BoardState, vertex: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _setup_settlement_avail(layout, state, vertex)
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     placed = state._replace(
@@ -105,9 +104,10 @@ def setup_settlement_step(
     ``setup_index >= N_PLAYERS``) grants one resource per adjacent tile. Always
     advances to SETUP_ROAD.
     """
+    available = _setup_settlement_avail_b(board[0], board[1], vertex)
     return cast(
         "tuple[BoardState, ResultCode]",
-        _setup_settlement_apply_b(board[0], board[1], vertex),
+        _setup_settlement_apply_b(board[0], board[1], vertex, available),
     )
 
 
@@ -131,9 +131,8 @@ def _setup_road_avail(
 
 
 def _setup_road_apply(
-    layout: BoardLayout, state: BoardState, edge: IntScalar
+    layout: BoardLayout, state: BoardState, edge: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _setup_road_avail(layout, state, edge)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
     new_index = state.setup_index.astype(jnp.int32) + 1
@@ -172,6 +171,8 @@ def setup_road_step(board: Board, edge: IndexParam) -> tuple[BoardState, ResultC
     Advances the snake setup order: the next settlement placement, or ROLL with
     player 0 once setup is complete.
     """
+    available = _setup_road_avail_b(board[0], board[1], edge)
     return cast(
-        "tuple[BoardState, ResultCode]", _setup_road_apply_b(board[0], board[1], edge)
+        "tuple[BoardState, ResultCode]",
+        _setup_road_apply_b(board[0], board[1], edge, available),
     )

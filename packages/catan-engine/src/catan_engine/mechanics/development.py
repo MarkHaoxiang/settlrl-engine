@@ -98,9 +98,8 @@ def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> Bool
 
 
 def _buy_dev_apply(
-    layout: BoardLayout, state: BoardState, params: None
+    layout: BoardLayout, state: BoardState, params: None, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _buy_dev_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     key, card = draw_dev_card(state.key, state.dev_deck)
     new_deck = state.dev_deck.astype(jnp.int32).at[card].add(-1)
@@ -119,7 +118,7 @@ def _buy_dev_apply(
 
 
 _buy_dev_avail_b = jax.jit(jax.vmap(_buy_dev_avail, in_axes=(0, 0, None)))
-_buy_dev_apply_b = jax.jit(jax.vmap(_buy_dev_apply, in_axes=(0, 0, None)))
+_buy_dev_apply_b = jax.jit(jax.vmap(_buy_dev_apply, in_axes=(0, 0, None, 0)))
 
 
 def buy_development_card_available(board: Board, params: None = None) -> Mask:
@@ -135,7 +134,8 @@ def buy_development_card_step(
     Resolves any win (a drawn Victory Point card can reach the threshold) via
     :func:`awards.resolve_step`.
     """
-    state, result = _buy_dev_apply_b(board[0], board[1], None)
+    available = _buy_dev_avail_b(board[0], board[1], None)
+    state, result = _buy_dev_apply_b(board[0], board[1], None, available)
     return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
 
 
@@ -155,9 +155,8 @@ def _monopoly_avail(
 
 
 def _monopoly_apply(
-    layout: BoardLayout, state: BoardState, resource: IntScalar
+    layout: BoardLayout, state: BoardState, resource: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _monopoly_avail(layout, state, resource)
     player = state.current_player.astype(jnp.int32)
     r = jnp.clip(resource, 0, N_RESOURCES - 1)
     res = state.player_resources.astype(jnp.int32)  # (N_PLAYERS, N_RESOURCES)
@@ -188,8 +187,10 @@ def play_monopoly_step(
     board: Board, resource: IndexParam
 ) -> tuple[BoardState, ResultCode]:
     """Play Monopoly: take all of ``resource`` from every other player."""
+    available = _monopoly_avail_b(board[0], board[1], resource)
     return cast(
-        "tuple[BoardState, ResultCode]", _monopoly_apply_b(board[0], board[1], resource)
+        "tuple[BoardState, ResultCode]",
+        _monopoly_apply_b(board[0], board[1], resource, available),
     )
 
 
@@ -217,10 +218,12 @@ def _yop_avail(
 
 
 def _yop_apply(
-    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+    layout: BoardLayout,
+    state: BoardState,
+    params: tuple[IntScalar, IntScalar],
+    available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
     resource_a, resource_b = params
-    available = _yop_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
     cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
@@ -253,8 +256,10 @@ def play_year_of_plenty_step(
     board: Board, params: TwoIndexParams
 ) -> tuple[BoardState, ResultCode]:
     """Play Year of Plenty (params: (a, b)); ``a == b`` draws two of one kind."""
+    available = _yop_avail_b(board[0], board[1], params)
     return cast(
-        "tuple[BoardState, ResultCode]", _yop_apply_b(board[0], board[1], params)
+        "tuple[BoardState, ResultCode]",
+        _yop_apply_b(board[0], board[1], params, available),
     )
 
 
@@ -273,9 +278,8 @@ def _road_building_avail(
 
 
 def _road_building_apply(
-    layout: BoardLayout, state: BoardState, params: None
+    layout: BoardLayout, state: BoardState, params: None, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _road_building_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     grant = jnp.minimum(2, roads_left(state.edge_road, player))
     new_hand = (
@@ -293,7 +297,9 @@ def _road_building_apply(
 
 
 _road_building_avail_b = jax.jit(jax.vmap(_road_building_avail, in_axes=(0, 0, None)))
-_road_building_apply_b = jax.jit(jax.vmap(_road_building_apply, in_axes=(0, 0, None)))
+_road_building_apply_b = jax.jit(
+    jax.vmap(_road_building_apply, in_axes=(0, 0, None, 0))
+)
 
 
 def play_road_building_available(board: Board, params: None = None) -> Mask:
@@ -305,9 +311,10 @@ def play_road_building_step(
     board: Board, params: None = None
 ) -> tuple[BoardState, ResultCode]:
     """Play Road Building per game. Grants up to 2 free roads."""
+    available = _road_building_avail_b(board[0], board[1], None)
     return cast(
         "tuple[BoardState, ResultCode]",
-        _road_building_apply_b(board[0], board[1], None),
+        _road_building_apply_b(board[0], board[1], None, available),
     )
 
 
@@ -339,10 +346,12 @@ def _knight_avail(
 
 
 def _knight_apply(
-    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+    layout: BoardLayout,
+    state: BoardState,
+    params: tuple[IntScalar, IntScalar],
+    available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
     tile, victim = params
-    available = _knight_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
     new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.KNIGHT].add(-1)
@@ -376,5 +385,6 @@ def play_knight_step(
     Moves the robber and steals; the Largest Army award and any win it brings are
     resolved via :func:`awards.resolve_step`.
     """
-    state, result = _knight_apply_b(board[0], board[1], params)
+    available = _knight_avail_b(board[0], board[1], params)
+    state, result = _knight_apply_b(board[0], board[1], params, available)
     return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))

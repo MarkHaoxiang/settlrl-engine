@@ -1,6 +1,9 @@
 """Tests for the unified action dispatch and the batched AEC env
 (catan_engine.env)."""
 
+from typing import Any
+
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -200,3 +203,49 @@ class TestBatchedCatanEnv:
         ospace = e.observation_space()
         assert isinstance(ospace["vertex_owner"], Box)
         assert ospace["vertex_owner"].shape == (54,)
+
+
+def _states_equal(a: Any, b: Any) -> bool:
+    """Full BoardState equality (the PRNG key compared on its raw data)."""
+    for field in a._fields:
+        x, y = getattr(a, field), getattr(b, field)
+        if field == "key":
+            x, y = jax.random.key_data(x), jax.random.key_data(y)
+        if not np.array_equal(np.asarray(x), np.asarray(y)):
+            return False
+    return True
+
+
+class TestCacheGatedStep:
+    """The env gates the chosen action with its cached flat legality and applies an
+    avail-free core; this must match the self-validating functional ``step`` (which
+    computes legality via the per-action ``action_available`` switch) exactly."""
+
+    def test_env_step_matches_validating_functional_step(self) -> None:
+        # auto_reset=False so a snapshot board and the env stay in lockstep.
+        e = BatchedCatanEnv(batch_size=8, seed=3, auto_reset=False)
+        key = jax.random.key(0)
+        for _ in range(60):
+            board = (e._layout, e._state)
+            key, sub = jax.random.split(key)
+            at, params = e.random_actions(sub)
+            # Same action, same starting state -> identical transition (incl. the
+            # stochastic roll/steal, which both consume state.key).
+            f_state, _ = env.step(board, at, params)
+            e.step(at, params)
+            assert _states_equal(e._state, f_state)
+
+    def test_env_step_gates_illegal_via_cache(self) -> None:
+        # BUILD_CITY is illegal in the setup phase: the cache must reject it, the
+        # core no-ops, and the result matches the validating path (INVALID).
+        e = BatchedCatanEnv(batch_size=1, seed=0, auto_reset=False)
+        board = (e._layout, e._state)
+        before = np.asarray(e._state.vertex_owner)
+        at = jnp.asarray([int(ActionType.BUILD_CITY)], dtype=jnp.int32)
+        params = _batch_params([0])
+        f_state, f_result = env.step(board, at, params)
+        e.step(at, params)
+        assert int(f_result[0]) == ActionResult.INVALID.value
+        assert int(e.infos["result"][0]) == ActionResult.INVALID.value
+        assert np.array_equal(np.asarray(e._state.vertex_owner), before)
+        assert _states_equal(e._state, f_state)

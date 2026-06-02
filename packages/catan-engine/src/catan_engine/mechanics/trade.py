@@ -86,10 +86,12 @@ def _maritime_avail(
 
 
 def _maritime_apply(
-    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
+    layout: BoardLayout,
+    state: BoardState,
+    params: tuple[IntScalar, IntScalar],
+    available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
     give, receive = params
-    available = _maritime_avail(layout, state, params)
     player = state.current_player.astype(jnp.int32)
     g = jnp.clip(give, 0, N_RESOURCES - 1)
     r = jnp.clip(receive, 0, N_RESOURCES - 1)
@@ -116,6 +118,8 @@ def maritime_step(
     board: Board, params: TwoIndexParams
 ) -> tuple[BoardState, ResultCode]:
     """Trade with the bank at the best available ratio (params: (give, receive))."""
+    available = _maritime_avail_b(board[0], board[1], params)
     return cast(
-        "tuple[BoardState, ResultCode]", _maritime_apply_b(board[0], board[1], params)
+        "tuple[BoardState, ResultCode]",
+        _maritime_apply_b(board[0], board[1], params, available),
     )

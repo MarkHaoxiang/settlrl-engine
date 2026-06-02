@@ -40,7 +40,7 @@ from catan_engine.board.layout import (
     BoardLayout,
 )
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
-from catan_engine.board.state import BoardState, GamePhase
+from catan_engine.board.state import BoardState
 from catan_engine.mechanics.awards import resolve_step
 from catan_engine.mechanics.common import (
     ActionResult,
@@ -101,6 +101,7 @@ __all__ = [
     "ResultCode",
     "action_available",
     "apply_action",
+    "flat_legality",
     "player_total_vp",
 ]
 
@@ -156,23 +157,25 @@ class ActionParams(NamedTuple):
 
 
 # Branch adapters in ActionType order: each maps the packed ActionParams onto the
-# single-game core's native param shape.
+# single-game core's native param shape. Each core takes the precomputed
+# ``available`` legality (the caller computes it once -- see ``apply_action``); no
+# branch recomputes avail.
 _APPLY_BRANCHES = (
-    lambda lay, st, pp: _setup_settlement_apply(lay, st, pp.idx),
-    lambda lay, st, pp: _setup_road_apply(lay, st, pp.idx),
-    lambda lay, st, pp: _roll_apply(lay, st, None),
-    lambda lay, st, pp: _discard_apply(lay, st, (pp.idx, pp.resources)),
-    lambda lay, st, pp: _move_robber_apply(lay, st, (pp.idx, pp.target)),
-    lambda lay, st, pp: _build_road_apply(lay, st, pp.idx),
-    lambda lay, st, pp: _build_settlement_apply(lay, st, pp.idx),
-    lambda lay, st, pp: _build_city_apply(lay, st, pp.idx),
-    lambda lay, st, pp: _buy_dev_apply(lay, st, None),
-    lambda lay, st, pp: _knight_apply(lay, st, (pp.idx, pp.target)),
-    lambda lay, st, pp: _road_building_apply(lay, st, None),
-    lambda lay, st, pp: _yop_apply(lay, st, (pp.idx, pp.target)),
-    lambda lay, st, pp: _monopoly_apply(lay, st, pp.idx),
-    lambda lay, st, pp: _maritime_apply(lay, st, (pp.idx, pp.target)),
-    lambda lay, st, pp: _end_turn_apply(lay, st, None),
+    lambda lay, st, pp, av: _setup_settlement_apply(lay, st, pp.idx, av),
+    lambda lay, st, pp, av: _setup_road_apply(lay, st, pp.idx, av),
+    lambda lay, st, pp, av: _roll_apply(lay, st, None, av),
+    lambda lay, st, pp, av: _discard_apply(lay, st, (pp.idx, pp.resources), av),
+    lambda lay, st, pp, av: _move_robber_apply(lay, st, (pp.idx, pp.target), av),
+    lambda lay, st, pp, av: _build_road_apply(lay, st, pp.idx, av),
+    lambda lay, st, pp, av: _build_settlement_apply(lay, st, pp.idx, av),
+    lambda lay, st, pp, av: _build_city_apply(lay, st, pp.idx, av),
+    lambda lay, st, pp, av: _buy_dev_apply(lay, st, None, av),
+    lambda lay, st, pp, av: _knight_apply(lay, st, (pp.idx, pp.target), av),
+    lambda lay, st, pp, av: _road_building_apply(lay, st, None, av),
+    lambda lay, st, pp, av: _yop_apply(lay, st, (pp.idx, pp.target), av),
+    lambda lay, st, pp, av: _monopoly_apply(lay, st, pp.idx, av),
+    lambda lay, st, pp, av: _maritime_apply(lay, st, (pp.idx, pp.target), av),
+    lambda lay, st, pp, av: _end_turn_apply(lay, st, None, av),
 )
 
 _AVAIL_BRANCHES = (
@@ -199,17 +202,26 @@ def apply_action(
     state: BoardState,
     action_type: ActionTypeArray,
     params: ActionParams,
+    available: Mask,
 ) -> tuple[BoardState, ResultCode]:
     """Apply ``action_type`` (single game) and return (new state, ActionResult code).
+
+    ``available`` is the precomputed legality of this ``(action_type, params)``
+    move: the caller computes avail *once* and passes it in, and the chosen branch
+    gates its core state change on it (``tree_select`` / INVALID). No branch
+    recomputes avail -- under ``vmap`` every branch runs regardless of which action
+    was chosen, so an internal avail call would be paid ~15x per lane. Callers
+    obtain ``available`` either from :func:`action_available` (the switch-based
+    avail, exact for any params) or from a cached flat-legality sweep (see
+    :func:`flat_legality`).
 
     Two stages: the ``lax.switch`` applies the chosen action's *core* state change
     (stage 1), then :func:`awards.resolve_step` recomputes the awards and resolves
     the win *once* (stage 2). Keeping the award sweep out of the per-action
-    branches avoids running the expensive Longest Road DFS in every branch -- under
-    ``vmap`` all branches execute regardless of which action was chosen.
+    branches avoids running the expensive Longest Road DFS in every branch.
     """
     state, result = jax.lax.switch(
-        action_type, _APPLY_BRANCHES, layout, state, params
+        action_type, _APPLY_BRANCHES, layout, state, params, available
     )
     return resolve_step(state, result)
 
@@ -308,6 +320,53 @@ def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
         out[r] = take
         remaining -= take
     return out
+
+
+# ===========================================================================
+# Reverse lookup: (action_type, idx, target) -> flat row.
+#
+# Lets a caller read one ``(action_type, params)`` action's legality straight out
+# of a cached ``(B, N_FLAT)`` flat-legality sweep (:func:`flat_legality`) instead
+# of recomputing avail for the chosen action. The flat table holds one row per
+# concrete move, so ``(action_type, idx, target)`` is unique per row; we pack the
+# triple into a dense int32 index and store its row. DISCARD is the lone collapsed
+# row (its per-resource amounts are not part of the key), so a caller that varies
+# the discarder / amounts resolves those lanes separately.
+# ===========================================================================
+_IDX_RANGE = int(_IDX.max()) + 1
+_TGT_MIN = int(_TARGET.min())
+_TGT_RANGE = int(_TARGET.max()) - _TGT_MIN + 1
+_REVERSE = np.zeros(N_ACTION_TYPES * _IDX_RANGE * _TGT_RANGE, dtype=np.int32)
+_REVERSE[(_ATYPE * _IDX_RANGE + _IDX) * _TGT_RANGE + (_TARGET - _TGT_MIN)] = np.arange(
+    _N_FLAT, dtype=np.int32
+)
+_REVERSE_J = jnp.asarray(_REVERSE)
+
+
+def flat_legality(
+    avail_flat: jax.Array,
+    action_type: ActionTypeArray,
+    idx: jax.Array,
+    target: jax.Array,
+) -> jax.Array:
+    """``(B,)`` legality of each lane's ``(action_type, idx, target)`` move.
+
+    Maps the action back to its flat row and gathers the bit from the cached
+    ``(B, N_FLAT)`` mask ``avail_flat``. An action that is not a row of the flat
+    table (out-of-range params) reads ``False`` (the row decode fails the identity
+    check). DISCARD keys on the collapsed entry only, so callers that vary the
+    discarder / amounts must resolve those lanes themselves.
+    """
+    pack = (action_type * _IDX_RANGE + idx) * _TGT_RANGE + (target - _TGT_MIN)
+    pack = jnp.clip(pack, 0, _REVERSE_J.shape[0] - 1)
+    row = _REVERSE_J[pack]  # (B,)
+    matches = (
+        (_ATYPE_J[row] == action_type)
+        & (_IDX_J[row] == idx)
+        & (_TARGET_J[row] == target)
+    )
+    rows = jnp.arange(avail_flat.shape[0])
+    return avail_flat[rows, row] & matches
 
 
 # ===========================================================================
@@ -424,73 +483,18 @@ _flat_available_b = jax.jit(jax.vmap(_flat_available_for))
 
 
 # ===========================================================================
-# Per-action-type and per-index legality enumerations.
+# Per-index legality enumerations.
 #
-# Coarser views over the same cores: ``_action_type_mask_b`` reduces each action
-# type to a single "is any concrete move of this type legal" flag (the env's
-# ``action_mask``); ``_INDEX_MASKS`` sweeps an index-parameterized action's whole
-# primary domain (the env's ``available_indices``).
+# A finer view over the same cores than the flat sweep: ``_INDEX_MASKS`` sweeps an
+# index-parameterized action's whole primary domain (the env's
+# ``available_indices``). The per-action-type "is any move of this type legal"
+# mask (the env's ``action_mask``) is no longer a separate sweep -- the env
+# reduces it straight from the cached flat-legality mask.
 # ===========================================================================
 
-# Static parameter domains for the legality sweeps.
-_VERTEX_DOM = jnp.arange(N_VERTICES, dtype=jnp.int32)
-_EDGE_DOM = jnp.arange(N_EDGES, dtype=jnp.int32)
+# Static parameter domains for the robber-tile legality sweep.
 _TILE_DOM = jnp.arange(N_TILES, dtype=jnp.int32)
-_RES_DOM = jnp.arange(N_RESOURCES, dtype=jnp.int32)
 _VICTIM_DOM = jnp.arange(-1, N_PLAYERS, dtype=jnp.int32)  # -1 = steal from no one
-
-
-def _action_type_mask_single(layout: BoardLayout, state: BoardState) -> jax.Array:
-    """Per-action-type legality for the acting player in one game (any params)."""
-
-    def any_idx(avail: IndexAvail, dom: jax.Array) -> jax.Array:
-        return jnp.any(jax.vmap(lambda i: avail(layout, state, i))(dom))
-
-    def any_robber(avail: PairAvail) -> jax.Array:
-        # Legal if some (tile, victim) pair -- including victim == -1 -- is valid.
-        return jnp.any(
-            jax.vmap(
-                lambda t: jnp.any(
-                    jax.vmap(lambda v: avail(layout, state, (t, v)))(_VICTIM_DOM)
-                )
-            )(_TILE_DOM)
-        )
-
-    def any_two_res(avail: PairAvail) -> jax.Array:
-        return jnp.any(
-            jax.vmap(
-                lambda a: jnp.any(
-                    jax.vmap(lambda b: avail(layout, state, (a, b)))(_RES_DOM)
-                )
-            )(_RES_DOM)
-        )
-
-    # Discard enumerates a resource vector; reduce to its precondition instead.
-    discard = (state.phase == jnp.uint8(GamePhase.DISCARD)) & jnp.any(
-        state.pending_discard > 0
-    )
-
-    flags = [
-        any_idx(_setup_settlement_avail, _VERTEX_DOM),
-        any_idx(_setup_road_avail, _EDGE_DOM),
-        _roll_avail(layout, state, None),
-        discard,
-        any_robber(_move_robber_avail),
-        any_idx(_build_road_avail, _EDGE_DOM),
-        any_idx(_build_settlement_avail, _VERTEX_DOM),
-        any_idx(_build_city_avail, _VERTEX_DOM),
-        _buy_dev_avail(layout, state, None),
-        any_robber(_knight_avail),
-        _road_building_avail(layout, state, None),
-        any_two_res(_yop_avail),
-        any_idx(_monopoly_avail, _RES_DOM),
-        any_two_res(_maritime_avail),
-        _end_turn_avail(layout, state, None),
-    ]
-    return jnp.stack(flags)  # (N_ACTION_TYPES,) bool, in ActionType order
-
-
-_action_type_mask_b = jax.jit(jax.vmap(_action_type_mask_single))
 
 
 _BatchedMask = Callable[[BoardLayout, BoardState], jax.Array]

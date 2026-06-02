@@ -92,9 +92,8 @@ def _roll_avail(layout: BoardLayout, state: BoardState, params: None) -> BoolSca
 
 
 def _roll_apply(
-    layout: BoardLayout, state: BoardState, params: None
+    layout: BoardLayout, state: BoardState, params: None, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    available = _roll_avail(layout, state, params)
     key, roll = roll_dice(state.key)
     is_seven = roll == 7
 
@@ -122,7 +121,7 @@ def _roll_apply(
 
 
 _roll_avail_b = jax.jit(jax.vmap(_roll_avail, in_axes=(0, 0, None)))
-_roll_apply_b = jax.jit(jax.vmap(_roll_apply, in_axes=(0, 0, None)))
+_roll_apply_b = jax.jit(jax.vmap(_roll_apply, in_axes=(0, 0, None, 0)))
 
 
 def roll_available(board: Board, params: None = None) -> Mask:
@@ -132,6 +131,8 @@ def roll_available(board: Board, params: None = None) -> Mask:
 
 def roll_step(board: Board, params: None = None) -> tuple[BoardState, ResultCode]:
     """Apply RollDice per game; return (new state, ActionResult codes)."""
+    available = _roll_avail_b(board[0], board[1], None)
     return cast(
-        "tuple[BoardState, ResultCode]", _roll_apply_b(board[0], board[1], None)
+        "tuple[BoardState, ResultCode]",
+        _roll_apply_b(board[0], board[1], None, available),
     )
