@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useBoard } from "../lib/useBoard";
 import type { Board } from "../lib/boardData";
+import { overlayMsgStyle } from "../lib/ui";
 import BoardView from "./BoardView";
 import TopBar from "./TopBar";
 
@@ -12,16 +13,14 @@ interface Props {
   controls: (board: Board) => ReactNode;
 }
 
-const overlayMsg: React.CSSProperties = { color: "#fff", padding: 24, fontFamily: "Georgia, serif" };
-
 // Full-screen frame shared by the replay and play views: it loads the board,
 // renders it via BoardView, and overlays a back-to-menu link plus a slot for
 // mode-specific controls at the bottom.
 export default function GameShell({ mode, controls }: Props) {
   const { board, error } = useBoard();
 
-  if (error) return <div style={overlayMsg}>{error}</div>;
-  if (!board) return <div style={overlayMsg}>Loading board…</div>;
+  if (error) return <div style={overlayMsgStyle}>{error}</div>;
+  if (!board) return <div style={overlayMsgStyle}>Loading board…</div>;
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>

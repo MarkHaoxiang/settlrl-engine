@@ -38,7 +38,7 @@ from catan_engine.board.layout import (
     PORT_V,
     BoardLayout,
 )
-from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import NO_INDEX, BoardState, GamePhase
 
 import catan_reference as ref
@@ -157,9 +157,10 @@ def _build_game(layout: ref.Layout, state: BoardState, b: int) -> ref.Game:
     knights = np.asarray(state.knights_played[b])
     pending = np.asarray(state.pending_discard[b])
     current_player = int(state.current_player[b])
+    n_players = int(state.n_players[b])
 
     players: list[ref.Player] = []
-    for p in range(N_PLAYERS):
+    for p in range(n_players):
         resources = {
             ref.Resource(r): int(player_resources[p, r]) for r in range(N_RESOURCES)
         }
@@ -204,12 +205,13 @@ def _build_game(layout: ref.Layout, state: BoardState, b: int) -> ref.Game:
         dev_deck={ref.DevCard(c): int(dev_deck[c]) for c in range(N_DEV_CARD_TYPES)},
         phase=_PHASE[int(state.phase[b])],
         current_player=current_player,
+        n_players=n_players,
         setup_index=int(state.setup_index[b]),
         dice_roll=int(state.dice_roll[b]),
         has_rolled=bool(int(state.has_rolled[b])),
         dev_played_this_turn=bool(int(state.dev_played[b])),
         free_roads=int(state.free_roads[b]),
-        pending_discard=[int(pending[p]) for p in range(N_PLAYERS)],
+        pending_discard=[int(pending[p]) for p in range(n_players)],
         longest_road_owner=_owner_or_none(int(state.longest_road_owner[b])),
         largest_army_owner=_owner_or_none(int(state.largest_army_owner[b])),
         longest_road_len=int(state.longest_road_len[b]),
@@ -399,6 +401,7 @@ def assert_states_match(
 
     if not ignore_phase:
         check("phase", expected.phase, game.phase)
+    check("n_players", expected.n_players, game.n_players)
     check("current_player", expected.current_player, game.current_player)
     check("setup_index", expected.setup_index, game.setup_index)
     check("dice_roll", expected.dice_roll, game.dice_roll)
@@ -413,7 +416,7 @@ def assert_states_match(
     check("longest_road_owner", expected.longest_road_owner, game.longest_road_owner)
     check("longest_road_len", expected.longest_road_len, game.longest_road_len)
     check("largest_army_owner", expected.largest_army_owner, game.largest_army_owner)
-    for p in range(N_PLAYERS):
+    for p in range(expected.n_players):
         check(
             f"resources[{p}]", expected.players[p].resources, game.players[p].resources
         )

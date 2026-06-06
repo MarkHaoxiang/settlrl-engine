@@ -2,19 +2,26 @@ import { useEffect, useMemo, useState } from "react";
 import BoardView, { type BoardInteraction } from "../components/BoardView";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
-import type { GameAction } from "../lib/game";
+import type { GameAction, PlayerCount } from "../lib/game";
 import {
   PLAYER_COLORS,
   PLAYER_STROKES,
   TERRAIN_FILL,
   TERRAIN_STROKE,
+  playerName,
   type DevCardKind,
   type Player,
   type ResourceKind,
 } from "../lib/boardData";
-import type { Cube, Hex } from "../lib/hex";
+import { cubeEq, edgeEq, hexEq, type Cube, type Hex } from "../lib/hex";
+import {
+  HIGHLIGHT,
+  buttonStyle,
+  overlayMsgStyle,
+  panelStyle,
+  selectedStyle,
+} from "../lib/ui";
 
-const PLAYER_NAMES = ["Red", "Blue", "White", "Orange"];
 const LOCAL_PLAYER = 0;
 
 const RESOURCES: { key: ResourceKind; label: string }[] = [
@@ -79,37 +86,7 @@ const PHASE_LABEL: Record<string, string> = {
   game_over: "Game over",
 };
 
-const cubeEq = (a: Cube, b: Cube) => a.q === b.q && a.r === b.r && a.s === b.s;
-const hexEq = (a: Hex, b: Hex) => a.q === b.q && a.r === b.r;
-const edgeEq = (a: { a: Cube; b: Cube }, b: { a: Cube; b: Cube }) =>
-  (cubeEq(a.a, b.a) && cubeEq(a.b, b.b)) || (cubeEq(a.a, b.b) && cubeEq(a.b, b.a));
-
-const barStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-  padding: "14px 18px",
-  borderRadius: 16,
-  background: "rgba(12, 28, 46, 0.92)",
-  border: "1px solid rgba(255,255,255,0.15)",
-  color: "#F2EFE6",
-  fontFamily: "Georgia, serif",
-  backdropFilter: "blur(2px)",
-  userSelect: "none",
-  boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
-  maxWidth: "92vw",
-};
-
-const actionStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.2)",
-  color: "#F2EFE6",
-  borderRadius: 8,
-  padding: "9px 16px",
-  fontSize: 14,
-  fontFamily: "Georgia, serif",
-  cursor: "pointer",
-};
+const smallButton: React.CSSProperties = { ...buttonStyle, padding: "5px 12px", fontSize: 12 };
 
 function Chip({ count, label, fill, stroke }: { count: number; label: string; fill: string; stroke: string }) {
   const empty = count === 0;
@@ -147,12 +124,11 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 function Hand({ player }: { player: Player }) {
   const color = PLAYER_COLORS[player.player] ?? "#888";
   const stroke = PLAYER_STROKES[player.player] ?? "#444";
-  const name = PLAYER_NAMES[player.player] ?? `Player ${player.player + 1}`;
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 }}>
         <span style={{ width: 16, height: 16, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }} />
-        <span style={{ fontWeight: 700, fontSize: 14 }}>{name} (you)</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{playerName(player.player)} (you)</span>
       </div>
       <Group title="Resources">
         {RESOURCES.map((r) => (
@@ -175,13 +151,13 @@ function ChoicePopover({ actions, onPick, onClose }: { actions: GameAction[]; on
     <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>Choose</span>
-        <button style={{ ...actionStyle, padding: "2px 10px", fontSize: 12 }} onClick={onClose}>
+        <button style={{ ...smallButton, padding: "2px 10px" }} onClick={onClose}>
           Cancel
         </button>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", maxWidth: 640 }}>
         {actions.map((a) => (
-          <button key={a.flat} style={actionStyle} onClick={() => onPick(a.flat)}>
+          <button key={a.flat} style={buttonStyle} onClick={() => onPick(a.flat)}>
             {a.label}
           </button>
         ))}
@@ -194,6 +170,9 @@ export default function PlayView() {
   const { snapshot, error, busy, act, reset } = useGame();
   const [armed, setArmed] = useState<string | null>(null);
   const [choice, setChoice] = useState<GameAction[] | null>(null);
+  // Seats for the *next* game (you + bots); applied by the New game button.
+  // The engine supports 2-4, but the renderer offers just 2 and 4 for now.
+  const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
 
   const actions = snapshot?.actions ?? [];
 
@@ -249,8 +228,8 @@ export default function PlayView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armed, actions]);
 
-  if (error) return <div style={{ color: "#fff", padding: 24, fontFamily: "Georgia, serif" }}>{error}</div>;
-  if (!snapshot) return <div style={{ color: "#fff", padding: 24, fontFamily: "Georgia, serif" }}>Loading game…</div>;
+  if (error) return <div style={overlayMsgStyle}>{error}</div>;
+  if (!snapshot) return <div style={overlayMsgStyle}>Loading game…</div>;
 
   const { status, board } = snapshot;
   const me = board.players[LOCAL_PLAYER];
@@ -270,26 +249,34 @@ export default function PlayView() {
       {status.terminal && (
         <div
           style={{
+            ...panelStyle,
             position: "absolute",
             top: 70,
             left: "50%",
             transform: "translateX(-50%)",
             padding: "10px 20px",
-            borderRadius: 12,
-            background: "rgba(12,28,46,0.92)",
-            border: "1px solid rgba(255,255,255,0.2)",
-            color: "#FCE38A",
-            fontFamily: "Georgia, serif",
+            color: HIGHLIGHT,
             fontWeight: 700,
             zIndex: 10,
           }}
         >
-          {status.winner === LOCAL_PLAYER ? "You win! 🎉" : `${PLAYER_NAMES[status.winner ?? 0]} wins`}
+          {status.winner === LOCAL_PLAYER ? "You win! 🎉" : `${playerName(status.winner ?? 0)} wins`}
         </div>
       )}
 
       <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)" }}>
-        <div style={barStyle}>
+        <div
+          style={{
+            ...panelStyle,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            padding: "14px 18px",
+            borderRadius: 16,
+            boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
+            maxWidth: "92vw",
+          }}
+        >
           <Hand player={me} />
 
           {/* Status + actions */}
@@ -301,35 +288,38 @@ export default function PlayView() {
                 {busy ? "Bots thinking…" : status.your_turn ? "Your turn" : status.terminal ? "Game over" : "Waiting…"}
               </span>
               {armed && BOARD_TYPES.has(armed) && !busy && (
-                <span style={{ color: "#FCE38A" }}>Click a highlighted spot to place ({TYPE_LABEL[armed]})</span>
+                <span style={{ color: HIGHLIGHT }}>Click a highlighted spot to place ({TYPE_LABEL[armed]})</span>
               )}
-              <button
-                style={{ ...actionStyle, marginLeft: "auto", padding: "5px 12px", fontSize: 12 }}
-                onClick={() => reset(Math.floor(Math.random() * 65536))}
-              >
-                New game
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>Players</span>
+                {([2, 4] as const).map((n) => (
+                  <button
+                    key={n}
+                    style={{ ...smallButton, padding: "5px 10px", ...(nPlayers === n ? selectedStyle : {}) }}
+                    onClick={() => setNPlayers(n)}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button style={smallButton} onClick={() => reset(Math.floor(Math.random() * 65536), nPlayers)}>
+                  New game
+                </button>
+              </div>
             </div>
 
             {!status.terminal && (
               <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                 {availableTypes.length === 0 && <span style={{ fontSize: 13, opacity: 0.6 }}>No moves available.</span>}
-                {availableTypes.map((type) => {
-                  const isArmed = armed === type;
-                  return (
-                    <button
-                      key={type}
-                      style={{
-                        ...actionStyle,
-                        ...(isArmed ? { background: "rgba(252,227,138,0.25)", borderColor: "#FCE38A" } : {}),
-                      }}
-                      disabled={busy}
-                      onClick={() => onTypeButton(type)}
-                    >
-                      {TYPE_LABEL[type] ?? type}
-                    </button>
-                  );
-                })}
+                {availableTypes.map((type) => (
+                  <button
+                    key={type}
+                    style={{ ...buttonStyle, ...(armed === type ? selectedStyle : {}) }}
+                    disabled={busy}
+                    onClick={() => onTypeButton(type)}
+                  >
+                    {TYPE_LABEL[type] ?? type}
+                  </button>
+                ))}
               </div>
             )}
 

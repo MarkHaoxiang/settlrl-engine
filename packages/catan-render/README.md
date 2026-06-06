@@ -72,7 +72,7 @@ uv run pytest packages/catan-render/tests
 | `GET /api/board` | Returns the current board as JSON |
 | `GET /api/game` | Live game snapshot: board + turn status + your legal moves |
 | `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot (bots have already replied). `409` if the move is illegal |
-| `POST /api/game/reset` | Start a fresh game `{ "seed": <int> }` |
+| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4 }` (default 4 seats: you + 3 bots) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
 Each legal move in `GET /api/game` is a decoded action descriptor carrying its `flat` index
@@ -108,11 +108,13 @@ packages/catan-render/
 └── frontend/
     └── src/
         ├── App.tsx          # Routes: menu, /play, /replay/:gameId
-        ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math
-        ├── lib/boardData.ts  # Board types + adaptBoard; fetches /api/board
+        ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
+        ├── lib/api.ts        # JSON fetch wrapper (ApiError)
+        ├── lib/boardData.ts  # Board types + palette + adaptBoard; fetches /api/board
         ├── lib/useBoard.ts   # Hook that loads the board for a view
         ├── lib/game.ts       # Live-game API client (/api/game*)
         ├── lib/useGame.ts    # Hook driving the live game (act / reset)
+        ├── lib/ui.ts         # Shared panel / button / highlight styles
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play or Replay
         │   ├── PlayView.tsx   # Play mode: interactive board + live action bar

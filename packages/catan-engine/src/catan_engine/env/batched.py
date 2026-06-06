@@ -226,6 +226,11 @@ class BatchedCatanEnv:
     Args:
         batch_size: number of games run in parallel (the leading array axis).
         seed: PRNG seed for the initial boards and auto-reset randomness.
+        n_players: players seated per game (2..4, default 4; same for every
+            lane). The per-player arrays keep their fixed ``N_PLAYERS`` axis --
+            rows at or beyond ``n_players`` belong to no one and stay zero
+            (those players never act, so ``rewards`` / ``terminations`` columns
+            past ``n_players`` are meaningless padding).
         reward: ``"sparse"`` (+1 to the winner on the terminal step, 0 else) or
             ``"vp_delta"`` (each player's change in total VP this step).
         auto_reset: when True (default), a lane that terminates is replaced with a
@@ -252,6 +257,7 @@ class BatchedCatanEnv:
         reward: str = "sparse",
         auto_reset: bool = True,
         number_placement: Literal["random", "spiral"] = "random",
+        n_players: int = N_PLAYERS,
     ) -> None:
         if reward not in ("sparse", "vp_delta"):
             raise ValueError(f"reward must be 'sparse' or 'vp_delta', got {reward!r}")
@@ -260,13 +266,16 @@ class BatchedCatanEnv:
                 "number_placement must be 'random' or 'spiral', "
                 f"got {number_placement!r}"
             )
+        if not 2 <= n_players <= N_PLAYERS:
+            raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
         self.batch_size = batch_size
         self.reward_mode = reward
         self.auto_reset = auto_reset
         self.number_placement = number_placement
-        self.possible_agents = [f"player_{i}" for i in range(N_PLAYERS)]
+        self.n_players = n_players
+        self.possible_agents = [f"player_{i}" for i in range(n_players)]
         self.agents = list(self.possible_agents)
-        self.num_agents = N_PLAYERS
+        self.num_agents = n_players
         self._seed = seed
         self.reset(seed)
 
@@ -284,7 +293,9 @@ class BatchedCatanEnv:
         self._layout = make_layout(
             self.batch_size, key=k_layout, number_placement=self.number_placement
         )
-        self._state = make_board_state(self.batch_size, key=k_state)
+        self._state = make_board_state(
+            self.batch_size, key=k_state, n_players=self.n_players
+        )
         self._state = self._state._replace(
             robber=desert_tile(self._layout.tile_resource)
         )
@@ -339,6 +350,7 @@ class BatchedCatanEnv:
             self.reward_mode,
             self.auto_reset,
             self.number_placement,
+            self.n_players,
         )
 
     def last(
@@ -501,8 +513,8 @@ class BatchedCatanEnv:
     def _agent_index(self, agent: int | str) -> int:
         if isinstance(agent, str):
             return self.possible_agents.index(agent)
-        if not 0 <= agent < N_PLAYERS:
-            raise ValueError(f"agent index {agent} out of range [0, {N_PLAYERS})")
+        if not 0 <= agent < self.n_players:
+            raise ValueError(f"agent index {agent} out of range [0, {self.n_players})")
         return agent
 
     def _obs_for(self, sel: jax.Array) -> Observation:
@@ -560,7 +572,9 @@ def _select_key(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
     return cast(jax.Array, jax.random.wrap_key_data(jnp.where(m, ad, bd)))
 
 
-@functools.partial(jax.jit, static_argnames=("batch_size", "number_placement"))
+@functools.partial(
+    jax.jit, static_argnames=("batch_size", "number_placement", "n_players")
+)
 def _auto_reset_core(
     layout: BoardLayout,
     state: BoardState,
@@ -568,14 +582,9 @@ def _auto_reset_core(
     key: jax.Array,
     batch_size: int,
     number_placement: Literal["random", "spiral"],
+    n_players: int,
 ) -> tuple[BoardLayout, BoardState]:
-    """Replace finished lanes (``done_lane``) with fresh games, fully on device.
-
-    The branch decision is a device-side ``lax.cond`` on ``jnp.any(done_lane)``
-    rather than a host ``bool(...)``: this avoids a per-step device->host sync
-    (so dispatch can run ahead of the device) while still only paying for the
-    expensive board generation on steps where some lane actually terminated.
-    """
+    """Replace finished lanes (``done_lane``) with fresh games, fully on device."""
 
     def do_reset(
         operand: tuple[BoardLayout, BoardState],
@@ -585,7 +594,7 @@ def _auto_reset_core(
         fresh_layout = make_layout(
             batch_size, key=k_layout, number_placement=number_placement
         )
-        fresh_state = make_board_state(batch_size, key=k_state)
+        fresh_state = make_board_state(batch_size, key=k_state, n_players=n_players)
         fresh_state = fresh_state._replace(
             robber=desert_tile(fresh_layout.tile_resource)
         )
@@ -618,7 +627,13 @@ def _auto_reset_core(
 
 @functools.partial(
     jax.jit,
-    static_argnames=("batch_size", "reward_mode", "auto_reset", "number_placement"),
+    static_argnames=(
+        "batch_size",
+        "reward_mode",
+        "auto_reset",
+        "number_placement",
+        "n_players",
+    ),
 )
 def _env_step_core(
     layout: BoardLayout,
@@ -632,6 +647,7 @@ def _env_step_core(
     reward_mode: str,
     auto_reset: bool,
     number_placement: Literal["random", "spiral"],
+    n_players: int,
 ) -> tuple[
     BoardLayout,
     BoardState,
@@ -654,7 +670,8 @@ def _env_step_core(
     small-batch throughput; the cache refresh rides along for free.
 
     ``reward_mode`` (``"sparse"`` / ``"vp_delta"``), ``auto_reset``, and
-    ``number_placement`` (forwarded to the auto-reset ``make_layout``) are static,
+    ``number_placement`` / ``n_players`` (forwarded to the auto-reset board
+    construction) are static,
     so their Python branches are resolved at trace time. ``key`` is threaded (split
     for auto-reset, returned unchanged when ``auto_reset`` is False).
     """
@@ -677,7 +694,7 @@ def _env_step_core(
     if auto_reset:
         key, subkey = jax.random.split(key)
         new_layout, new_state = _auto_reset_core(
-            layout, applied, done_lane, subkey, batch_size, number_placement
+            layout, applied, done_lane, subkey, batch_size, number_placement, n_players
         )
     else:
         new_layout, new_state = layout, applied

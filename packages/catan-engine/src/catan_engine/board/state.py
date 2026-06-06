@@ -101,6 +101,14 @@ class BoardState(NamedTuple):
     victory_points holds *building* points only (settlement=1, city=2); Longest
     Road, Largest Army and hidden Victory Point cards are added on top when a
     total is needed (see catan_engine.mechanics.action.player_total_vp).
+
+    ``n_players`` is the per-game number of seated players (2..N_PLAYERS). The
+    per-player arrays keep their fixed ``N_PLAYERS`` axis regardless; rows at or
+    beyond ``n_players`` belong to no one -- those players never take a turn
+    (the setup snake and the end-turn rotation run modulo ``n_players``), so
+    they can never own a building or hold a card, and every other rule
+    (production, discard, robber victims, awards, the win check) masks them out
+    naturally through that emptiness.
     """
 
     # -- Board occupancy ----------------------------------------------------
@@ -119,7 +127,8 @@ class BoardState(NamedTuple):
     # -- Turn / flow --------------------------------------------------------
     phase: GameScalarArray  # GamePhase
     current_player: GameScalarArray  # 0-indexed
-    setup_index: GameScalarArray  # 0..2*N_PLAYERS placement counter
+    n_players: GameScalarArray  # active players (2..N_PLAYERS); see note below
+    setup_index: GameScalarArray  # 0..2*n_players placement counter
     dice_roll: GameScalarArray  # 0 = not rolled this turn, else 2..12
     has_rolled: GameScalarArray  # flag
     dev_played: GameScalarArray  # flag - a dev card played this turn
@@ -137,11 +146,7 @@ class BoardState(NamedTuple):
 
 
 def to_u8(x: jax.Array) -> jax.Array:
-    """Saturating cast to uint8 (clip to ``[0, 255]``).
-
-    The state arrays are uint8; integer arithmetic is done in int32 and committed
-    back through this clip so over/underflows saturate instead of wrapping.
-    """
+    """Saturating cast to uint8 (clip to ``[0, 255]``)."""
     return jnp.clip(x, 0, 255).astype(jnp.uint8)
 
 
@@ -156,7 +161,11 @@ def tree_select(mask: jax.Array, a: BoardState, b: BoardState) -> BoardState:
     )
 
 
-def make_board_state(batch_size: int = 1, key: jax.Array | None = None) -> BoardState:
+def make_board_state(
+    batch_size: int = 1, key: jax.Array | None = None, n_players: int = N_PLAYERS
+) -> BoardState:
+    if not 2 <= n_players <= N_PLAYERS:
+        raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
     B = batch_size
     key = key if key is not None else jax.random.key(0)
     none = jnp.full((B,), NO_INDEX, dtype=jnp.uint8)
@@ -175,6 +184,7 @@ def make_board_state(batch_size: int = 1, key: jax.Array | None = None) -> Board
         knights_played=jnp.zeros((B, N_PLAYERS), dtype=jnp.uint8),
         phase=jnp.full((B,), GamePhase.SETUP_SETTLEMENT, dtype=jnp.uint8),
         current_player=jnp.zeros((B,), dtype=jnp.uint8),
+        n_players=jnp.full((B,), n_players, dtype=jnp.uint8),
         setup_index=jnp.zeros((B,), dtype=jnp.uint8),
         dice_roll=jnp.zeros((B,), dtype=jnp.uint8),
         has_rolled=jnp.zeros((B,), dtype=jnp.uint8),

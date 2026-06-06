@@ -42,8 +42,10 @@ from catan_reference.types import (
     Resource,
 )
 
-# Snake / boustrophedon setup order over the 2 * N_PLAYERS starting settlements.
-SETUP_ORDER: list[int] = list(range(N_PLAYERS)) + list(range(N_PLAYERS - 1, -1, -1))
+def setup_order(n_players: int) -> list[int]:
+    """Snake / boustrophedon setup order over the 2 * n_players starting
+    settlements: first round in player order, second round reversed."""
+    return list(range(n_players)) + list(range(n_players - 1, -1, -1))
 
 
 def _zero_resources() -> dict[Resource, int]:
@@ -192,26 +194,37 @@ class Game:
 
     phase: Phase = Phase.SETUP_SETTLEMENT
     current_player: int = 0
-    setup_index: int = 0  # 0..2*N_PLAYERS; settlements placed so far in setup
+    n_players: int = N_PLAYERS  # seated players (2..4); len(players)
+    setup_index: int = 0  # 0..2*n_players; settlements placed so far in setup
     dice_roll: int = 0  # last roll, 0 if not rolled this turn
     has_rolled: bool = False
     dev_played_this_turn: bool = False
     free_roads: int = 0  # owed by Road Building
-    pending_discard: list[int] = field(default_factory=lambda: [0] * N_PLAYERS)
+    pending_discard: list[int] = field(default_factory=list)  # len n_players
 
     longest_road_owner: int | None = None
     largest_army_owner: int | None = None
     longest_road_len: int = 0
 
+    def __post_init__(self) -> None:
+        if not self.pending_discard:
+            self.pending_discard = [0] * self.n_players
+        assert len(self.players) == self.n_players, (
+            f"{len(self.players)} players but n_players={self.n_players}"
+        )
+
     # -- construction ----------------------------------------------------
 
     @staticmethod
-    def new(layout: Layout, robber: int) -> "Game":
+    def new(layout: Layout, robber: int, n_players: int = N_PLAYERS) -> "Game":
         """A fresh game in the setup phase (robber starts on the desert tile)."""
+        if not 2 <= n_players <= N_PLAYERS:
+            raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
         return Game(
             layout=layout,
             robber=robber,
-            players=[Player() for _ in range(N_PLAYERS)],
+            players=[Player() for _ in range(n_players)],
+            n_players=n_players,
         )
 
     # -- derived counts --------------------------------------------------
@@ -359,8 +372,10 @@ class Game:
         is set aside (no holder). It is held only when exactly one player has the
         unique longest road of >= 5 segments.
         """
-        lengths = [self.longest_road_length(p) for p in range(N_PLAYERS)]
-        qualifying = [p for p in range(N_PLAYERS) if lengths[p] >= LONGEST_ROAD_MIN]
+        lengths = [self.longest_road_length(p) for p in range(self.n_players)]
+        qualifying = [
+            p for p in range(self.n_players) if lengths[p] >= LONGEST_ROAD_MIN
+        ]
         if not qualifying:
             self.longest_road_owner = None
             self.longest_road_len = 0
@@ -387,8 +402,10 @@ class Game:
         among the leaders and the set-aside branch is a defensive default for
         out-of-band states.
         """
-        knights = [self.players[p].knights_played for p in range(N_PLAYERS)]
-        qualifying = [p for p in range(N_PLAYERS) if knights[p] >= LARGEST_ARMY_MIN]
+        knights = [self.players[p].knights_played for p in range(self.n_players)]
+        qualifying = [
+            p for p in range(self.n_players) if knights[p] >= LARGEST_ARMY_MIN
+        ]
         if not qualifying:
             self.largest_army_owner = None
             return
@@ -408,7 +425,7 @@ class Game:
         """Resources each player earns from ``roll``, honouring the bank shortage
         rule (rulebook p.4 / Almanac). Does not mutate state."""
         gains: dict[int, dict[Resource, int]] = {
-            p: _zero_resources() for p in range(N_PLAYERS)
+            p: _zero_resources() for p in range(self.n_players)
         }
         for tile in range(board.N_TILES):
             if tile == self.robber:
@@ -427,10 +444,10 @@ class Game:
 
         # Apply the bank shortage rule per resource.
         granted: dict[int, dict[Resource, int]] = {
-            p: _zero_resources() for p in range(N_PLAYERS)
+            p: _zero_resources() for p in range(self.n_players)
         }
         for r in RESOURCES:
-            demand = {p: gains[p][r] for p in range(N_PLAYERS) if gains[p][r] > 0}
+            demand = {p: gains[p][r] for p in range(self.n_players) if gains[p][r] > 0}
             total = sum(demand.values())
             stock = self.bank(r)
             if total <= stock:
@@ -507,7 +524,7 @@ class Game:
         return self.phase is Phase.ROLL and not self.has_rolled
 
     def _legal_discard(self, a: Discard) -> bool:
-        if self.phase is not Phase.DISCARD or not 0 <= a.player < N_PLAYERS:
+        if self.phase is not Phase.DISCARD or not 0 <= a.player < self.n_players:
             return False
         if self.pending_discard[a.player] == 0:
             return False
@@ -724,7 +741,7 @@ class Game:
         discard choice is independent -- and it matches the engine's fixed
         order, so the differential driver exercises identical action streams.
         """
-        for p in range(N_PLAYERS):
+        for p in range(self.n_players):
             if self.pending_discard[p] > 0:
                 return [
                     Discard(p, r)
@@ -799,15 +816,16 @@ class Game:
     def _apply_setup_settlement(self, a: SetupSettlement) -> None:
         self.buildings[a.vertex] = (self.current_player, Building.SETTLEMENT)
         # The second settlement (reverse pass) grants its adjacent resources.
-        if self.setup_index >= N_PLAYERS:
+        if self.setup_index >= self.n_players:
             self.grant_setup_resources(a.vertex, self.current_player)
         self.phase = Phase.SETUP_ROAD
 
     def _apply_setup_road(self, a: SetupRoad) -> None:
         self.roads[a.edge] = self.current_player
         self.setup_index += 1
-        if self.setup_index < len(SETUP_ORDER):
-            self.current_player = SETUP_ORDER[self.setup_index]
+        order = setup_order(self.n_players)
+        if self.setup_index < len(order):
+            self.current_player = order[self.setup_index]
             self.phase = Phase.SETUP_SETTLEMENT
         else:
             self.current_player = 0
@@ -820,7 +838,7 @@ class Game:
         self.dice_roll = a.value
         self.has_rolled = True
         if a.value == 7:
-            for p in range(N_PLAYERS):
+            for p in range(self.n_players):
                 hand = sum(self.players[p].resources.values())
                 self.pending_discard[p] = (
                     hand // 2 if hand > ROBBER_DISCARD_LIMIT else 0
@@ -920,7 +938,7 @@ class Game:
         p = self.current_player
         self.players[p].dev_cards[DevCard.MONOPOLY] -= 1
         self.dev_played_this_turn = True
-        for other in range(N_PLAYERS):
+        for other in range(self.n_players):
             if other == p:
                 continue
             taken = self.players[other].resources[a.resource]
@@ -939,7 +957,7 @@ class Game:
         self.dev_played_this_turn = False
         self.free_roads = 0
         self.players[self.current_player].dev_bought_this_turn = _zero_dev()
-        self.current_player = (self.current_player + 1) % N_PLAYERS
+        self.current_player = (self.current_player + 1) % self.n_players
         self.phase = Phase.ROLL
 
     def _check_win(self) -> None:

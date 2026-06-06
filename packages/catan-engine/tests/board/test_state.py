@@ -6,6 +6,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS
 from catan_engine.board.layout import N_VERTICES
@@ -80,3 +81,14 @@ class TestMakeBoardState:
         assert s.vertex_owner.shape == (4, N_VERTICES)
         assert s.player_resources.shape == (4, N_PLAYERS, N_RESOURCES)
         assert s.key.shape == (4,)
+
+    def test_n_players_defaults_full_and_validates(self) -> None:
+        # The per-player arrays keep their fixed N_PLAYERS axis regardless of
+        # how many players are seated; only the n_players scalar varies.
+        assert int(make_board_state(1).n_players[0]) == N_PLAYERS
+        s = make_board_state(2, n_players=2)
+        assert np.array_equal(np.asarray(s.n_players), [2, 2])
+        assert s.player_resources.shape == (2, N_PLAYERS, N_RESOURCES)
+        for bad in (1, N_PLAYERS + 1):
+            with pytest.raises(ValueError, match="n_players"):
+                make_board_state(1, n_players=bad)

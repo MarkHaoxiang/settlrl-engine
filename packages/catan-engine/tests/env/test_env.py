@@ -260,6 +260,45 @@ class TestDiscardOneCard:
         assert int(e._state.phase[0]) == GamePhase.DISCARD
 
 
+class TestTwoPlayerMode:
+    def test_agents_and_validation(self) -> None:
+        e = BatchedCatanEnv(batch_size=1, seed=0, n_players=2)
+        assert e.possible_agents == ["player_0", "player_1"]
+        assert e.num_agents == 2
+        for bad in (1, N_PLAYERS + 1):
+            with pytest.raises(ValueError, match="n_players"):
+                BatchedCatanEnv(n_players=bad)
+
+    def test_setup_snake_and_first_rotation(self) -> None:
+        # 2-player snake: settlements (and their roads) go 0, 1, 1, 0; then ROLL
+        # returns to player 0. Drive each step with the first legal vertex/edge.
+        e = BatchedCatanEnv(batch_size=1, seed=2, n_players=2, auto_reset=False)
+        for placer in (0, 1, 1, 0):
+            for at in (ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD):
+                assert int(e.agent_selection[0]) == placer
+                mask = np.asarray(e.available_indices(at))
+                e.step(
+                    jnp.asarray([int(at)], jnp.int32),
+                    _batch_params([_first_legal(mask[0])]),
+                )
+        assert int(e._state.phase[0]) == GamePhase.ROLL
+        assert int(e.agent_selection[0]) == 0
+
+    def test_random_rollout_never_touches_unseated_players(self) -> None:
+        e = BatchedCatanEnv(batch_size=2, seed=1, n_players=2)
+        key = jax.random.key(0)
+        for _ in range(120):
+            key, sub = jax.random.split(key)
+            at, params = e.random_actions(sub)
+            e.step(at, params)
+            assert (np.asarray(e.agent_selection) < 2).all()
+        # The unseated rows (players 2/3) own nothing throughout.
+        assert np.asarray(e._state.player_resources)[:, 2:].sum() == 0
+        assert np.asarray(e._state.victory_points)[:, 2:].sum() == 0
+        assert (np.asarray(e._state.vertex_owner) <= 2).all()
+        assert (np.asarray(e._state.edge_road) <= 2).all()
+
+
 def _states_equal(a: Any, b: Any) -> bool:
     """Full BoardState equality (the PRNG key compared on its raw data)."""
     for field in a._fields:

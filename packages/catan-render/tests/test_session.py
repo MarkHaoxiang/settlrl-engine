@@ -61,3 +61,31 @@ def test_game_drives_to_completion() -> None:
     assert status.terminal
     assert status.winner is not None
     assert 0 <= status.winner < 4
+
+
+def test_two_player_session() -> None:
+    # n_players=2 seats the human and one bot; the unseated players never act
+    # and a random game still drives to completion with a seated winner.
+    sess = GameSession(seed=0, n_players=2)
+    assert sess.acting_seat() == HUMAN_SEAT
+    assert len(sess.board[1].player_resources[0]) == 4  # arrays keep 4 rows
+    rng = sess._rng
+    for _ in range(50_000):
+        if sess.terminal():
+            break
+        legal = sess.legal_flat()
+        if legal.size == 0:
+            break
+        assert sess.acting_seat() in (0, 1)
+        sess.apply(int(rng.choice(legal)))
+    status = sess.status()
+    assert status.terminal
+    assert status.winner is not None and 0 <= status.winner < 2
+
+
+def test_reset_keeps_seat_count_unless_changed() -> None:
+    sess = GameSession(seed=0, n_players=2)
+    sess.reset(seed=1)  # no n_players -> keeps 2
+    assert sess.n_players == 2
+    sess.reset(seed=2, n_players=4)
+    assert sess.n_players == 4

@@ -1,15 +1,15 @@
 import { Link } from "react-router-dom";
+import { panelStyle } from "../lib/ui";
 
 const cardStyle: React.CSSProperties = {
+  ...panelStyle,
   display: "flex",
   flexDirection: "column",
   gap: 8,
   width: 240,
   padding: "26px 24px",
   borderRadius: 16,
-  background: "rgba(12, 28, 46, 0.82)",
   border: "2px solid rgba(255,255,255,0.15)",
-  color: "#F2EFE6",
   textDecoration: "none",
   boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
 };

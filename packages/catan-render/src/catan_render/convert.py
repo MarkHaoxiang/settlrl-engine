@@ -182,11 +182,13 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
     # player_resources: (players, resources) -> total cards in hand.
     # dev_hand: (players, dev card types) -> unplayed dev cards.
     # victory_points: (players,) building points only.
+    # Only the seated players (state.n_players; the arrays always carry the
+    # engine's fixed 4 rows) get a panel.
     player_resources = state.player_resources[batch_index]
     dev_hand = state.dev_hand[batch_index]
     victory_points = state.victory_points[batch_index]
     players: list[PlayerModel] = []
-    for p in range(player_resources.shape[0]):
+    for p in range(int(state.n_players[batch_index])):
         # Indexed positionally in enum order (see _RESOURCE_NAMES / _DEV_CARD_NAMES).
         res = player_resources[p]
         dev = dev_hand[p]

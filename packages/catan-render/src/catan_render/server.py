@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -55,11 +56,14 @@ def post_action(req: _ActionRequest) -> GameModel:
 
 class _ResetRequest(BaseModel):
     seed: int = 0
+    # Seats in the new game (the human + bots). The engine supports 2-4; the
+    # renderer offers 2 and 4 for now.
+    n_players: Literal[2, 4] = 4
 
 
 @app.post("/api/game/reset")
 def post_reset(req: _ResetRequest) -> GameModel:
-    _SESSION.reset(req.seed)
+    _SESSION.reset(req.seed, n_players=req.n_players)
     return _game_model()
 
 

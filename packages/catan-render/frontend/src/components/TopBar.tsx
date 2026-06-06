@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { panelStyle } from "../lib/ui";
 
 // The top-centre bar shared by the game views: a back-to-menu link and the
 // current mode label. Pure presentation.
@@ -6,6 +7,7 @@ export default function TopBar({ mode }: { mode: string }) {
   return (
     <div
       style={{
+        ...panelStyle,
         position: "absolute",
         top: 16,
         left: "50%",
@@ -14,13 +16,6 @@ export default function TopBar({ mode }: { mode: string }) {
         alignItems: "center",
         gap: 12,
         padding: "6px 14px",
-        borderRadius: 12,
-        background: "rgba(12, 28, 46, 0.82)",
-        border: "1px solid rgba(255,255,255,0.15)",
-        color: "#F2EFE6",
-        fontFamily: "Georgia, serif",
-        backdropFilter: "blur(2px)",
-        userSelect: "none",
         zIndex: 10,
       }}
     >

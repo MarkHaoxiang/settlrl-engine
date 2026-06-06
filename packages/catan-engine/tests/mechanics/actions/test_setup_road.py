@@ -10,7 +10,6 @@ from catan_engine.mechanics.action import ActionResult
 from catan_engine.mechanics.setup import setup_road_step
 from catan_engine.board import Board, place_road, set_phase
 from catan_engine.board.layout import EDGE_V
-from catan_engine.mechanics.setup import N_SETUP
 from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import fmt
 
@@ -83,10 +82,11 @@ current_player=1""",
 
 def test_setup_complete(setup_road_board: Board) -> None:
     layout, st = setup_road_board
-    st = st._replace(setup_index=st.setup_index.at[0].set(N_SETUP - 1))
+    n_setup = 2 * int(st.n_players[0])  # the snake places 2 settlements each
+    st = st._replace(setup_index=st.setup_index.at[0].set(n_setup - 1))
     state, result = setup_road_step((layout, st), jnp.array([_E0]))
     assert int(result[0]) == ActionResult.SUCCESS.value
-    assert int(state.setup_index[0]) == N_SETUP
+    assert int(state.setup_index[0]) == n_setup
     assert int(state.phase[0]) == GamePhase.ROLL
     assert int(state.current_player[0]) == 0
 

@@ -1,7 +1,8 @@
 """Decode the AEC flat action set into JSON-friendly action descriptors.
 
-``catan_engine.env.aec`` enumerates every concrete move as a flat ``Discrete`` index
-(its ``_ATYPE`` / ``_IDX`` / ``_TARGET`` lookup tables). The renderer needs each
+The engine's AEC wrapper enumerates every concrete move as a flat ``Discrete``
+index (the ``_ATYPE`` / ``_IDX`` / ``_TARGET`` lookup tables in
+``catan_engine.mechanics.action``). The renderer needs each
 legal index turned into something the frontend can act on: the action type, a
 human label, and — for placement / robber / resource moves — the board geometry
 or resources involved, expressed in the same cube/axial coordinates the SVG board
@@ -10,8 +11,7 @@ already uses (reused from :mod:`catan_render.convert`).
 
 from __future__ import annotations
 
-from catan_engine.mechanics.action import ActionType
-from catan_engine.env.aec import _ATYPE, _IDX, _TARGET
+from catan_engine.mechanics.action import _ATYPE, _IDX, _TARGET, ActionType
 
 from .convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _RESOURCE_NAMES, _cube
 from .models import ActionModel, EdgeModel, HexModel

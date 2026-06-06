@@ -60,8 +60,8 @@ def _inject_outcome(
     return action
 
 
-def _play_one_game(seed: int, max_steps: int = 300) -> None:
-    board = make_board(1, seed=seed)
+def _play_one_game(seed: int, max_steps: int = 300, n_players: int = 4) -> None:
+    board = make_board(1, seed=seed, n_players=n_players)
     game = conv.to_reference_single(board, 0)
     rng = random.Random(seed)
 
@@ -117,3 +117,12 @@ _SEEDS = (0, 1, 2, 18)
 def test_engine_matches_reference_over_random_games() -> None:
     for seed in _SEEDS:
         _play_one_game(seed)
+
+
+def test_engine_matches_reference_with_fewer_players() -> None:
+    # 2- and 3-player games exercise the shorter setup snake, the tighter
+    # end-turn rotation, and the unused player rows staying empty. Fewer seeds
+    # than the 4-player run to keep the suite's slowest test in check.
+    for n_players in (2, 3):
+        for seed in (0, 1):
+            _play_one_game(seed, n_players=n_players)

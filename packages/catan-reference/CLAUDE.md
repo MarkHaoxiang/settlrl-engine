@@ -21,7 +21,10 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   dataclass per action; `Game.legal_actions()` / `is_legal()` / `apply()` drive
   play, with the rule logic (placement, `longest_road_length`, `production`,
   `port_ratio`, award recomputation, turn flow) written straight from the
-  rulebook. Stochastic actions carry their realised outcome (`Roll.value`,
+  rulebook. Games seat `n_players` (2..4, default 4; `Game.new(layout, robber,
+  n_players)`): `len(players) == n_players`, and the setup snake
+  (`setup_order(n_players)`), turn rotation, discard, production, monopoly and
+  award loops all run over it. Stochastic actions carry their realised outcome (`Roll.value`,
   `BuyDevelopmentCard.card`, the robber's `stolen` card) — see README.
 
 ## Deliberate rulebook choices worth noting

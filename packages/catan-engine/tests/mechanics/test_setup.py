@@ -23,8 +23,14 @@ def _single(tree: _T) -> _T:
 
 
 def test_setup_order_is_snake() -> None:
-    assert setup.N_SETUP == 2 * N_PLAYERS
-    assert np.array_equal(np.asarray(setup.SETUP_ORDER_ARR), [0, 1, 2, 3, 3, 2, 1, 0])
+    assert setup.setup_order(4) == [0, 1, 2, 3, 3, 2, 1, 0]
+    assert setup.setup_order(2) == [0, 1, 1, 0]
+    # The traceable snake (`_setup_player`) agrees with the host-side order.
+    for n in range(2, N_PLAYERS + 1):
+        got = [
+            int(setup._setup_player(jnp.int32(i), jnp.int32(n))) for i in range(2 * n)
+        ]
+        assert got == setup.setup_order(n)
 
 
 def test_grant_setup_resources_matches_reference() -> None:

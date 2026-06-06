@@ -60,6 +60,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
             ``"human"`` (prints it).
         number_placement: ``"random"`` or ``"spiral"`` number-token placement
             (see ``BatchedCatanEnv``).
+        n_players: players seated (2..4, default 4); sets the agent list.
     """
 
     metadata = {"render_modes": ["human", "ansi"], "name": "catan_aec_v0"}
@@ -70,6 +71,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         reward: str = "sparse",
         render_mode: str | None = None,
         number_placement: Literal["random", "spiral"] = "random",
+        n_players: int = N_PLAYERS,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
@@ -80,6 +82,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
             reward=reward,
             auto_reset=False,
             number_placement=number_placement,
+            n_players=n_players,
         )
         self.possible_agents = list(self._env.possible_agents)
         self._index = {a: i for i, a in enumerate(self.possible_agents)}
@@ -152,7 +155,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         reward = np.asarray(self._env.rewards[0])  # (N_PLAYERS,)
         done = bool(np.asarray(self._env.terminations[0, 0]))
         self.rewards = {
-            self.possible_agents[i]: float(reward[i]) for i in range(N_PLAYERS)
+            a: float(reward[i]) for i, a in enumerate(self.possible_agents)
         }
         if done:
             self.terminations = {a: True for a in self.agents}
@@ -206,6 +209,7 @@ def env(
     reward: str = "sparse",
     render_mode: str | None = None,
     number_placement: Literal["random", "spiral"] = "random",
+    n_players: int = N_PLAYERS,
 ) -> CatanAECEnv:
     """PettingZoo-style constructor returning a :class:`CatanAECEnv`."""
     return CatanAECEnv(
@@ -213,4 +217,5 @@ def env(
         reward=reward,
         render_mode=render_mode,
         number_placement=number_placement,
+        n_players=n_players,
     )

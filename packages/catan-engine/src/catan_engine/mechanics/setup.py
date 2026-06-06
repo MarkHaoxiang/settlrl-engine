@@ -13,7 +13,7 @@ import jax.numpy as jnp
 
 from catan_engine.board import Board
 from catan_engine.board.layout import N_EDGES, N_VERTICES, TILE_V, BoardLayout
-from catan_engine.board.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
+from catan_engine.board.resources import BANK_INITIAL, N_RESOURCES
 from catan_engine.board.state import (
     SETTLEMENT,
     BoardState,
@@ -26,11 +26,23 @@ from catan_engine.board.tile import Tile
 from catan_engine.mechanics import placement
 from catan_engine.mechanics.common import INVALID, SUCCESS, IndexParam, Mask, ResultCode
 
-# Setup placement order over 2 * N_PLAYERS settlements (snake / boustrophedon),
-# as a traceable int32 array so SetupRoad can advance the turn branchlessly.
-SETUP_ORDER = list(range(N_PLAYERS)) + list(range(N_PLAYERS - 1, -1, -1))
-SETUP_ORDER_ARR = jnp.array(SETUP_ORDER, dtype=jnp.int32)  # (2 * N_PLAYERS,)
-N_SETUP = len(SETUP_ORDER)
+# Setup placement order over the 2 * n_players starting settlements: a snake /
+# boustrophedon (0..n-1 then back n-1..0). ``n_players`` is per-game state, so
+# the cores compute the snake arithmetically (see ``_setup_player``) instead of
+# indexing a static table; this host-side helper states the same order plainly
+# for tests and inspection.
+
+
+def setup_order(n_players: int) -> list[int]:
+    """The snake setup order for ``n_players`` (host-side, not traceable)."""
+    return list(range(n_players)) + list(range(n_players - 1, -1, -1))
+
+
+def _setup_player(setup_index: IntScalar, n_players: IntScalar) -> IntScalar:
+    """Who places the ``setup_index``-th starting settlement (traceable snake)."""
+    return jnp.where(
+        setup_index < n_players, setup_index, 2 * n_players - 1 - setup_index
+    )
 
 
 def grant_setup_resources(
@@ -78,7 +90,9 @@ def _setup_settlement_apply(
     # The second settlement (placed in the reverse pass) grants resources.
     granted = grant_setup_resources(layout, placed, v, player)
     placed = tree_select(
-        state.setup_index.astype(jnp.int32) >= N_PLAYERS, granted, placed
+        state.setup_index.astype(jnp.int32) >= state.n_players.astype(jnp.int32),
+        granted,
+        placed,
     )
     cand = placed._replace(phase=jnp.uint8(GamePhase.SETUP_ROAD))
     return tree_select(available, cand, state), jnp.where(
@@ -101,7 +115,7 @@ def setup_settlement_step(
     """Place a free starting settlement on ``vertex`` per game.
 
     The second settlement (placed in the reverse setup pass, when
-    ``setup_index >= N_PLAYERS``) grants one resource per adjacent tile. Always
+    ``setup_index >= n_players``) grants one resource per adjacent tile. Always
     advances to SETUP_ROAD.
     """
     available = _setup_settlement_avail_b(board[0], board[1], vertex)
@@ -135,11 +149,12 @@ def _setup_road_apply(
 ) -> tuple[BoardState, IntScalar]:
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
+    n = state.n_players.astype(jnp.int32)
     new_index = state.setup_index.astype(jnp.int32) + 1
-    setup_continues = new_index < N_SETUP
+    setup_continues = new_index < 2 * n
     next_player = jnp.where(
         setup_continues,
-        SETUP_ORDER_ARR[jnp.clip(new_index, 0, N_SETUP - 1)],
+        _setup_player(new_index, n),
         0,
     )
     next_phase = jnp.where(

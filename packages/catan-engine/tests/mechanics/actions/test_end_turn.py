@@ -29,6 +29,14 @@ has_rolled=0""",
     )
 
 
+def test_rotation_wraps_at_n_players() -> None:
+    # In a 2-player game the turn passes 0 -> 1 -> 0; players 2/3 never act.
+    board = to_main(make_board(n_players=2), player=1)
+    state, result = end_turn_step(board, None)
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.current_player[0]) == 0
+
+
 def test_resets_turn_local_dev_and_road_state() -> None:
     # Set the per-turn flags EndTurn must clear: a dev card was played this turn,
     # a Knight was bought this turn (dev_bought), and free roads remain. The

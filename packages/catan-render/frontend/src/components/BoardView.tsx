@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { hexToPixel, cubeToPixel, hexCorners, type Cube, type Hex } from "../lib/hex";
+import { hexToPixel, cubeToPixel, hexCorners, type Cube, type CubeEdge, type Hex } from "../lib/hex";
 import type { Board } from "../lib/boardData";
+import { HIGHLIGHT } from "../lib/ui";
 import HexTile from "./HexTile";
 import Road from "./Road";
 import Building from "./Building";
@@ -13,14 +14,13 @@ import PlayerPanel from "./PlayerPanel";
 // clicked target so the caller can map it back to an engine action.
 export interface BoardInteraction {
   vertices: Cube[];
-  edges: { a: Cube; b: Cube }[];
+  edges: CubeEdge[];
   tiles: Hex[];
   onVertex?: (vertex: Cube) => void;
-  onEdge?: (edge: { a: Cube; b: Cube }) => void;
+  onEdge?: (edge: CubeEdge) => void;
   onTile?: (tile: Hex) => void;
 }
 
-const HIGHLIGHT = "#FCE38A";
 const HIGHLIGHT_STROKE = "#C99A2E";
 
 const HEX_SIZE = 72;

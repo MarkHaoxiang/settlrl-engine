@@ -32,14 +32,22 @@ class IllegalActionError(ValueError):
 
 
 class GameSession:
-    """A live game vs. random bots, behind the single-game AEC env."""
+    """A live game vs. random bots, behind the single-game AEC env.
 
-    def __init__(self, seed: int = 0) -> None:
+    ``n_players`` (2..4) is how many seats the game has: the human plus
+    ``n_players - 1`` bots.
+    """
+
+    def __init__(self, seed: int = 0, n_players: int = 4) -> None:
+        self.n_players = n_players
         self.reset(seed)
 
-    def reset(self, seed: int = 0) -> None:
+    def reset(self, seed: int = 0, n_players: int | None = None) -> None:
+        """Start a fresh game (``n_players`` changes the seat count; None keeps it)."""
+        if n_players is not None:
+            self.n_players = n_players
         self.seed = seed
-        self.env = CatanAECEnv(seed=seed)
+        self.env = CatanAECEnv(seed=seed, n_players=self.n_players)
         # Dedicated RNG so bot choices are reproducible per seed and independent
         # of the engine's own randomness.
         self._rng = np.random.default_rng(seed)

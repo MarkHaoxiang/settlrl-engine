@@ -1,4 +1,5 @@
-import { PLAYER_COLORS, PLAYER_STROKES, type Player } from "../lib/boardData";
+import { PLAYER_COLORS, PLAYER_STROKES, playerName, type Player } from "../lib/boardData";
+import { panelStyle } from "../lib/ui";
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -6,8 +7,6 @@ interface Props {
   player: Player;
   corner: Corner;
 }
-
-const PLAYER_NAMES = ["Red", "Blue", "White", "Orange"];
 
 // Anchor each panel to its corner of the viewport.
 const CORNER_STYLE: Record<Corner, React.CSSProperties> = {
@@ -31,25 +30,19 @@ function Stat({ label, value }: { label: string; value: number }) {
 export default function PlayerPanel({ player, corner }: Props) {
   const color = PLAYER_COLORS[player.player] ?? "#888";
   const stroke = PLAYER_STROKES[player.player] ?? "#444";
-  const name = PLAYER_NAMES[player.player] ?? `Player ${player.player + 1}`;
 
   return (
     <div
       style={{
+        ...panelStyle,
         position: "absolute",
         ...CORNER_STYLE[corner],
         display: "flex",
         flexDirection: "column",
         gap: 8,
         padding: "10px 14px",
-        borderRadius: 12,
-        background: "rgba(12, 28, 46, 0.82)",
         border: `2px solid ${color}`,
         boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-        color: "#F2EFE6",
-        fontFamily: "Georgia, serif",
-        backdropFilter: "blur(2px)",
-        userSelect: "none",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -62,7 +55,7 @@ export default function PlayerPanel({ player, corner }: Props) {
             border: `2px solid ${stroke}`,
           }}
         />
-        <span style={{ fontWeight: 700, fontSize: 14 }}>{name}</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{playerName(player.player)}</span>
       </div>
       <div style={{ display: "flex", gap: 12 }}>
         <Stat label="cards" value={player.resourceCards} />

@@ -46,6 +46,13 @@ class TestCatanAEC:
         out = e.render()
         assert isinstance(out, str) and "lane 0" in out
 
+    def test_two_player_mode(self) -> None:
+        # n_players=2 seats two agents; the same PettingZoo compliance test
+        # passes (it covers the shorter setup snake and the 0/1 rotation).
+        e = CatanAECEnv(seed=8, n_players=2)
+        assert e.agents == ["player_0", "player_1"]
+        api_test(e, num_cycles=40)
+
 
 # Flat index of "discard one card of resource r", from the static table.
 _DISCARD_ROWS = {

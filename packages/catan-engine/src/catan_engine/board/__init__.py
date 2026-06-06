@@ -26,17 +26,19 @@ def make_board(
     batch_size: int = 1,
     seed: int = 0,
     number_placement: Literal["random", "spiral"] = "random",
+    n_players: int = 4,
 ) -> Board:
     """A fresh batched Board: random layout paired with a setup-phase state.
 
     The robber starts on the desert tile (rulebook); since tile positions are
     randomised it is read off the generated layout. ``number_placement`` is
     forwarded to :func:`make_layout` (``"spiral"`` gives the rulebook's
-    variable set-up token spiral).
+    variable set-up token spiral); ``n_players`` (2..4) to
+    :func:`make_board_state`.
     """
     key = jax.random.key(seed)
     layout = make_layout(batch_size, key=key, number_placement=number_placement)
-    state = make_board_state(batch_size, key=key)
+    state = make_board_state(batch_size, key=key, n_players=n_players)
     state = state._replace(robber=desert_tile(layout.tile_resource))
     return layout, state
 

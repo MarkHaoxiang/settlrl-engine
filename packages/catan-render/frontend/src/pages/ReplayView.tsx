@@ -1,29 +1,21 @@
 import { useParams } from "react-router-dom";
 import GameShell from "../components/GameShell";
+import { buttonStyle, panelStyle } from "../lib/ui";
 
 const barStyle: React.CSSProperties = {
+  ...panelStyle,
   display: "flex",
   alignItems: "center",
   gap: 14,
   padding: "10px 18px",
   borderRadius: 14,
-  background: "rgba(12, 28, 46, 0.82)",
-  border: "1px solid rgba(255,255,255,0.15)",
-  color: "#F2EFE6",
-  fontFamily: "Georgia, serif",
-  backdropFilter: "blur(2px)",
-  userSelect: "none",
 };
 
 const btnStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.2)",
-  color: "#F2EFE6",
-  borderRadius: 8,
+  ...buttonStyle,
   width: 36,
   height: 32,
-  fontSize: 14,
-  cursor: "pointer",
+  padding: 0,
 };
 
 // Playback controls for stepping through a recorded game. These are presentation

@@ -18,8 +18,9 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _fresh_game() -> None:
     # Each test starts from a deterministic fresh game (server holds one global
-    # session); reset keeps tests independent of execution order.
-    server._SESSION.reset(0)
+    # session); reset keeps tests independent of execution order (including the
+    # seat count a previous test may have changed).
+    server._SESSION.reset(0, n_players=4)
 
 
 def test_get_board() -> None:
@@ -62,6 +63,26 @@ def test_reset() -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"]["your_turn"]
+
+
+def test_reset_two_players() -> None:
+    resp = client.post("/api/game/reset", json={"seed": 7, "n_players": 2})
+    assert resp.status_code == 200
+    body = resp.json()
+    # Only the two seated players get a panel; play starts as usual.
+    assert len(body["board"]["players"]) == 2
+    assert body["status"]["your_turn"]
+    # The seat count sticks across subsequent moves.
+    flat = body["actions"][0]["flat"]
+    body = client.post("/api/game/action", json={"flat": flat}).json()
+    assert len(body["board"]["players"]) == 2
+
+
+def test_reset_rejects_unsupported_player_counts() -> None:
+    # The renderer offers 2 and 4 seats for now (422 from request validation).
+    for bad in (1, 3, 5):
+        resp = client.post("/api/game/reset", json={"seed": 0, "n_players": bad})
+        assert resp.status_code == 422
 
 
 _HAS_DIST = (server._dist / "index.html").exists()
