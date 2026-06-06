@@ -23,15 +23,19 @@ from catan_engine.board.state import (
     VertexOwnerVec,
 )
 
-# Tight bound for the DFS stack, assuming the rule invariant n_owned <=
-# MAX_ROADS (= 15). Seeding puts at most 2 * n_owned <= 30 frames on the stack.
-# Each pop pushes at most deg - 1 <= 2 children (the arrival edge is always in
-# the frame's used set), so an expansion grows the stack by at most +1 net; a
-# trail's length is capped at n_owned, so at most MAX_ROADS - 1 = 14 such
-# expansions can be live along the current DFS path. Peak sp is therefore
-# 2 * MAX_ROADS + (MAX_ROADS - 1) = 44, plus one scratch slot (_DUMP) above
-# any live frame, where dropped seeds park (never popped).
-STACK_CAP = 2 * MAX_ROADS + (MAX_ROADS - 1) + 1
+# Frames popped (and expanded together) per while_loop iteration.
+_POP_K = 32
+
+# Stack bound, assuming the rule invariant n_owned <= MAX_ROADS (= 15). Seeding
+# puts at most 2 * n_owned <= 30 frames on the stack. Each popped frame pushes
+# at most deg - 1 <= 2 children (the arrival edge is always in the frame's used
+# set), so a block expansion grows the stack by at most +_POP_K net; a trail's
+# length is capped at n_owned, so at most MAX_ROADS - 1 = 14 expansion levels
+# can be live (at _POP_K = 1 this bound is provably tight). The level argument
+# is heuristic for mixed-depth blocks; tests/mechanics/test_rules.py fuzzes the
+# peak sp against it. The top slot is scratch (_DUMP), never popped: dropped
+# seeds and invalid children park there.
+STACK_CAP = 2 * MAX_ROADS + (MAX_ROADS - 1) * _POP_K + 1
 _DUMP = STACK_CAP - 1
 
 # Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built
@@ -128,26 +132,42 @@ def longest_road_length(
         return dfs.sp > 0
 
     def body(dfs: _DfsState) -> _DfsState:
-        stack = dfs.stack
-        sp = dfs.sp - 1
-        frame = stack[sp]
+        # Pop the top min(_POP_K, sp) frames as one block.
+        pop_idx = dfs.sp - 1 - jnp.arange(_POP_K)
+        live = pop_idx >= 0
+        frame = dfs.stack[jnp.clip(pop_idx, 0)]
         tip = frame >> _TIP_SHIFT
         used = frame & _USED_MASK
-        best = jnp.maximum(dfs.best, jax.lax.population_count(used))
+        length = jnp.where(live, jax.lax.population_count(used), 0)
+        best = jnp.maximum(dfs.best, jnp.max(length))
+        base = dfs.sp - jnp.sum(live.astype(jnp.int32))
 
-        start = ADJ_INDPTR[tip]
-        deg = ADJ_DEG[tip]
-        for slot in range(MAX_VERTEX_DEGREE):
-            idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
-            e, nbr = ADJ_EDGE[idx], ADJ_NBR[idx]
-            edge_bit = jnp.int32(1) << owned_rank[e]
-            valid = (slot < deg) & passable[tip] & mine[e] & ((used & edge_bit) == 0)
+        # Expand all popped frames at once: a (_POP_K, MAX_VERTEX_DEGREE) grid
+        # of candidate children.
+        cols = jnp.arange(MAX_VERTEX_DEGREE)
+        idx = jnp.clip(ADJ_INDPTR[tip][:, None] + cols, 0, 2 * N_EDGES - 1)
+        e, nbr = ADJ_EDGE[idx], ADJ_NBR[idx]
+        edge_bit = jnp.int32(1) << owned_rank[e]
+        valid = (
+            live[:, None]
+            & (cols < ADJ_DEG[tip][:, None])
+            & passable[tip][:, None]
+            & mine[e]
+            & ((used[:, None] & edge_bit) == 0)
+        )
+        child = (nbr << _TIP_SHIFT) | used[:, None] | edge_bit
 
-            child = (nbr << _TIP_SHIFT) | used | edge_bit
-            stack = stack.at[sp].set(jnp.where(valid, child, stack[sp]))
-            sp = sp + valid.astype(jnp.int32)
-
-        return _DfsState(stack, sp, best)
+        # Push the valid children contiguously above the new base; invalid
+        # candidates scatter to _DUMP.
+        valid_f = valid.ravel()
+        valid_i = valid_f.astype(jnp.int32)
+        offset = jnp.cumsum(valid_i) - valid_i
+        slot = jnp.where(valid_f, base + offset, _DUMP)
+        return _DfsState(
+            stack=dfs.stack.at[slot].set(child.ravel()),
+            sp=base + jnp.sum(valid_i),
+            best=best,
+        )
 
     final = jax.lax.while_loop(cond, body, init)
     return final.best

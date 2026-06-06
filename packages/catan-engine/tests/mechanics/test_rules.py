@@ -3,9 +3,12 @@
 oracle (the ``catan-reference`` package, via ``tests.conversion``) across
 randomized boards."""
 
+from typing import Any, Callable
+
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from expecttest import TestCase
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -533,6 +536,48 @@ class TestLongestRoadTopologies(TestCase):
 
 """
         )
+
+
+def test_dfs_peak_sp_stays_below_dump(monkeypatch: pytest.MonkeyPatch) -> None:
+    """STACK_CAP's expansion-level bound is heuristic for block pops, so fuzz
+    it: drive the while_loop eagerly, record the peak stack pointer, and check
+    live frames never reach the _DUMP scratch slot."""
+    peaks: list[int] = []
+
+    def recording_while_loop(
+        cond: Callable[[Any], Any], body: Callable[[Any], Any], init: Any
+    ) -> Any:
+        val, peak = init, int(init.sp)
+        while bool(cond(val)):
+            val = body(val)
+            peak = max(peak, int(val.sp))
+        peaks.append(peak)
+        return val
+
+    monkeypatch.setattr(jax.lax, "while_loop", recording_while_loop)
+
+    def run(edge_road: np.ndarray, vertex_owner: np.ndarray, p: int) -> None:
+        longest_road.longest_road_length(
+            jnp.asarray(edge_road), jnp.asarray(vertex_owner), jnp.int32(p)
+        )
+
+    # The high-branching named shapes, then dense random occupancies.
+    for edges in (_THETA, _LOOP + _TAIL, _LOOP + _BRIDGE + _LOOP2):
+        edge_road = np.zeros(N_EDGES, np.uint8)
+        edge_road[edges] = 1
+        run(edge_road, np.zeros(N_VERTICES, np.uint8), 0)
+    dense_edge_p = [0.4, 0.2, 0.16, 0.14, 0.1]
+    for seed in range(100):
+        edge_road, vertex_owner = random_occupancy(
+            seed, edge_p=dense_edge_p, vertex_p=_VERTEX_P
+        )
+        for p in range(N_PLAYERS):
+            run(edge_road, vertex_owner, p)
+
+    assert peaks and max(peaks) <= longest_road._DUMP, (
+        f"peak sp {max(peaks)} reached the scratch slot "
+        f"(_DUMP = {longest_road._DUMP}, STACK_CAP = {longest_road.STACK_CAP})"
+    )
 
 
 class TestProductionAndPorts(TestCase):
