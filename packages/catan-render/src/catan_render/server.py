@@ -59,11 +59,12 @@ class _ResetRequest(BaseModel):
     # Seats in the new game (the human + bots). The engine supports 2-4; the
     # renderer offers 2 and 4 for now.
     n_players: Literal[2, 4] = 4
+    number_placement: Literal["random", "spiral"] = "random"
 
 
 @app.post("/api/game/reset")
 def post_reset(req: _ResetRequest) -> GameModel:
-    _SESSION.reset(req.seed, n_players=req.n_players)
+    _SESSION.reset(req.seed, n_players=req.n_players, number_placement=req.number_placement)
     return _game_model()
 
 

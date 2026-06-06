@@ -78,6 +78,20 @@ def test_reset_two_players() -> None:
     assert len(body["board"]["players"]) == 2
 
 
+def test_reset_spiral_numbers() -> None:
+    resp = client.post(
+        "/api/game/reset", json={"seed": 7, "number_placement": "spiral"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"]["your_turn"]
+    # Same seed + placement reproduces the same board.
+    tiles = resp.json()["board"]["tiles"]
+    again = client.post(
+        "/api/game/reset", json={"seed": 7, "number_placement": "spiral"}
+    )
+    assert again.json()["board"]["tiles"] == tiles
+
+
 def test_reset_rejects_unsupported_player_counts() -> None:
     # The renderer offers 2 and 4 seats for now (422 from request validation).
     for bad in (1, 3, 5):

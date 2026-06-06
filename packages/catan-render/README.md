@@ -9,7 +9,9 @@ A menu lets you choose between two modes, each at its own URL:
   / tiles on the board for placements and the robber, use the bottom control-bar buttons for
   parameterless moves (roll, end turn, buy dev card), and pick from a popover for resource moves
   (monopoly / year-of-plenty / maritime trade). The bar also shows your hand (resources + dev
-  cards by type).
+  cards by type). On entry — and from the **New game** button — a dialog configures the next
+  game: player count (2 or 4), number-token placement (random or spiral), and an optional
+  seed; cancelling keeps the game in progress.
 - **Replay** (`/replay`, or `/replay/:gameId`) — a recorded game with playback controls. The
   playback controls are still presentation stubs.
 
@@ -72,7 +74,7 @@ uv run pytest packages/catan-render/tests
 | `GET /api/board` | Returns the current board as JSON |
 | `GET /api/game` | Live game snapshot: board + turn status + your legal moves |
 | `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot (bots have already replied). `409` if the move is illegal |
-| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4 }` (default 4 seats: you + 3 bots) |
+| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral" }` (default 4 seats: you + 3 bots, random tokens) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
 Each legal move in `GET /api/game` is a decoded action descriptor carrying its `flat` index
@@ -123,6 +125,7 @@ packages/catan-render/
             ├── GameShell.tsx    # Shared frame (Replay): board + back link + controls slot
             ├── TopBar.tsx       # Back-to-menu + mode label bar
             ├── BoardView.tsx    # SVG viewport, zoom, optional click/highlight interaction
+            ├── NewGameDialog.tsx # Modal: configure players / numbers / seed for a new game
             ├── HexTile.tsx      # Hex polygon, terrain colour, number token
             ├── Road.tsx         # Player road along an edge
             ├── Building.tsx     # Settlement / city on a vertex

@@ -12,6 +12,8 @@ and a small status snapshot (phase / dice / whose turn / winner).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 from catan_engine.env.aec import CatanAECEnv
 from catan_engine.board import Board
@@ -42,12 +44,19 @@ class GameSession:
         self.n_players = n_players
         self.reset(seed)
 
-    def reset(self, seed: int = 0, n_players: int | None = None) -> None:
+    def reset(
+        self,
+        seed: int = 0,
+        n_players: int | None = None,
+        number_placement: Literal["random", "spiral"] = "random",
+    ) -> None:
         """Start a fresh game (``n_players`` changes the seat count; None keeps it)."""
         if n_players is not None:
             self.n_players = n_players
         self.seed = seed
-        self.env = CatanAECEnv(seed=seed, n_players=self.n_players)
+        self.env = CatanAECEnv(
+            seed=seed, n_players=self.n_players, number_placement=number_placement
+        )
         # Dedicated RNG so bot choices are reproducible per seed and independent
         # of the engine's own randomness.
         self._rng = np.random.default_rng(seed)

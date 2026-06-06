@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import BoardView, { type BoardInteraction } from "../components/BoardView";
+import NewGameDialog from "../components/NewGameDialog";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
-import type { GameAction, PlayerCount } from "../lib/game";
+import type { GameAction } from "../lib/game";
 import {
   PLAYER_COLORS,
   PLAYER_STROKES,
@@ -170,9 +171,9 @@ export default function PlayView() {
   const { snapshot, error, busy, act, reset } = useGame();
   const [armed, setArmed] = useState<string | null>(null);
   const [choice, setChoice] = useState<GameAction[] | null>(null);
-  // Seats for the *next* game (you + bots); applied by the New game button.
-  // The engine supports 2-4, but the renderer offers just 2 and 4 for now.
-  const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
+  // Whether the new-game configuration dialog is open (shown on entry, and
+  // reopened by the New game button).
+  const [configuring, setConfiguring] = useState(true);
 
   const actions = snapshot?.actions ?? [];
 
@@ -246,6 +247,16 @@ export default function PlayView() {
       <BoardView board={board} interaction={interaction} />
       <TopBar mode="Play" />
 
+      {configuring && (
+        <NewGameDialog
+          onStart={(config) => {
+            setConfiguring(false);
+            reset(config);
+          }}
+          onClose={() => setConfiguring(false)}
+        />
+      )}
+
       {status.terminal && (
         <div
           style={{
@@ -290,21 +301,9 @@ export default function PlayView() {
               {armed && BOARD_TYPES.has(armed) && !busy && (
                 <span style={{ color: HIGHLIGHT }}>Click a highlighted spot to place ({TYPE_LABEL[armed]})</span>
               )}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-                <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>Players</span>
-                {([2, 4] as const).map((n) => (
-                  <button
-                    key={n}
-                    style={{ ...smallButton, padding: "5px 10px", ...(nPlayers === n ? selectedStyle : {}) }}
-                    onClick={() => setNPlayers(n)}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <button style={smallButton} onClick={() => reset(Math.floor(Math.random() * 65536), nPlayers)}>
-                  New game
-                </button>
-              </div>
+              <button style={{ ...smallButton, marginLeft: "auto" }} onClick={() => setConfiguring(true)}>
+                New game
+              </button>
             </div>
 
             {!status.terminal && (
