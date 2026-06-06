@@ -5,11 +5,10 @@ Includes the PettingZoo-provided ``api_test`` compliance check.
 
 import jax.numpy as jnp
 import numpy as np
-import pytest
 from pettingzoo.test import api_test
 
 from catan_engine.env.aec import CatanAECEnv, env
-from catan_engine.mechanics.action import _ATYPE, _DISCARD_FLAT, ActionType
+from catan_engine.mechanics.action import _ATYPE, _IDX, ActionType, _flat_available_b
 from catan_engine.board.state import GamePhase
 
 
@@ -48,10 +47,16 @@ class TestCatanAEC:
         assert isinstance(out, str) and "lane 0" in out
 
 
-class TestDiscardChoice:
-    """The discard action takes its per-resource amounts as a vector:
-    ``step((flat, resources))`` chooses exactly what to give up; a bare index
-    falls back to the canonical greedy fill."""
+# Flat index of "discard one card of resource r", from the static table.
+_DISCARD_ROWS = {
+    int(_IDX[f]): int(f)
+    for f in np.where(_ATYPE == int(ActionType.DISCARD))[0]
+}
+
+
+class TestDiscardOneCard:
+    """Discarding is one flat action per resource, one card per step; the mask
+    offers only the resources the discarder still holds."""
 
     @staticmethod
     def _force_discard(e: CatanAECEnv) -> None:
@@ -64,35 +69,35 @@ class TestDiscardChoice:
             ),
             pending_discard=st.pending_discard.at[0, 0].set(4),
         )
+        # The action mask and step gate read the cached flat legality; refresh
+        # it after the direct state surgery above.
+        e._env._avail = _flat_available_b(e._env._layout, e._env._state)
         e.agent_selection = e._acting_agent()
 
-    def test_vector_choice(self) -> None:
+    def test_mask_offers_held_resources_only(self) -> None:
         e = CatanAECEnv(seed=5)
         self._force_discard(e)
-        e.step((int(_DISCARD_FLAT), [0, 4, 0, 0, 0]))  # give up the wheat
-        hand = np.asarray(e._env._state.player_resources[0, 0])
-        assert list(hand) == [4, 0, 0, 0, 0]
-        assert int(e._env._state.phase[0]) == GamePhase.MOVE_ROBBER
+        obs, *_ = e.last()
+        mask = obs["action_mask"]
+        legal = set(np.where(mask)[0])
+        assert legal == {_DISCARD_ROWS[0], _DISCARD_ROWS[1]}  # sheep + wheat only
 
-    def test_bare_index_is_canonical(self) -> None:
+    def test_chosen_sequence_applies(self) -> None:
+        # Choose 1 sheep then 3 wheat (greedy order would strip all the sheep).
         e = CatanAECEnv(seed=6)
         self._force_discard(e)
-        e.step(int(_DISCARD_FLAT))  # greedy in resource order: takes the sheep
+        for resource in (0, 1, 1, 1):
+            assert e.agent_selection == "player_0"
+            e.step(_DISCARD_ROWS[resource])
         hand = np.asarray(e._env._state.player_resources[0, 0])
-        assert list(hand) == [0, 4, 0, 0, 0]
+        assert list(hand) == [3, 1, 0, 0, 0]
+        assert int(e._env._state.phase[0]) == GamePhase.MOVE_ROBBER
 
-    def test_illegal_vector_no_ops(self) -> None:
-        # Well-formed but illegal (wrong total): rejected by the engine gate,
-        # like any other illegal action.
+    def test_unheld_resource_no_ops(self) -> None:
+        # Masked out and rejected by the engine gate, like any illegal action.
         e = CatanAECEnv(seed=7)
         self._force_discard(e)
-        e.step((int(_DISCARD_FLAT), [1, 1, 0, 0, 0]))
+        e.step(_DISCARD_ROWS[2])  # wood: not held
         hand = np.asarray(e._env._state.player_resources[0, 0])
         assert list(hand) == [4, 4, 0, 0, 0]
         assert int(e._env._state.phase[0]) == GamePhase.DISCARD
-
-    def test_malformed_vector_raises(self) -> None:
-        e = CatanAECEnv(seed=8)
-        self._force_discard(e)
-        with pytest.raises(ValueError, match="nonnegative"):
-            e.step((int(_DISCARD_FLAT), [1, 2, 3]))

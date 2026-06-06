@@ -9,7 +9,12 @@ import numpy as np
 import pytest
 
 from catan_engine import env
-from catan_engine.mechanics.action import ActionParams, ActionResult, ActionType
+from catan_engine.mechanics.action import (
+    ActionParams,
+    ActionResult,
+    ActionType,
+    _flat_available_b,
+)
 from catan_engine.mechanics.placement import build_road_step
 from catan_engine.board import make_board, replicate, set_phase
 from catan_engine.env import N_ACTION_TYPES, BatchedCatanEnv, Box, Discrete
@@ -22,7 +27,6 @@ def _params(index: list[int], target: list[int], batch: int) -> ActionParams:
     return ActionParams(
         idx=jnp.asarray(index, dtype=jnp.int32),
         target=jnp.asarray(target, dtype=jnp.int32),
-        resources=jnp.zeros((batch, N_RESOURCES), dtype=jnp.int32),
     )
 
 
@@ -89,7 +93,6 @@ def _batch_params(idx: list[int], target: list[int] | None = None) -> ActionPara
     return ActionParams(
         idx=jnp.asarray(idx, dtype=jnp.int32),
         target=jnp.asarray(tgt, dtype=jnp.int32),
-        resources=jnp.zeros((b, N_RESOURCES), dtype=jnp.int32),
     )
 
 
@@ -205,10 +208,9 @@ class TestBatchedCatanEnv:
         assert ospace["vertex_owner"].shape == (54,)
 
 
-class TestDiscardChoice:
-    """DISCARD takes its per-resource amounts as a vector (the choice space is not
-    flattened); the env step must validate the caller's actual vector rather than
-    assume the canonical fill-in."""
+class TestDiscardOneCard:
+    """DISCARD is one card of one resource per step: the discarder chooses freely
+    among held resources, repeating until the owed count reaches zero."""
 
     def _discard_env(self) -> BatchedCatanEnv:
         """Lane 0 in the DISCARD phase: player 0 holds 4 sheep + 4 wheat, owes 4."""
@@ -220,42 +222,39 @@ class TestDiscardChoice:
             ),
             pending_discard=e._state.pending_discard.at[0, 0].set(4),
         )
-        # _avail is stale, but the DISCARD gate validates the passed vector
-        # directly (its amounts are not part of the flat key), so no refresh.
+        # The step gate reads the cached flat legality, so refresh it after the
+        # direct state surgery above.
+        e._avail = _flat_available_b(e._layout, e._state)
         return e
 
     @staticmethod
-    def _discard_params(resources: list[int]) -> ActionParams:
-        return ActionParams(
-            idx=jnp.asarray([0], dtype=jnp.int32),
-            target=jnp.asarray([0], dtype=jnp.int32),
-            resources=jnp.asarray([resources], dtype=jnp.int32),
-        )
-
-    def test_non_canonical_vector_applies(self) -> None:
-        # Canonical would take all 4 sheep; choose 1 sheep + 3 wheat instead.
-        e = self._discard_env()
+    def _discard(e: BatchedCatanEnv, resource: int) -> None:
         at = jnp.asarray([int(ActionType.DISCARD)], dtype=jnp.int32)
-        e.step(at, self._discard_params([1, 3, 0, 0, 0]))
-        assert int(e.infos["result"][0]) == ActionResult.SUCCESS.value
+        e.step(at, _batch_params([resource]))
+
+    def test_mask_offers_held_resources_only(self) -> None:
+        e = self._discard_env()
+        mask = np.asarray(e.available_indices(ActionType.DISCARD))
+        assert np.array_equal(mask[0], [True, True, False, False, False])
+        type_mask = np.asarray(e.action_mask())
+        assert set(np.where(type_mask[0])[0]) == {int(ActionType.DISCARD)}
+
+    def test_chosen_sequence_applies(self) -> None:
+        # Greedy would strip sheep first; choose 1 sheep + 3 wheat instead.
+        e = self._discard_env()
+        for resource in (0, 1, 1, 1):
+            self._discard(e, resource)
+            assert int(e.infos["result"][0]) == ActionResult.SUCCESS.value
         assert np.array_equal(
             np.asarray(e._state.player_resources[0, 0]), [3, 1, 0, 0, 0]
         )
         assert int(e._state.pending_discard[0, 0]) == 0
         assert int(e._state.phase[0]) == GamePhase.MOVE_ROBBER
 
-    @pytest.mark.parametrize(
-        "bad",
-        [
-            [3, 0, 0, 0, 0],  # wrong total (owes 4)
-            [0, 0, 4, 0, 0],  # right total, but exceeds the hand
-        ],
-    )
-    def test_invalid_vector_rejected(self, bad: list[int]) -> None:
+    def test_unheld_resource_rejected(self) -> None:
         e = self._discard_env()
         before = np.asarray(e._state.player_resources)
-        at = jnp.asarray([int(ActionType.DISCARD)], dtype=jnp.int32)
-        e.step(at, self._discard_params(bad))
+        self._discard(e, 2)  # wood: not held
         assert int(e.infos["result"][0]) == ActionResult.INVALID.value
         assert np.array_equal(np.asarray(e._state.player_resources), before)
         assert int(e._state.phase[0]) == GamePhase.DISCARD

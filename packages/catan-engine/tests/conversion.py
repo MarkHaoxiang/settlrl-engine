@@ -330,63 +330,50 @@ def grant_setup_resources(
 # ===========================================================================
 
 
-def to_engine_action(action: ref.Action) -> tuple[int, int, int, list[int]]:
-    """Translate a reference action into the engine's ``(action_type, idx, target,
-    resources)`` tuple (engine indexing). ``target`` is ``-1`` when unused / for
-    "steal from no one"; ``resources`` is the per-resource discard vector."""
-    no_resources = [0] * N_RESOURCES
+def to_engine_action(action: ref.Action) -> tuple[int, int, int]:
+    """Translate a reference action into the engine's ``(action_type, idx,
+    target)`` tuple (engine indexing). ``target`` is ``-1`` when unused / for
+    "steal from no one". Discard carries only its resource -- the engine derives
+    the discarder (the first owing player) from the state."""
     match action:
         case ref.SetupSettlement(vertex=v):
-            return (
-                int(ActionType.SETUP_SETTLEMENT),
-                _REF2ENG_VERTEX[v],
-                -1,
-                no_resources,
-            )
+            return int(ActionType.SETUP_SETTLEMENT), _REF2ENG_VERTEX[v], -1
         case ref.SetupRoad(edge=e):
-            return int(ActionType.SETUP_ROAD), _REF2ENG_EDGE[e], -1, no_resources
+            return int(ActionType.SETUP_ROAD), _REF2ENG_EDGE[e], -1
         case ref.Roll():
-            return int(ActionType.ROLL_DICE), 0, -1, no_resources
-        case ref.Discard(player=p, counts=counts):
-            vec = [int(counts.get(ref.Resource(r), 0)) for r in range(N_RESOURCES)]
-            return int(ActionType.DISCARD), p, -1, vec
+            return int(ActionType.ROLL_DICE), 0, -1
+        case ref.Discard(resource=r):
+            return int(ActionType.DISCARD), int(r), -1
         case ref.MoveRobber(tile=t, victim=victim):
             return (
                 int(ActionType.MOVE_ROBBER),
                 _REF2ENG_TILE[t],
                 -1 if victim is None else victim,
-                no_resources,
             )
         case ref.BuildRoad(edge=e):
-            return int(ActionType.BUILD_ROAD), _REF2ENG_EDGE[e], -1, no_resources
+            return int(ActionType.BUILD_ROAD), _REF2ENG_EDGE[e], -1
         case ref.BuildSettlement(vertex=v):
-            return (
-                int(ActionType.BUILD_SETTLEMENT),
-                _REF2ENG_VERTEX[v],
-                -1,
-                no_resources,
-            )
+            return int(ActionType.BUILD_SETTLEMENT), _REF2ENG_VERTEX[v], -1
         case ref.BuildCity(vertex=v):
-            return int(ActionType.BUILD_CITY), _REF2ENG_VERTEX[v], -1, no_resources
+            return int(ActionType.BUILD_CITY), _REF2ENG_VERTEX[v], -1
         case ref.BuyDevelopmentCard():
-            return int(ActionType.BUY_DEVELOPMENT_CARD), 0, -1, no_resources
+            return int(ActionType.BUY_DEVELOPMENT_CARD), 0, -1
         case ref.PlayKnight(tile=t, victim=victim):
             return (
                 int(ActionType.PLAY_KNIGHT),
                 _REF2ENG_TILE[t],
                 -1 if victim is None else victim,
-                no_resources,
             )
         case ref.PlayRoadBuilding():
-            return int(ActionType.PLAY_ROAD_BUILDING), 0, -1, no_resources
+            return int(ActionType.PLAY_ROAD_BUILDING), 0, -1
         case ref.PlayYearOfPlenty(first=a, second=b):
-            return int(ActionType.PLAY_YEAR_OF_PLENTY), int(a), int(b), no_resources
+            return int(ActionType.PLAY_YEAR_OF_PLENTY), int(a), int(b)
         case ref.PlayMonopoly(resource=r):
-            return int(ActionType.PLAY_MONOPOLY), int(r), -1, no_resources
+            return int(ActionType.PLAY_MONOPOLY), int(r), -1
         case ref.MaritimeTrade(give=g, receive=r):
-            return int(ActionType.MARITIME_TRADE), int(g), int(r), no_resources
+            return int(ActionType.MARITIME_TRADE), int(g), int(r)
         case ref.EndTurn():
-            return int(ActionType.END_TURN), 0, -1, no_resources
+            return int(ActionType.END_TURN), 0, -1
         case _:  # pragma: no cover - the match above is exhaustive over Action
             raise AssertionError(f"unhandled reference action: {action!r}")
 

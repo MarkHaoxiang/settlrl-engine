@@ -27,7 +27,6 @@ from catan_engine.board.dev_cards import DEV_CARD_COST, DevCard
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.resources import (
     CITY_COST,
-    N_RESOURCES,
     ROAD_COST,
     SETTLEMENT_COST,
 )
@@ -52,16 +51,12 @@ Mask = Bool[Array, "batch"]  # per-game legality / win flag
 ResultCode = Int[Array, "batch"]  # ActionResult codes
 ActionTypeArray = Int[Array, "batch"]  # ActionType codes (unified dispatch)
 IndexParam = Int[Array, "batch"]  # vertex / edge / tile / resource / player / victim
-ResourceParam = Int[Array, f"batch resources={N_RESOURCES}"]  # per-resource counts
 TwoIndexParams = tuple[IndexParam, IndexParam]  # e.g. (tile, victim), (give, receive)
-DiscardParams = tuple[IndexParam, ResourceParam]  # (player, per-resource discard counts)
 
-# Single-game (per-trace) counterpart of ``ResourceParam`` -- the per-resource
-# vector seen *inside* a vmap (no leading batch axis). The cores in the rule
-# modules run one game at a time, so they annotate their params/results with the
-# single-game ``IntScalar`` / ``BoolScalar`` (from ``board.state``) and this; the
-# batched ``IndexParam`` / ``Mask`` / ``ResultCode`` describe the wrapped views.
-SingleResources = Int[Array, f"resources={N_RESOURCES}"]
+# The cores in the rule modules run one game at a time, so they annotate their
+# params/results with the single-game ``IntScalar`` / ``BoolScalar`` (from
+# ``board.state``); the batched ``IndexParam`` / ``Mask`` / ``ResultCode``
+# describe the wrapped views.
 
 # Single-game legality-core signatures, keyed by their native param shape. Used
 # by the flattening / enumeration helpers in ``action`` that close over a board

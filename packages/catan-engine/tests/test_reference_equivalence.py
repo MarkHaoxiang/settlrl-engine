@@ -30,11 +30,10 @@ _INVALID = int(ActionResult.INVALID)
 _GAME_COMPLETE = int(ActionResult.GAME_COMPLETE)
 
 
-def _params(idx: int, target: int, resources: list[int]) -> ActionParams:
+def _params(idx: int, target: int) -> ActionParams:
     return ActionParams(
         idx=jnp.asarray([idx], jnp.int32),
         target=jnp.asarray([target], jnp.int32),
-        resources=jnp.asarray([resources], jnp.int32),
     )
 
 
@@ -78,9 +77,9 @@ def _play_one_game(seed: int, max_steps: int = 300) -> None:
         applied: ref.Action | None = None
         result = _INVALID
         for candidate in legal:
-            atype, idx, target, resources = conv.to_engine_action(candidate)
+            atype, idx, target = conv.to_engine_action(candidate)
             new_state, code = step(
-                board, jnp.asarray([atype], jnp.int32), _params(idx, target, resources)
+                board, jnp.asarray([atype], jnp.int32), _params(idx, target)
             )
             result = int(np.asarray(code[0]))
             if result != _INVALID:

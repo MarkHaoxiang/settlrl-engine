@@ -66,7 +66,7 @@ def test_decoded_target_matches_engine_lookup(flat: int) -> None:
         assert (m.tile.q, m.tile.r) == tile_cube(idx)[:2]
         assert m.victim == target
 
-    elif m.type == "play_monopoly":
+    elif m.type in ("discard", "play_monopoly"):
         assert m.resource == _RESOURCE_NAMES[idx]
 
     elif m.type == "play_year_of_plenty":

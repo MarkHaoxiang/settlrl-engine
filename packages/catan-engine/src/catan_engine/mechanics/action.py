@@ -10,7 +10,8 @@ top of them:
    thing stays traceable and vmappable. The heterogeneous per-action params are
    packed into one ``ActionParams`` struct; each branch unpacks what it needs.
 2. The *flat action table*: one enumerated index per concrete move (each vertex/
-   edge/tile/resource choice plus the parameterless actions), decoded back to
+   edge/tile/resource choice plus the parameterless actions; Discard is one
+   entry per resource -- one card per action), decoded back to
    ``(ActionType, ActionParams)``. This backs both ``random_actions`` and the
    single-game AEC wrapper's flat ``Discrete`` action space.
 3. The switch-free *flat legality* sweep and the per-action-type / per-index
@@ -50,9 +51,7 @@ from catan_engine.mechanics.common import (
     Mask,
     NoneAvail,
     PairAvail,
-    ResourceParam,
     ResultCode,
-    agent_selection_single,
     player_total_vp,
 )
 from catan_engine.mechanics.development import (
@@ -137,12 +136,12 @@ N_ACTION_TYPES = len(ActionType)
 class ActionParams(NamedTuple):
     """Packed parameters for the unified ``apply_action`` / ``action_available``.
 
-    Single game: all fields are 0-d / 1-d arrays (batch by vmapping). Each action
+    Single game: all fields are 0-d arrays (batch by vmapping). Each action
     reads only what it needs; unused fields are ignored. By action:
 
     - vertex/edge/tile/resource/give (single index)  -> ``idx``
+      (Discard's ``idx`` is the resource to give up one card of)
     - victim / receive / second resource (Year of Plenty) -> ``target``
-    - Discard: ``idx`` = player, ``resources`` = per-resource discard counts
     - parameterless actions (RollDice, BuyDevelopmentCard, PlayRoadBuilding,
       EndTurn) read nothing.
 
@@ -151,9 +150,8 @@ class ActionParams(NamedTuple):
     reserves the ``index`` attribute.)
     """
 
-    idx: IndexParam  # primary index / player
+    idx: IndexParam  # primary index
     target: IndexParam  # secondary index (victim / receive / resource_b)
-    resources: ResourceParam  # per-resource counts — Discard only
 
 
 # Branch adapters in ActionType order: each maps the packed ActionParams onto the
@@ -164,7 +162,7 @@ _APPLY_BRANCHES = (
     lambda lay, st, pp, av: _setup_settlement_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _setup_road_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _roll_apply(lay, st, None, av),
-    lambda lay, st, pp, av: _discard_apply(lay, st, (pp.idx, pp.resources), av),
+    lambda lay, st, pp, av: _discard_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _move_robber_apply(lay, st, (pp.idx, pp.target), av),
     lambda lay, st, pp, av: _build_road_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _build_settlement_apply(lay, st, pp.idx, av),
@@ -182,7 +180,7 @@ _AVAIL_BRANCHES = (
     lambda lay, st, pp: _setup_settlement_avail(lay, st, pp.idx),
     lambda lay, st, pp: _setup_road_avail(lay, st, pp.idx),
     lambda lay, st, pp: _roll_avail(lay, st, None),
-    lambda lay, st, pp: _discard_avail(lay, st, (pp.idx, pp.resources)),
+    lambda lay, st, pp: _discard_avail(lay, st, pp.idx),
     lambda lay, st, pp: _move_robber_avail(lay, st, (pp.idx, pp.target)),
     lambda lay, st, pp: _build_road_avail(lay, st, pp.idx),
     lambda lay, st, pp: _build_settlement_avail(lay, st, pp.idx),
@@ -244,17 +242,13 @@ def action_available(
 #
 # A single flat enumeration of every concrete action (each vertex/edge/tile/
 # resource choice plus the parameterless moves), decoded to the engine's
-# ``(ActionType, ActionParams)``. DISCARD collapses to one entry whose
-# per-resource amounts are filled in canonically per lane. This is the table
-# behind both :meth:`BatchedCatanEnv.random_actions` and the single-game AEC
-# wrapper's flat ``Discrete`` action space (see ``env/aec.py``).
+# ``(ActionType, ActionParams)``. DISCARD is per-resource (one card of that
+# resource per action), so the table is fully static -- no per-lane fill-in.
+# This is the table behind both :meth:`BatchedCatanEnv.random_actions` and the
+# single-game AEC wrapper's flat ``Discrete`` action space (see ``env/aec.py``).
 # ===========================================================================
-def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
-    """Flat action index -> (ActionType, primary index, secondary target).
-
-    Returns the three lookup arrays plus the flat index of the single DISCARD
-    action (whose resource amounts are computed on the fly).
-    """
+def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Flat action index -> (ActionType, primary index, secondary target)."""
     atype: list[int] = []
     idx: list[int] = []
     target: list[int] = []
@@ -269,8 +263,8 @@ def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
     for e in range(N_EDGES):
         add(ActionType.SETUP_ROAD, e)
     add(ActionType.ROLL_DICE)
-    discard_flat = len(atype)
-    add(ActionType.DISCARD)
+    for r in range(N_RESOURCES):
+        add(ActionType.DISCARD, r)
     for t in range(N_TILES):
         for victim in range(-1, N_PLAYERS):
             add(ActionType.MOVE_ROBBER, t, victim)
@@ -299,27 +293,15 @@ def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
         np.asarray(atype, dtype=np.int32),
         np.asarray(idx, dtype=np.int32),
         np.asarray(target, dtype=np.int32),
-        discard_flat,
     )
 
 
-_ATYPE, _IDX, _TARGET, _DISCARD_FLAT = _build_action_table()
+_ATYPE, _IDX, _TARGET = _build_action_table()
 _N_FLAT = int(_ATYPE.shape[0])
 # Device-side copies for the batched random-action sweep.
 _ATYPE_J = jnp.asarray(_ATYPE)
 _IDX_J = jnp.asarray(_IDX)
 _TARGET_J = jnp.asarray(_TARGET)
-
-
-def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
-    """A valid discard of ``owed`` cards, taken greedily in resource order."""
-    out = np.zeros(N_RESOURCES, dtype=np.int32)
-    remaining = owed
-    for r in range(N_RESOURCES):
-        take = min(int(hand[r]), remaining)
-        out[r] = take
-        remaining -= take
-    return out
 
 
 # ===========================================================================
@@ -329,9 +311,7 @@ def _canonical_discard(hand: np.ndarray, owed: int) -> np.ndarray:
 # of a cached ``(B, N_FLAT)`` flat-legality sweep (:func:`flat_legality`) instead
 # of recomputing avail for the chosen action. The flat table holds one row per
 # concrete move, so ``(action_type, idx, target)`` is unique per row; we pack the
-# triple into a dense int32 index and store its row. DISCARD is the lone collapsed
-# row (its per-resource amounts are not part of the key), so a caller that varies
-# the discarder / amounts resolves those lanes separately.
+# triple into a dense int32 index and store its row.
 # ===========================================================================
 _IDX_RANGE = int(_IDX.max()) + 1
 _TGT_MIN = int(_TARGET.min())
@@ -354,8 +334,7 @@ def flat_legality(
     Maps the action back to its flat row and gathers the bit from the cached
     ``(B, N_FLAT)`` mask ``avail_flat``. An action that is not a row of the flat
     table (out-of-range params) reads ``False`` (the row decode fails the identity
-    check). DISCARD keys on the collapsed entry only, so callers that vary the
-    discarder / amounts must resolve those lanes themselves.
+    check).
     """
     pack = (action_type * _IDX_RANGE + idx) * _TGT_RANGE + (target - _TGT_MIN)
     pack = jnp.clip(pack, 0, _REVERSE_J.shape[0] - 1)
@@ -391,6 +370,7 @@ _INDEX_AVAIL: tuple[tuple[IndexAvail, jax.Array, jax.Array], ...] = tuple(
     for core, p in (
         (_setup_settlement_avail, _flat_positions(ActionType.SETUP_SETTLEMENT)),
         (_setup_road_avail, _flat_positions(ActionType.SETUP_ROAD)),
+        (_discard_avail, _flat_positions(ActionType.DISCARD)),
         (_build_road_avail, _flat_positions(ActionType.BUILD_ROAD)),
         (_build_settlement_avail, _flat_positions(ActionType.BUILD_SETTLEMENT)),
         (_build_city_avail, _flat_positions(ActionType.BUILD_CITY)),
@@ -439,28 +419,13 @@ def _sweep_pair(
     return jax.vmap(lambda i, tg: core(layout, state, (i, tg)))(idxs, tgts)
 
 
-def _acting_discard(state: BoardState, sel: jax.Array) -> jax.Array:
-    """The acting player's canonical greedy discard ``(R,)`` (zeros if not owed).
-
-    Computed in int32 (not the uint8 the resource arrays are stored in): the
-    intermediate ``owed - exclusive_prefix`` is signed, so uint8 would wrap, and
-    the result feeds ``_discard_avail`` whose ``resources`` param is signed.
-    """
-    hand = state.player_resources[sel].astype(jnp.int32)
-    owed = state.pending_discard[sel].astype(jnp.int32)
-    return jnp.clip(owed - (jnp.cumsum(hand) - hand), 0, hand)
-
-
-def _flat_available_single(
-    layout: BoardLayout, state: BoardState, sel: jax.Array, discard: jax.Array
-) -> jax.Array:
+def _flat_available_for(layout: BoardLayout, state: BoardState) -> jax.Array:
     """``(N_FLAT,)`` legality of every flat action for one game -- switch-free.
 
     Each action type's legality core is ``vmap``-ed over its own slice of the
     flat table (board closed over, not replicated) and scattered back into the
     flat mask, reproducing :func:`action_available` over the table without the
-    ``lax.switch`` branch blow-up. ``sel`` is the acting player and ``discard``
-    its canonical discard (for the single DISCARD entry).
+    ``lax.switch`` branch blow-up.
     """
     out = jnp.zeros(_N_FLAT, dtype=bool)
     for core, pos, idxs in _INDEX_AVAIL:
@@ -469,13 +434,7 @@ def _flat_available_single(
         out = out.at[pos].set(_sweep_pair(pair_core, layout, state, idxs, tgts))
     for none_core, p in _NONE_AVAIL:
         out = out.at[p].set(none_core(layout, state, None))
-    return out.at[_DISCARD_FLAT].set(_discard_avail(layout, state, (sel, discard)))
-
-
-def _flat_available_for(layout: BoardLayout, state: BoardState) -> jax.Array:
-    """``(N_FLAT,)`` flat legality for one game's acting player (``sel`` derived)."""
-    sel = agent_selection_single(state)
-    return _flat_available_single(layout, state, sel, _acting_discard(state, sel))
+    return out
 
 
 _flat_available_b = jax.jit(jax.vmap(_flat_available_for))
@@ -531,6 +490,7 @@ _INDEX_MASKS = {
         _setup_settlement_avail, N_VERTICES
     ),
     ActionType.SETUP_ROAD: _index_mask_factory(_setup_road_avail, N_EDGES),
+    ActionType.DISCARD: _index_mask_factory(_discard_avail, N_RESOURCES),
     ActionType.BUILD_ROAD: _index_mask_factory(_build_road_avail, N_EDGES),
     ActionType.BUILD_SETTLEMENT: _index_mask_factory(
         _build_settlement_avail, N_VERTICES

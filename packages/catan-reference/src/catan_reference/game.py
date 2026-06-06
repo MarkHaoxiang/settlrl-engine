@@ -76,8 +76,16 @@ class Roll:
 
 @dataclass(frozen=True)
 class Discard:
+    """Give up one card of ``resource`` toward ``player``'s owed discard.
+
+    Discarding is one card per action: the action repeats until the player's
+    owed count (set to half the hand when the 7 was rolled) reaches zero. Any
+    owing player may act -- the rulebook treats discards as simultaneous, so no
+    order is imposed.
+    """
+
     player: int
-    counts: dict[Resource, int]
+    resource: Resource
 
 
 @dataclass(frozen=True)
@@ -501,15 +509,9 @@ class Game:
     def _legal_discard(self, a: Discard) -> bool:
         if self.phase is not Phase.DISCARD or not 0 <= a.player < N_PLAYERS:
             return False
-        owed = self.pending_discard[a.player]
-        if owed == 0:
+        if self.pending_discard[a.player] == 0:
             return False
-        hand = self.players[a.player].resources
-        if any(n < 0 for n in a.counts.values()):
-            return False
-        if sum(a.counts.values()) != owed:
-            return False
-        return all(a.counts.get(r, 0) <= hand[r] for r in RESOURCES)
+        return self.players[a.player].resources[a.resource] > 0
 
     def robber_victims(self, tile: int, thief: int) -> list[int]:
         """Players (other than ``thief``) with a building on ``tile`` and cards."""
@@ -714,24 +716,22 @@ class Game:
         return out
 
     def _legal_discards(self) -> list[Action]:
-        """One canonical discard per owing player (greedy in resource order).
+        """Single-card discards for the first owing player (one per held resource).
 
-        Many discard splits are legal; for enumeration we offer a single valid
-        one per player. ``is_legal`` still accepts any valid split.
+        Discards are simultaneous in the rulebook, so ``is_legal`` accepts any
+        owing player; for enumeration we serialize in player order (lowest
+        index first). The order cannot change any outcome -- each player's
+        discard choice is independent -- and it matches the engine's fixed
+        order, so the differential driver exercises identical action streams.
         """
-        out: list[Action] = []
         for p in range(N_PLAYERS):
-            owed = self.pending_discard[p]
-            if owed == 0:
-                continue
-            counts = _zero_resources()
-            remaining = owed
-            for r in RESOURCES:
-                take = min(self.players[p].resources[r], remaining)
-                counts[r] = take
-                remaining -= take
-            out.append(Discard(p, counts))
-        return out
+            if self.pending_discard[p] > 0:
+                return [
+                    Discard(p, r)
+                    for r in RESOURCES
+                    if self.players[p].resources[r] > 0
+                ]
+        return []
 
     def _robber_actions(
         self,
@@ -836,10 +836,8 @@ class Game:
         self.phase = Phase.MAIN
 
     def _apply_discard(self, a: Discard) -> None:
-        hand = self.players[a.player].resources
-        for r, n in a.counts.items():
-            hand[r] -= n
-        self.pending_discard[a.player] = 0
+        self.players[a.player].resources[a.resource] -= 1
+        self.pending_discard[a.player] -= 1
         if not any(self.pending_discard):
             self.phase = Phase.MOVE_ROBBER
 

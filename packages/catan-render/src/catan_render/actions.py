@@ -37,7 +37,6 @@ _BASE_LABELS = {
     ActionType.END_TURN: "End turn",
     ActionType.BUY_DEVELOPMENT_CARD: "Buy dev card",
     ActionType.PLAY_ROAD_BUILDING: "Road building",
-    ActionType.DISCARD: "Discard",
 }
 
 
@@ -68,6 +67,10 @@ def _decode(flat: int) -> ActionModel:
             tile=HexModel(q=q, r=r),
             victim=target,
         )
+
+    if at is ActionType.DISCARD:
+        res = _RESOURCE_NAMES[idx]
+        return ActionModel(flat=flat, type=type_name, label=f"Discard {res}", resource=res)
 
     if at is ActionType.PLAY_MONOPOLY:
         res = _RESOURCE_NAMES[idx]

@@ -10,15 +10,13 @@ directly.
 Action representation: the AEC action space is a single flat ``Discrete`` that
 enumerates every concrete move (each vertex/edge/tile/resource choice, plus the
 parameterless actions). A flat index decodes to the engine's
-``(ActionType, ActionParams)``. Discards are one flat action taking its
-per-resource amounts as a vector rather than enumerating the (combinatorial)
-choice space: pass ``(flat_index, resources)`` to :meth:`CatanAECEnv.step` to
-choose exactly what to give up — the engine validates the vector (nonnegative,
-sums to the amount owed, within hand) and rejects it as illegal otherwise. A
-bare flat index falls back to the canonical greedy discard, so masked random
-play (e.g. ``action_space.sample(mask)``) keeps working. Legality is exposed
-PettingZoo-style as ``observation["action_mask"]`` (a binary vector over the flat
-action set) so ``env.action_space(agent).sample(mask)`` only picks legal moves.
+``(ActionType, ActionParams)``. Discarding is one card per action (one flat
+action per resource type): the discard prompt repeats — masked to the resources
+the discarder still holds — until the owed count reaches zero, so the full
+discard choice is expressible without enumerating whole-hand splits. Legality is
+exposed PettingZoo-style as ``observation["action_mask"]`` (a binary vector over
+the flat action set) so ``env.action_space(agent).sample(mask)`` only picks
+legal moves.
 
 The observation is partial (own hand / dev cards in full, public counts for
 opponents) -- see ``BatchedCatanEnv.observe`` -- wrapped as
@@ -29,7 +27,7 @@ Requires the optional ``rl`` extra (``pettingzoo``, ``gymnasium``).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import gymnasium.spaces as spaces
 import jax.numpy as jnp
@@ -42,16 +40,14 @@ from catan_engine.mechanics.action import (
     _N_FLAT,
     _TARGET,
     ActionParams,
-    ActionType,
-    _canonical_discard,
 )
 from catan_engine.env.batched import BatchedCatanEnv
-from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.board.resources import N_PLAYERS
 
 __all__ = ["CatanAECEnv", "env"]
 
-# The flat action table (index -> (ActionType, ActionParams)) and canonical
-# discard live in ``env/batched.py`` -- shared with ``BatchedCatanEnv.random_actions``.
+# The flat action table (index -> (ActionType, ActionParams)) lives in
+# ``mechanics/action.py`` -- shared with ``BatchedCatanEnv.random_actions``.
 
 
 class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any base)
@@ -62,18 +58,28 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         reward: ``"sparse"`` or ``"vp_delta"`` (see ``BatchedCatanEnv``).
         render_mode: ``None``, ``"ansi"`` (returns a status string) or
             ``"human"`` (prints it).
+        number_placement: ``"random"`` or ``"spiral"`` number-token placement
+            (see ``BatchedCatanEnv``).
     """
 
     metadata = {"render_modes": ["human", "ansi"], "name": "catan_aec_v0"}
 
     def __init__(
-        self, seed: int = 0, reward: str = "sparse", render_mode: str | None = None
+        self,
+        seed: int = 0,
+        reward: str = "sparse",
+        render_mode: str | None = None,
+        number_placement: Literal["random", "spiral"] = "random",
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
         self._seed = seed
         self._env = BatchedCatanEnv(
-            batch_size=1, seed=seed, reward=reward, auto_reset=False
+            batch_size=1,
+            seed=seed,
+            reward=reward,
+            auto_reset=False,
+            number_placement=number_placement,
         )
         self.possible_agents = list(self._env.possible_agents)
         self._index = {a: i for i, a in enumerate(self.possible_agents)}
@@ -131,14 +137,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         self.infos: dict[str, dict[str, Any]] = {a: {} for a in self.agents}
         self.agent_selection = self._acting_agent()
 
-    def step(self, action: int | tuple[int, Any] | None) -> None:
-        """Apply one flat action (see module docstring for the encoding).
-
-        ``action`` is a flat index, or ``(flat_index, resources)`` for a discard
-        with explicit per-resource amounts (a length-``N_RESOURCES`` vector of
-        nonnegative ints). The vector is only read for the DISCARD action; a bare
-        index discards canonically (greedy in resource order).
-        """
+    def step(self, action: int | None) -> None:
         if (
             self.terminations[self.agent_selection]
             or self.truncations[self.agent_selection]
@@ -148,8 +147,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
 
         agent = self.agent_selection
         self._cumulative_rewards[agent] = 0
-        flat, discard = self._parse_action(action)  # type: ignore[arg-type]
-        self._apply(flat, discard)
+        self._apply(int(action))  # type: ignore[arg-type]
 
         reward = np.asarray(self._env.rewards[0])  # (N_PLAYERS,)
         done = bool(np.asarray(self._env.terminations[0, 0]))
@@ -195,49 +193,24 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         """
         return np.asarray(self._env._avail[0]).astype(np.int8)
 
-    def _parse_action(
-        self, action: int | tuple[int, Any]
-    ) -> tuple[int, np.ndarray | None]:
-        """Split ``action`` into (flat index, optional discard vector).
-
-        A bare index means "no explicit discard amounts" (canonical fill-in). A
-        vector must be length ``N_RESOURCES`` of nonnegative ints; only its
-        *shape* is checked here — legality (sums to the amount owed, within
-        hand) is the engine gate's job, and an illegal discard no-ops like any
-        other illegal action.
-        """
-        if not isinstance(action, (tuple, list)):
-            return int(action), None  # bare flat index (int or 0-d array)
-        flat, vec = action
-        discard = np.asarray(vec, dtype=np.int32)
-        if discard.shape != (N_RESOURCES,) or (discard < 0).any():
-            raise ValueError(
-                f"discard amounts must be {N_RESOURCES} nonnegative ints, got {vec!r}"
-            )
-        return int(flat), discard
-
-    def _apply(self, flat: int, discard: np.ndarray | None = None) -> None:
-        sel = int(self._env.agent_selection[0])
-        at = int(_ATYPE[flat])
-        idx = int(_IDX[flat])
-        target = int(_TARGET[flat])
-        resources = np.zeros(N_RESOURCES, dtype=np.int32)
-        if at == int(ActionType.DISCARD):
-            idx = sel
-            if discard is not None:
-                resources = discard
-            else:
-                hand = np.asarray(self._env._state.player_resources[0, sel])
-                owed = int(np.asarray(self._env._state.pending_discard[0, sel]))
-                resources = _canonical_discard(hand, owed)
+    def _apply(self, flat: int) -> None:
         params = ActionParams(
-            idx=jnp.asarray([idx], dtype=jnp.int32),
-            target=jnp.asarray([target], dtype=jnp.int32),
-            resources=jnp.asarray(resources[None, :], dtype=jnp.int32),
+            idx=jnp.asarray([int(_IDX[flat])], dtype=jnp.int32),
+            target=jnp.asarray([int(_TARGET[flat])], dtype=jnp.int32),
         )
-        self._env.step(jnp.asarray([at], dtype=jnp.int32), params)
+        self._env.step(jnp.asarray([int(_ATYPE[flat])], dtype=jnp.int32), params)
 
 
-def env(seed: int = 0, reward: str = "sparse", render_mode: str | None = None) -> CatanAECEnv:
+def env(
+    seed: int = 0,
+    reward: str = "sparse",
+    render_mode: str | None = None,
+    number_placement: Literal["random", "spiral"] = "random",
+) -> CatanAECEnv:
     """PettingZoo-style constructor returning a :class:`CatanAECEnv`."""
-    return CatanAECEnv(seed=seed, reward=reward, render_mode=render_mode)
+    return CatanAECEnv(
+        seed=seed,
+        reward=reward,
+        render_mode=render_mode,
+        number_placement=number_placement,
+    )

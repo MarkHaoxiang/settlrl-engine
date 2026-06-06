@@ -35,6 +35,12 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   on a tie.
 - The robber: when any opponent with cards borders the target tile you must steal
   from one of them; only when there is no such victim do you steal nothing.
+- **Discarding is one card per action** (`Discard(player, resource)`): the
+  rulebook's simultaneous half-hand discard is serialized into single-card
+  steps, which cannot change any outcome (each player's choice is independent).
+  `is_legal` accepts any owing player; `legal_actions()` enumerates only the
+  lowest-indexed owing player, matching the engine's fixed order so the
+  differential driver exercises identical action streams.
 
 ## Checks
 

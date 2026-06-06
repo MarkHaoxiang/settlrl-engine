@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-from typing import cast
+from typing import Literal, cast
 
 import jax
 import jax.numpy as jnp
@@ -49,12 +49,10 @@ from catan_engine.mechanics.action import (
     ActionType,
     N_ACTION_TYPES,
     _ATYPE_J,
-    _DISCARD_FLAT,
     _IDX_J,
     _INDEX_MASKS,
     _N_FLAT,
     _TARGET_J,
-    _acting_discard,
     _flat_available_b,
     _flat_available_for,
     action_available,
@@ -68,7 +66,6 @@ from catan_engine.mechanics.common import (
     agent_selection_single,
     player_total_vp,
 )
-from catan_engine.mechanics.robber import _discard_avail
 from catan_engine.board import Board
 from catan_engine.board.dev_cards import N_DEV_CARD_TYPES
 from catan_engine.board.layout import (
@@ -153,46 +150,36 @@ _agent_selection_b = jax.jit(jax.vmap(agent_selection_single))
 
 
 def _random_action_single(
-    state: BoardState, avail_flat: jax.Array, key: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    avail_flat: jax.Array, key: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Sample a uniformly-random *legal* flat action for one game.
 
     The single-game core behind :meth:`BatchedCatanEnv.random_actions`: takes the
     lane's cached flat legality mask ``avail_flat`` (``(N_FLAT,)``) and the argmax
     of uniform noise over its legal entries. Returns the chosen action's
-    ``(action_type, idx, target, resources)``. The mask is read from the env's
-    cache (computed once per step), not recomputed here.
+    ``(action_type, idx, target)`` straight from the static flat table. The mask
+    is read from the env's cache (computed once per step), not recomputed here.
     """
-    sel = agent_selection_single(state)  # acting player this lane
-    discard = _acting_discard(state, sel)  # (R,) -- DISCARD entry amounts
-
-    # Flat params are state-independent except DISCARD, whose player / amounts
-    # depend on the acting lane -- override that single column.
-    idx = _IDX_J.at[_DISCARD_FLAT].set(sel)  # (N_FLAT,)
-    resources = (
-        jnp.zeros((_N_FLAT, N_RESOURCES), jnp.int32).at[_DISCARD_FLAT].set(discard)
-    )
-
     # Random legal action: score legal moves with uniform noise and take the
     # argmax (illegal scored -1, so only picked if the lane has no legal move).
     noise = jax.random.uniform(key, (_N_FLAT,))
     chosen = jnp.argmax(jnp.where(avail_flat, noise, -1.0))
-    return _ATYPE_J[chosen], idx[chosen], _TARGET_J[chosen], resources[chosen]
+    return _ATYPE_J[chosen], _IDX_J[chosen], _TARGET_J[chosen]
 
 
 @jax.jit
 def _random_actions_b(
-    state: BoardState, avail_flat: jax.Array, key: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Sample a random legal action per lane: ``(action_type, idx, target, resources)``.
+    avail_flat: jax.Array, key: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Sample a random legal action per lane: ``(action_type, idx, target)``.
 
     Splits ``key`` per lane *inside* the trace (so the split fuses into the XLA
     graph rather than dispatching eagerly every step) and maps
     :func:`_random_action_single` over the batch. ``avail_flat`` is the cached
     ``(B, N_FLAT)`` flat-legality sweep -- no avail is recomputed here.
     """
-    keys = jax.random.split(key, state.phase.shape[0])
-    return jax.vmap(_random_action_single, in_axes=(0, 0, 0))(state, avail_flat, keys)
+    keys = jax.random.split(key, avail_flat.shape[0])
+    return jax.vmap(_random_action_single, in_axes=(0, 0))(avail_flat, keys)
 
 
 @jax.jit
@@ -245,6 +232,10 @@ class BatchedCatanEnv:
             fresh game on the same step; when False, terminated lanes freeze (and
             keep reporting ``terminations`` True) for callers that manage episode
             boundaries themselves (e.g. the single-game AEC wrapper).
+        number_placement: ``"random"`` (default) shuffles the number tokens
+            uniformly; ``"spiral"`` lays them in the rulebook's variable set-up
+            spiral (tournament-style balanced boards). Applied to the initial
+            boards and to auto-reset replacements.
 
     The action consumed by :meth:`step` is the engine's
     ``(action_type, ActionParams)`` pair with a leading batch axis -- one action
@@ -260,12 +251,19 @@ class BatchedCatanEnv:
         seed: int = 0,
         reward: str = "sparse",
         auto_reset: bool = True,
+        number_placement: Literal["random", "spiral"] = "random",
     ) -> None:
         if reward not in ("sparse", "vp_delta"):
             raise ValueError(f"reward must be 'sparse' or 'vp_delta', got {reward!r}")
+        if number_placement not in ("random", "spiral"):
+            raise ValueError(
+                "number_placement must be 'random' or 'spiral', "
+                f"got {number_placement!r}"
+            )
         self.batch_size = batch_size
         self.reward_mode = reward
         self.auto_reset = auto_reset
+        self.number_placement = number_placement
         self.possible_agents = [f"player_{i}" for i in range(N_PLAYERS)]
         self.agents = list(self.possible_agents)
         self.num_agents = N_PLAYERS
@@ -283,7 +281,9 @@ class BatchedCatanEnv:
             self._seed = seed
         self._key = jax.random.key(self._seed)
         self._key, k_layout, k_state = jax.random.split(self._key, 3)
-        self._layout = make_layout(self.batch_size, key=k_layout)
+        self._layout = make_layout(
+            self.batch_size, key=k_layout, number_placement=self.number_placement
+        )
         self._state = make_board_state(self.batch_size, key=k_state)
         self._state = self._state._replace(
             robber=desert_tile(self._layout.tile_resource)
@@ -308,12 +308,9 @@ class BatchedCatanEnv:
         auto-reset; the resulting reward / termination reflect the transition
         that just happened, while the next observation is the reset game's.
 
-        DISCARD takes the full choice in ``params``: ``idx`` names the
-        discarding player (any player who still owes — discards are simultaneous
-        in the rulebook, so order is free) and ``resources`` the per-resource
-        counts to give up. The vector is validated (nonnegative, sums to the
-        amount owed, within hand); an invalid choice is INVALID and leaves the
-        lane unchanged, like any illegal action.
+        DISCARD is one card per step: ``idx`` is the resource the acting
+        discarder gives up one card of; the action repeats until every owed
+        count reaches zero, then the phase advances to MOVE_ROBBER.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
         # The whole step -- gate the chosen action with the cached legality, apply,
@@ -341,6 +338,7 @@ class BatchedCatanEnv:
             self.batch_size,
             self.reward_mode,
             self.auto_reset,
+            self.number_placement,
         )
 
     def last(
@@ -415,7 +413,6 @@ class BatchedCatanEnv:
             "action_type": Discrete(N_ACTION_TYPES),
             "idx": Discrete(max(N_VERTICES, N_EDGES)),  # vertex/edge/tile/resource
             "target": Discrete(N_PLAYERS),  # victim / receive / 2nd resource
-            "resources": Box((N_RESOURCES,), "int32", 0, BANK_INITIAL),  # Discard
         }
 
     def observation_space(self, agent: object = None) -> dict[str, Space]:
@@ -471,8 +468,8 @@ class BatchedCatanEnv:
         """``(B, D)`` legality over the primary index of an index-parameterized action.
 
         Supported: SETUP_SETTLEMENT / BUILD_SETTLEMENT / BUILD_CITY (vertices),
-        SETUP_ROAD / BUILD_ROAD (edges), PLAY_MONOPOLY (resources), and
-        MOVE_ROBBER / PLAY_KNIGHT (tiles, legal if some victim choice works).
+        SETUP_ROAD / BUILD_ROAD (edges), DISCARD / PLAY_MONOPOLY (resources),
+        and MOVE_ROBBER / PLAY_KNIGHT (tiles, legal if some victim choice works).
         Other action types have no single index domain -- use :meth:`action_mask`
         or :func:`available`.
         """
@@ -496,10 +493,8 @@ class BatchedCatanEnv:
         action and simply stalls until its next auto-reset. ``key`` is a JAX PRNG
         key, split per lane for the choice.
         """
-        atype, idx, target, resources = _random_actions_b(
-            self._state, self._avail, key
-        )
-        return atype, ActionParams(idx=idx, target=target, resources=resources)
+        atype, idx, target = _random_actions_b(self._avail, key)
+        return atype, ActionParams(idx=idx, target=target)
 
     # -- Internals --------------------------------------------------------
 
@@ -565,13 +560,14 @@ def _select_key(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
     return cast(jax.Array, jax.random.wrap_key_data(jnp.where(m, ad, bd)))
 
 
-@functools.partial(jax.jit, static_argnames=("batch_size",))
+@functools.partial(jax.jit, static_argnames=("batch_size", "number_placement"))
 def _auto_reset_core(
     layout: BoardLayout,
     state: BoardState,
     done_lane: jax.Array,
     key: jax.Array,
     batch_size: int,
+    number_placement: Literal["random", "spiral"],
 ) -> tuple[BoardLayout, BoardState]:
     """Replace finished lanes (``done_lane``) with fresh games, fully on device.
 
@@ -586,7 +582,9 @@ def _auto_reset_core(
     ) -> tuple[BoardLayout, BoardState]:
         layout, state = operand
         k_layout, k_state = jax.random.split(key)
-        fresh_layout = make_layout(batch_size, key=k_layout)
+        fresh_layout = make_layout(
+            batch_size, key=k_layout, number_placement=number_placement
+        )
         fresh_state = make_board_state(batch_size, key=k_state)
         fresh_state = fresh_state._replace(
             robber=desert_tile(fresh_layout.tile_resource)
@@ -619,7 +617,8 @@ def _auto_reset_core(
 
 
 @functools.partial(
-    jax.jit, static_argnames=("batch_size", "reward_mode", "auto_reset")
+    jax.jit,
+    static_argnames=("batch_size", "reward_mode", "auto_reset", "number_placement"),
 )
 def _env_step_core(
     layout: BoardLayout,
@@ -632,6 +631,7 @@ def _env_step_core(
     batch_size: int,
     reward_mode: str,
     auto_reset: bool,
+    number_placement: Literal["random", "spiral"],
 ) -> tuple[
     BoardLayout,
     BoardState,
@@ -653,21 +653,13 @@ def _env_step_core(
     legality refresh) into one removes the per-step dispatch overhead that dominates
     small-batch throughput; the cache refresh rides along for free.
 
-    ``reward_mode`` (``"sparse"`` / ``"vp_delta"``) and ``auto_reset`` are static, so
-    their Python branches are resolved at trace time. ``key`` is threaded (split for
-    auto-reset, returned unchanged when ``auto_reset`` is False).
+    ``reward_mode`` (``"sparse"`` / ``"vp_delta"``), ``auto_reset``, and
+    ``number_placement`` (forwarded to the auto-reset ``make_layout``) are static,
+    so their Python branches are resolved at trace time. ``key`` is threaded (split
+    for auto-reset, returned unchanged when ``auto_reset`` is False).
     """
     # Gate: read the chosen action's legality from the cache (no avail recompute).
     legal = flat_legality(avail_flat, action_type, params.idx, params.target)
-    # DISCARD's per-resource amounts are not part of the flat key (the cache holds
-    # only the canonical-discard bit), so validate the caller's actual
-    # ``(player, resources)`` choice directly: ``_discard_avail`` is cheap
-    # arithmetic (player owes, counts nonnegative, sum to the amount owed, within
-    # hand) and fuses into this kernel.
-    discard_legal = jax.vmap(_discard_avail)(
-        layout, state, (params.idx, params.resources)
-    )
-    legal = jnp.where(action_type == int(ActionType.DISCARD), discard_legal, legal)
     applied, result = jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0))(
         layout, state, action_type, params, legal
     )
@@ -685,7 +677,7 @@ def _env_step_core(
     if auto_reset:
         key, subkey = jax.random.split(key)
         new_layout, new_state = _auto_reset_core(
-            layout, applied, done_lane, subkey, batch_size
+            layout, applied, done_lane, subkey, batch_size, number_placement
         )
     else:
         new_layout, new_state = layout, applied

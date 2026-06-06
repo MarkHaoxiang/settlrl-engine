@@ -2,7 +2,8 @@
 
 Holds the steal / victim-mask primitives, the shared robber-victim validation
 reused by ``MoveRobber`` and ``PlayKnight`` (the latter lives in
-``development``), and the ``MoveRobber`` / ``Discard`` action cores. All
+``development``), and the ``MoveRobber`` / ``Discard`` action cores (the
+latter discards one card per action -- see the Discard section). All
 single-game and traceable.
 """
 
@@ -22,16 +23,17 @@ from catan_engine.board.state import (
     GamePhase,
     IntScalar,
     PlayerMaskVec,
+    to_u8,
     tree_select,
 )
 from catan_engine.mechanics.common import (
     INVALID,
     SUCCESS,
-    DiscardParams,
+    IndexParam,
     Mask,
     ResultCode,
-    SingleResources,
     TwoIndexParams,
+    agent_selection_single,
 )
 
 
@@ -161,47 +163,45 @@ def move_robber_step(
 # ===========================================================================
 # Discard
 # ===========================================================================
+#
+# One card per action: the acting discarder (the lowest-indexed player still
+# owing cards -- ``agent_selection_single``) gives up a single card of the
+# chosen resource, decrementing its owed count. The phase advances to
+# MOVE_ROBBER once every owed count is zero. Splitting the discard into
+# per-card moves keeps the choice space flat (one action per resource) instead
+# of the combinatorial space of whole-hand splits.
 
 
 def _discard_avail(
-    layout: BoardLayout, state: BoardState, params: tuple[IntScalar, SingleResources]
+    layout: BoardLayout, state: BoardState, params: IntScalar
 ) -> BoolScalar:
-    player, resources = params
-    p = jnp.clip(player, 0, N_PLAYERS - 1)
-    req = resources.astype(jnp.int32)  # (N_RESOURCES,)
+    resource = params
+    r = jnp.clip(resource, 0, N_RESOURCES - 1)
+    p = agent_selection_single(state)
     phase_ok = state.phase == GamePhase.DISCARD
-    player_ok = (player >= 0) & (player < N_PLAYERS)
-    nonneg = jnp.all(req >= 0)
-    owed = state.pending_discard[p].astype(jnp.int32)
-    owes = owed != 0
-    count_ok = req.sum() == owed
-    held = state.player_resources[p].astype(jnp.int32)
-    within_hand = jnp.all(req <= held)
-    return phase_ok & player_ok & nonneg & owes & count_ok & within_hand
+    in_range = (resource >= 0) & (resource < N_RESOURCES)
+    owes = state.pending_discard[p] > 0
+    holds = state.player_resources[p, r] > 0
+    return phase_ok & in_range & owes & holds
 
 
 def _discard_apply(
     layout: BoardLayout,
     state: BoardState,
-    params: tuple[IntScalar, SingleResources],
+    params: IntScalar,
     available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
-    player, resources = params
-    p = jnp.clip(player, 0, N_PLAYERS - 1)
-    req = resources.astype(jnp.int32)
-    new_row = jnp.clip(
-        state.player_resources[p].astype(jnp.int32) - req, 0, 255
-    ).astype(jnp.uint8)
-    new_resources = state.player_resources.at[p].set(new_row)
-    updated_pending = state.pending_discard.at[p].set(jnp.uint8(0))
+    resource = params
+    r = jnp.clip(resource, 0, N_RESOURCES - 1)
+    p = agent_selection_single(state)
+    new_resources = to_u8(state.player_resources.astype(jnp.int32).at[p, r].add(-1))
+    new_pending = state.pending_discard.astype(jnp.int32).at[p].add(-1)
     new_phase = jnp.where(
-        updated_pending.astype(jnp.int32).sum() == 0,
-        GamePhase.MOVE_ROBBER,
-        GamePhase.DISCARD,
+        new_pending.sum() == 0, GamePhase.MOVE_ROBBER, GamePhase.DISCARD
     ).astype(state.phase.dtype)
     cand = state._replace(
         player_resources=new_resources,
-        pending_discard=updated_pending,
+        pending_discard=to_u8(new_pending),
         phase=new_phase,
     )
     return tree_select(available, cand, state), jnp.where(
@@ -213,16 +213,18 @@ _discard_avail_b = jax.jit(jax.vmap(_discard_avail))
 _discard_apply_b = jax.jit(jax.vmap(_discard_apply))
 
 
-def discard_available(board: Board, params: DiscardParams) -> Mask:
-    """``(batch,)`` legality of a (player, resources) discard (no state change)."""
+def discard_available(board: Board, params: IndexParam) -> Mask:
+    """``(batch,)`` legality of discarding one card of ``resource`` (no state change)."""
     return cast(Mask, _discard_avail_b(board[0], board[1], params))
 
 
-def discard_step(board: Board, params: DiscardParams) -> tuple[BoardState, ResultCode]:
-    """Discard half a hand after a 7 (params: (player, per-resource counts)).
+def discard_step(board: Board, params: IndexParam) -> tuple[BoardState, ResultCode]:
+    """Discard one card of ``resource`` from the acting discarder (post-7).
 
-    When every player has finished discarding, the phase advances to
-    MOVE_ROBBER. Never wins.
+    Discarding is sequential, one card per step: the acting discarder is the
+    lowest-indexed player still owing cards, and each action decrements its
+    owed count by one. When every owed count reaches zero the phase advances
+    to MOVE_ROBBER. Never wins.
     """
     available = _discard_avail_b(board[0], board[1], params)
     return cast(
