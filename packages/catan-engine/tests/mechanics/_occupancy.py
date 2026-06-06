@@ -15,6 +15,7 @@ import jax
 import numpy as np
 
 from catan_engine.board.layout import N_EDGES, N_VERTICES
+from catan_engine.board.state import MAX_ROADS
 
 _T = TypeVar("_T")
 
@@ -36,10 +37,17 @@ def random_occupancy(
 
     Values are 0 (empty) or 1..4 (player + 1), drawn from the categorical
     weights ``edge_p`` / ``vertex_p`` (each length 5). The biases keep road
-    networks realistically small.
+    networks realistically small, and each player is capped at ``MAX_ROADS``
+    edges (excess randomly cleared): the longest-road bitmask and stack bounds
+    rely on that rule invariant, so states beyond it are out of contract.
     """
     rng = np.random.default_rng(seed)
     edge_road = rng.choice(_VALUES, size=N_EDGES, p=list(edge_p)).astype(np.uint8)
+    for code in range(1, 5):
+        owned = np.where(edge_road == code)[0]
+        if len(owned) > MAX_ROADS:
+            drop = rng.choice(owned, size=len(owned) - MAX_ROADS, replace=False)
+            edge_road[drop] = 0
     vertex_owner = rng.choice(_VALUES, size=N_VERTICES, p=list(vertex_p)).astype(
         np.uint8
     )

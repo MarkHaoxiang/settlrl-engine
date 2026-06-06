@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 from catan_engine.mechanics import common, dice, longest_road, trade
 from tests import conversion as reference
 from tests.mechanics._occupancy import random_occupancy, single as _single
+from tests.render import BoardRenderer
 from catan_engine.board.layout import (
     BoardLayout,
     EDGE_V,
@@ -163,6 +164,375 @@ class TestLongestRoad(TestCase):
                 f"roads={ {int(e): int(edge_road[e]) for e in np.flatnonzero(edge_road)} }\n"
                 f"buildings={ {int(v): int(vertex_owner[v]) for v in np.flatnonzero(vertex_owner)} }"
             )
+
+
+# --- Hand-built topologies for the trail DFS -------------------------------
+#
+# Edge lists named after their shape, on the real board geometry (see the
+# rendered snapshots). A figure-eight (two loops sharing a vertex) cannot exist
+# on a Catan board (MAX_VERTEX_DEGREE = 3); the dumbbell is its closest
+# realizable analogue.
+_LOOP = [0, 1, 3, 4, 5, 7]  # tile 0's hexagon: 0-3-4-1-2-5-0
+_TAIL = [9]  # edge 5-6: a tail off loop vertex 5
+_THETA = _LOOP + [6, 9, 10, 12, 13]  # tiles 0+1: junctions 2 and 5, three paths
+_Y = [0, 8, 1, 9, 2, 22]  # three 2-edge arms meeting at vertex 0
+_BRIDGE = [9, 10]  # path 5-6-9 joining the two loops below
+_LOOP2 = [13, 14, 15, 16, 18, 19]  # tile 2's hexagon: 8-9-10-13-12-11-8
+
+_LAYOUT = make_layout(1, key=jax.random.key(0))
+
+
+class TestLongestRoadTopologies(TestCase):
+    """Named road shapes that exercise the DFS's seeding cases: odd-degree
+    starts (dead ends, junctions), blocked starts (opponent buildings), and the
+    closed-trail fallback (cycles, where no vertex is a forced start)."""
+
+    def _check(
+        self, edges: list[int], expected: int, buildings: dict[int, int] | None = None
+    ) -> str:
+        """Assert player 0's longest road is ``expected`` (and the oracle
+        agrees, for every player); return the rendered board map."""
+        edge_road = np.zeros(N_EDGES, np.uint8)
+        edge_road[edges] = 1  # player 0
+        vertex_owner = np.zeros(N_VERTICES, np.uint8)
+        for v, code in (buildings or {}).items():
+            vertex_owner[v] = code
+        state = _state_with(edge_road, vertex_owner)
+        for p in range(N_PLAYERS):
+            ref = reference.longest_road_length(state, p, 0)
+            got = int(
+                _LRL(jnp.asarray(edge_road), jnp.asarray(vertex_owner), jnp.int32(p))
+            )
+            assert got == ref, f"player={p}: engine={got} ref={ref}"
+            assert got == (expected if p == 0 else 0), f"player={p}: {got}"
+        return BoardRenderer(_LAYOUT, state).render_map()
+
+    def test_path(self) -> None:
+        # Open chain: both ends are degree-1 starts; interior seeds are
+        # dominated. 0-5-2-1-4-3, length 5.
+        self._check([1, 5, 3, 4, 7], expected=5)
+
+    def test_y_junction(self) -> None:
+        # Three 2-edge arms from vertex 0 (degree 3): the longest trail passes
+        # *through* the junction, tip to tip, stranding the third arm.
+        self.assertExpectedInline(self._check(_Y, expected=4), r"""
+
+
+          ORE             3:1
+               /o\     /o\     /o\
+              /   \   /   \   /   \
+            o/     \o/     \o/     \o
+            |  SHP  |  ORE  |  BRK  |
+            |   5   |   6   |  10   |
+            |       |       |  <R>  |
+           /o\     /o\     1o1     1o1   3:1
+          /   \   /   \   1   1   1   1
+        o/     \o/     \o1     1o1     1o
+  WOD   |  WHT  |  WOD  |  WOD  1  SHP  |
+        |   9   |   2   |  10   1  11   |
+        |       |       |       1       |
+       /o\     /o\     /o\     /o1     /o\
+      /   \   /   \   /   \   /   1   /   \
+    o/     \o/     \o/     \o/     1o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+""")
+
+    def test_loop(self) -> None:
+        # Pure cycle: every vertex even-degree and passable, so nothing is a
+        # forced start -- only the closed-trail fallback seeds it.
+        self.assertExpectedInline(self._check(_LOOP, expected=6), r"""
+
+
+          ORE             3:1
+               /o\     /o\     1o1
+              /   \   /   \   1   1
+            o/     \o/     \o1     1o
+            |  SHP  |  ORE  1  BRK  1
+            |   5   |   6   1  10   1
+            |       |       1  <R>  1
+           /o\     /o\     /o1     1o\   3:1
+          /   \   /   \   /   1   1   \
+        o/     \o/     \o/     1o1     \o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+""")
+
+    def test_lollipop(self) -> None:
+        # Loop + tail: starts at the tail's dead end, rides around the loop,
+        # and ends back at the degree-3 junction. Uses every edge.
+        self.assertExpectedInline(self._check(_LOOP + _TAIL, expected=7), r"""
+
+
+          ORE             3:1
+               /o\     /o\     1o1
+              /   \   /   \   1   1
+            o/     \o/     \o1     1o
+            |  SHP  |  ORE  1  BRK  1
+            |   5   |   6   1  10   1
+            |       |       1  <R>  1
+           /o\     /o\     1o1     1o\   3:1
+          /   \   /   \   1   1   1   \
+        o/     \o/     \o1     1o1     \o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+""")
+
+    def test_theta(self) -> None:
+        # Two junctions joined by three paths (lengths 1, 5, 5): the longest
+        # trail weaves through all three, junction to junction, using every
+        # edge. Both endpoints are degree-3 -- no degree-1 vertex exists, so
+        # junction seeding is load-bearing here.
+        self.assertExpectedInline(self._check(_THETA, expected=11), r"""
+
+
+          ORE             3:1
+               /o\     1o1     1o1
+              /   \   1   1   1   1
+            o/     \o1     1o1     1o
+            |  SHP  1  ORE  1  BRK  1
+            |   5   1   6   1  10   1
+            |       1       1  <R>  1
+           /o\     /o1     1o1     1o\   3:1
+          /   \   /   1   1   1   1   \
+        o/     \o/     1o1     1o1     \o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+""")
+
+    def test_dumbbell(self) -> None:
+        # Two loops joined by a path: around one loop, across the bridge,
+        # around the other. Uses every edge; both junctions are degree-3.
+        self.assertExpectedInline(
+            self._check(_LOOP + _BRIDGE + _LOOP2, expected=14), r"""
+
+
+          ORE             3:1
+               1o1     /o\     1o1
+              1   1   /   \   1   1
+            o1     1o/     \o1     1o
+            1  SHP  1  ORE  1  BRK  1
+            1   5   1   6   1  10   1
+            1       1       1  <R>  1
+           /o1     1o1     1o1     1o\   3:1
+          /   1   1   1   1   1   1   \
+        o/     1o1     1o1     1o1     \o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+"""
+        )
+
+    def test_loop_with_opponent_settlement(self) -> None:
+        # One opponent building on a cycle makes that vertex a (blocked) start:
+        # the full loop still counts, starting and ending there.
+        self.assertExpectedInline(
+            self._check(_LOOP, expected=6, buildings={0: 2}), r"""
+
+
+          ORE             3:1
+               /o\     /o\     1o1
+              /   \   /   \   1   1
+            o/     \o/     \o1     1o
+            |  SHP  |  ORE  1  BRK  1
+            |   5   |   6   1  10   1
+            |       |       1  <R>  1
+           /o\     /o\     /o1     1o\   3:1
+          /   \   /   \   /   1   1   \
+        o/     \o/     \o/     121     \o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+"""
+        )
+
+    def test_loop_split_by_two_settlements(self) -> None:
+        # Two opponent buildings sever the cycle into arcs of 4 and 2.
+        self.assertExpectedInline(
+            self._check(_LOOP, expected=4, buildings={0: 2, 2: 3}), r"""
+
+
+          ORE             3:1
+               /o\     /o\     1o1
+              /   \   /   \   1   1
+            o/     \o/     \31     1o
+            |  SHP  |  ORE  1  BRK  1
+            |   5   |   6   1  10   1
+            |       |       1  <R>  1
+           /o\     /o\     /o1     1o\   3:1
+          /   \   /   \   /   1   1   \
+        o/     \o/     \o/     121     \o
+  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
+        |   9   |   2   |  10   |  11   |
+        |       |       |       |       |
+       /o\     /o\     /o\     /o\     /o\
+      /   \   /   \   /   \   /   \   /   \
+    o/     \o/     \o/     \o/     \o/     \o
+    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
+    |   8   |   4   |   3   |       |  12   |   3
+    |       |       |       |       |       |
+    o\     /o\     /o\     /o\     /o\     /o
+      \   /   \   /   \   /   \   /   \   /
+       \o/     \o/     \o/     \o/     \o/
+        |  SHP  |  ORE  |  BRK  |  BRK  |
+        |   8   |   3   |  11   |   6   |
+  3:1   |       |       |       |       |
+        o\     /o\     /o\     /o\     /o
+          \   /   \   /   \   /   \   /
+           \o/     \o/     \o/     \o/   BRK
+            |  WHT  |  WHT  |  WOD  |
+            |   4   |   9   |   5   |
+            |       |       |       |
+            o\     /o\     /o\     /o
+              \   /   \   /   \   /
+               \o/     \o/     \o/
+          SHP             WHT
+
+
+"""
+        )
 
 
 class TestProductionAndPorts(TestCase):

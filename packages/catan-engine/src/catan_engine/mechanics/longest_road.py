@@ -16,17 +16,22 @@ from jaxtyping import Array, Int
 
 from catan_engine.board.layout import EDGE_V, MAX_VERTEX_DEGREE, N_EDGES, N_VERTICES
 from catan_engine.board.state import (
+    MAX_ROADS,
     BoolScalar,
     EdgeRoadVec,
     IntScalar,
     VertexOwnerVec,
 )
 
-# Generous bound for the DFS stack. We seed at most 2 * MAX_ROADS (=30)
-# owned-edge frames and the live DFS frontier adds only depth * (maxdeg-1)
-# ~= 15 * 2 on top; this leaves a wide margin. _DUMP is a scratch slot above any
-# live frame where non-owned edges park their (never-popped) seeds.
-STACK_CAP = 2 * N_EDGES + 128
+# Tight bound for the DFS stack, assuming the rule invariant n_owned <=
+# MAX_ROADS (= 15). Seeding puts at most 2 * n_owned <= 30 frames on the stack.
+# Each pop pushes at most deg - 1 <= 2 children (the arrival edge is always in
+# the frame's used set), so an expansion grows the stack by at most +1 net; a
+# trail's length is capped at n_owned, so at most MAX_ROADS - 1 = 14 such
+# expansions can be live along the current DFS path. Peak sp is therefore
+# 2 * MAX_ROADS + (MAX_ROADS - 1) = 44, plus one scratch slot (_DUMP) above
+# any live frame, where dropped seeds park (never popped).
+STACK_CAP = 2 * MAX_ROADS + (MAX_ROADS - 1) + 1
 _DUMP = STACK_CAP - 1
 
 # Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built
@@ -44,7 +49,7 @@ ADJ_EDGE = jnp.asarray(
     np.concatenate([np.arange(N_EDGES), np.arange(N_EDGES)])[_order], dtype=jnp.int32
 )
 ADJ_NBR = jnp.asarray(np.concatenate([_E[:, 1], _E[:, 0]])[_order], dtype=jnp.int32)
-ADJ_DEG = jnp.asarray(_counts, dtype=jnp.int32)  # per-vertex degree (slice width)
+ADJ_DEG = jnp.asarray(_counts, dtype=jnp.int32)
 
 
 _StackVec = Int[Array, f"stack_cap={STACK_CAP}"]
@@ -77,40 +82,42 @@ def longest_road_length(
     under ``vmap`` a masked-off lane adds no loop iterations.
     """
     owner_code = player + 1  # edge_road / vertex_owner store player + 1, 0 = empty
-    mine = (edge_road == owner_code) & needed  # (N_EDGES,) bool
-    passable = (vertex_owner == 0) | (vertex_owner == owner_code)  # (N_VERTICES,)
+    mine = (edge_road == owner_code) & needed
+    mine_i = mine.astype(jnp.int32)
+    passable = (vertex_owner == 0) | (vertex_owner == owner_code)
+    u, v = EDGE_V[:, 0], EDGE_V[:, 1]
 
-    # owned_rank[e]: rank of edge e among the player's owned edges -- the k-th
-    # owned edge, in edge-id order, has rank k-1. A rank doubles as the edge's
-    # bit position in the int32 used-edge mask (a player owns <= MAX_ROADS = 15
-    # < 32 edges) and as its seed slot. Non-owned edges get a clamped junk rank
-    # the `mine[e]` guard never reads, and seed into a throwaway slot that is
-    # never popped.
-    owned_rank = jnp.clip(jnp.cumsum(mine.astype(jnp.int32)) - 1, 0, 31)  # (N_EDGES,)
-    n_owned = jnp.sum(mine.astype(jnp.int32))
+    # owned_rank[e]: rank of edge e among the player's owned edges -- its bit
+    # position in the int32 used-edge mask (a player owns <= MAX_ROADS = 15 < 32
+    # edges). Non-owned edges get a clamped junk rank that is never read.
+    owned_rank = jnp.clip(jnp.cumsum(mine_i) - 1, 0, 31)
 
-    # Seed only owned edges, compacted to the front: forward seeds fill slots
-    # [0, n_owned), backward seeds fill [n_owned, 2 * n_owned); each starts a
-    # length-1 trail with only its own bit set. Non-owned edges scatter to slot
-    # _DUMP (> any live frame, never popped).
-    fwd_slot = jnp.where(mine, owned_rank, _DUMP)
-    bwd_slot = jnp.where(mine, n_owned + owned_rank, _DUMP)
+    # Endpoint-only seeding: a maximal trail can only terminate at a vertex of
+    # odd owned-degree (a pass-through consumes edges in pairs) or at an
+    # impassable vertex -- unless it is closed. Seed direction u -> v only when
+    # u is such a start; edges with neither endpoint a start keep their forward
+    # seed, covering closed trails (rotatable to begin anywhere, either way).
+    owned_deg = jnp.zeros((N_VERTICES,), jnp.int32).at[u].add(mine_i).at[v].add(mine_i)
+    is_start = (owned_deg % 2 == 1) | ~passable
+    fwd_keep = mine & is_start[u]
+    bwd_keep = mine & is_start[v]
+    fwd_keep = fwd_keep | (mine & ~fwd_keep & ~bwd_keep)  # closed-trail fallback
 
-    def seed_stack(fwd_val: jax.Array, bwd_val: jax.Array) -> jax.Array:
-        """A stack array seeded per edge: ``fwd_val[e]`` at ``fwd_slot[e]``,
-        ``bwd_val[e]`` at ``bwd_slot[e]``."""
-        zeros = jnp.zeros((STACK_CAP,), jnp.int32)
-        return zeros.at[fwd_slot].set(fwd_val).at[bwd_slot].set(bwd_val)
+    # Kept seeds compact to the front of the stack; dropped directions scatter
+    # to _DUMP. Each seed is a length-1 trail with only its own edge's bit set;
+    # the two directions differ only in the tip (the walked-to endpoint).
+    keep = jnp.concatenate([fwd_keep, bwd_keep])
+    slot = jnp.where(keep, jnp.cumsum(keep.astype(jnp.int32)) - 1, _DUMP)
 
-    # The two directions of an edge differ only in the tip (which endpoint was
-    # walked to).
-    seed_len = jnp.where(mine, jnp.int32(1), jnp.int32(0))
-    seed_used = jnp.where(mine, jnp.int32(1) << owned_rank, jnp.int32(0))
+    def seed_stack(val: jax.Array) -> jax.Array:
+        """A stack array with per-direction ``val`` scattered to the seed slots."""
+        return jnp.zeros((STACK_CAP,), jnp.int32).at[slot].set(val)
+
     init = _DfsState(
-        stack_tip=seed_stack(EDGE_V[:, 1], EDGE_V[:, 0]),
-        stack_len=seed_stack(seed_len, seed_len),
-        stack_used=seed_stack(seed_used, seed_used),
-        sp=jnp.int32(2) * n_owned,
+        stack_tip=seed_stack(jnp.concatenate([v, u])),
+        stack_len=seed_stack(jnp.ones((2 * N_EDGES,), jnp.int32)),
+        stack_used=seed_stack(jnp.tile(jnp.int32(1) << owned_rank, 2)),
+        sp=jnp.sum(keep.astype(jnp.int32)),
         best=jnp.int32(0),
     )
 
