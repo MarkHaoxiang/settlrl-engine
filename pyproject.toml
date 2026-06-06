@@ -24,6 +24,7 @@ catan-reference = { workspace = true }
 
 [tool.mypy]
 mypy_path = [
+    "packages/catan-agents/src",
     "packages/catan-engine/src",
     "packages/catan-render/src",
     "packages/catan-reference/src",

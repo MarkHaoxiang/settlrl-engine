@@ -1,0 +1,29 @@
+[project]
+name = "catan-agents"
+version = "0.1.0"
+description = "Catan-playing agents (pure-JAX policies) for catan-engine"
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "catan-engine",
+    "jax[cpu]>=0.4.0",
+    "jaxtyping>=0.3.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+catan-engine = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+disallow_any_explicit = false
+disallow_any_generics = false
