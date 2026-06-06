@@ -68,6 +68,7 @@ from catan_engine.mechanics.common import (
     agent_selection_single,
     player_total_vp,
 )
+from catan_engine.mechanics.robber import _discard_avail
 from catan_engine.board import Board
 from catan_engine.board.dev_cards import N_DEV_CARD_TYPES
 from catan_engine.board.layout import (
@@ -306,6 +307,13 @@ class BatchedCatanEnv:
         ``params`` an :class:`ActionParams` with batched leaves. Terminated lanes
         auto-reset; the resulting reward / termination reflect the transition
         that just happened, while the next observation is the reset game's.
+
+        DISCARD takes the full choice in ``params``: ``idx`` names the
+        discarding player (any player who still owes — discards are simultaneous
+        in the rulebook, so order is free) and ``resources`` the per-resource
+        counts to give up. The vector is validated (nonnegative, sums to the
+        amount owed, within hand); an invalid choice is INVALID and leaves the
+        lane unchanged, like any illegal action.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
         # The whole step -- gate the chosen action with the cached legality, apply,
@@ -650,13 +658,16 @@ def _env_step_core(
     auto-reset, returned unchanged when ``auto_reset`` is False).
     """
     # Gate: read the chosen action's legality from the cache (no avail recompute).
-    rows = jnp.arange(batch_size)
     legal = flat_legality(avail_flat, action_type, params.idx, params.target)
-    # DISCARD keys on the collapsed flat row (its amounts are not in the key); read
-    # the canonical-discard bit the cache holds for the acting discarder.
-    legal = jnp.where(
-        action_type == int(ActionType.DISCARD), avail_flat[rows, _DISCARD_FLAT], legal
+    # DISCARD's per-resource amounts are not part of the flat key (the cache holds
+    # only the canonical-discard bit), so validate the caller's actual
+    # ``(player, resources)`` choice directly: ``_discard_avail`` is cheap
+    # arithmetic (player owes, counts nonnegative, sum to the amount owed, within
+    # hand) and fuses into this kernel.
+    discard_legal = jax.vmap(_discard_avail)(
+        layout, state, (params.idx, params.resources)
     )
+    legal = jnp.where(action_type == int(ActionType.DISCARD), discard_legal, legal)
     applied, result = jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0))(
         layout, state, action_type, params, legal
     )

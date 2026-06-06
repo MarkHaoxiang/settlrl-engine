@@ -10,8 +10,13 @@ directly.
 Action representation: the AEC action space is a single flat ``Discrete`` that
 enumerates every concrete move (each vertex/edge/tile/resource choice, plus the
 parameterless actions). A flat index decodes to the engine's
-``(ActionType, ActionParams)``. Discards are collapsed to one flat action whose
-exact per-resource amounts the wrapper fills in canonically. Legality is exposed
+``(ActionType, ActionParams)``. Discards are one flat action taking its
+per-resource amounts as a vector rather than enumerating the (combinatorial)
+choice space: pass ``(flat_index, resources)`` to :meth:`CatanAECEnv.step` to
+choose exactly what to give up — the engine validates the vector (nonnegative,
+sums to the amount owed, within hand) and rejects it as illegal otherwise. A
+bare flat index falls back to the canonical greedy discard, so masked random
+play (e.g. ``action_space.sample(mask)``) keeps working. Legality is exposed
 PettingZoo-style as ``observation["action_mask"]`` (a binary vector over the flat
 action set) so ``env.action_space(agent).sample(mask)`` only picks legal moves.
 
@@ -126,7 +131,14 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         self.infos: dict[str, dict[str, Any]] = {a: {} for a in self.agents}
         self.agent_selection = self._acting_agent()
 
-    def step(self, action: int | None) -> None:
+    def step(self, action: int | tuple[int, Any] | None) -> None:
+        """Apply one flat action (see module docstring for the encoding).
+
+        ``action`` is a flat index, or ``(flat_index, resources)`` for a discard
+        with explicit per-resource amounts (a length-``N_RESOURCES`` vector of
+        nonnegative ints). The vector is only read for the DISCARD action; a bare
+        index discards canonically (greedy in resource order).
+        """
         if (
             self.terminations[self.agent_selection]
             or self.truncations[self.agent_selection]
@@ -136,7 +148,8 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
 
         agent = self.agent_selection
         self._cumulative_rewards[agent] = 0
-        self._apply(int(action))  # type: ignore[arg-type]
+        flat, discard = self._parse_action(action)  # type: ignore[arg-type]
+        self._apply(flat, discard)
 
         reward = np.asarray(self._env.rewards[0])  # (N_PLAYERS,)
         done = bool(np.asarray(self._env.terminations[0, 0]))
@@ -182,7 +195,28 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         """
         return np.asarray(self._env._avail[0]).astype(np.int8)
 
-    def _apply(self, flat: int) -> None:
+    def _parse_action(
+        self, action: int | tuple[int, Any]
+    ) -> tuple[int, np.ndarray | None]:
+        """Split ``action`` into (flat index, optional discard vector).
+
+        A bare index means "no explicit discard amounts" (canonical fill-in). A
+        vector must be length ``N_RESOURCES`` of nonnegative ints; only its
+        *shape* is checked here — legality (sums to the amount owed, within
+        hand) is the engine gate's job, and an illegal discard no-ops like any
+        other illegal action.
+        """
+        if not isinstance(action, (tuple, list)):
+            return int(action), None  # bare flat index (int or 0-d array)
+        flat, vec = action
+        discard = np.asarray(vec, dtype=np.int32)
+        if discard.shape != (N_RESOURCES,) or (discard < 0).any():
+            raise ValueError(
+                f"discard amounts must be {N_RESOURCES} nonnegative ints, got {vec!r}"
+            )
+        return int(flat), discard
+
+    def _apply(self, flat: int, discard: np.ndarray | None = None) -> None:
         sel = int(self._env.agent_selection[0])
         at = int(_ATYPE[flat])
         idx = int(_IDX[flat])
@@ -190,9 +224,12 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         resources = np.zeros(N_RESOURCES, dtype=np.int32)
         if at == int(ActionType.DISCARD):
             idx = sel
-            hand = np.asarray(self._env._state.player_resources[0, sel])
-            owed = int(np.asarray(self._env._state.pending_discard[0, sel]))
-            resources = _canonical_discard(hand, owed)
+            if discard is not None:
+                resources = discard
+            else:
+                hand = np.asarray(self._env._state.player_resources[0, sel])
+                owed = int(np.asarray(self._env._state.pending_discard[0, sel]))
+                resources = _canonical_discard(hand, owed)
         params = ActionParams(
             idx=jnp.asarray([idx], dtype=jnp.int32),
             target=jnp.asarray([target], dtype=jnp.int32),

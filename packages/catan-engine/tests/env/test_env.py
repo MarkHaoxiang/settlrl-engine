@@ -205,6 +205,62 @@ class TestBatchedCatanEnv:
         assert ospace["vertex_owner"].shape == (54,)
 
 
+class TestDiscardChoice:
+    """DISCARD takes its per-resource amounts as a vector (the choice space is not
+    flattened); the env step must validate the caller's actual vector rather than
+    assume the canonical fill-in."""
+
+    def _discard_env(self) -> BatchedCatanEnv:
+        """Lane 0 in the DISCARD phase: player 0 holds 4 sheep + 4 wheat, owes 4."""
+        e = BatchedCatanEnv(batch_size=1, seed=12, auto_reset=False)
+        e._state = e._state._replace(
+            phase=e._state.phase.at[0].set(int(GamePhase.DISCARD)),
+            player_resources=e._state.player_resources.at[0, 0].set(
+                jnp.asarray([4, 4, 0, 0, 0], dtype=jnp.uint8)
+            ),
+            pending_discard=e._state.pending_discard.at[0, 0].set(4),
+        )
+        # _avail is stale, but the DISCARD gate validates the passed vector
+        # directly (its amounts are not part of the flat key), so no refresh.
+        return e
+
+    @staticmethod
+    def _discard_params(resources: list[int]) -> ActionParams:
+        return ActionParams(
+            idx=jnp.asarray([0], dtype=jnp.int32),
+            target=jnp.asarray([0], dtype=jnp.int32),
+            resources=jnp.asarray([resources], dtype=jnp.int32),
+        )
+
+    def test_non_canonical_vector_applies(self) -> None:
+        # Canonical would take all 4 sheep; choose 1 sheep + 3 wheat instead.
+        e = self._discard_env()
+        at = jnp.asarray([int(ActionType.DISCARD)], dtype=jnp.int32)
+        e.step(at, self._discard_params([1, 3, 0, 0, 0]))
+        assert int(e.infos["result"][0]) == ActionResult.SUCCESS.value
+        assert np.array_equal(
+            np.asarray(e._state.player_resources[0, 0]), [3, 1, 0, 0, 0]
+        )
+        assert int(e._state.pending_discard[0, 0]) == 0
+        assert int(e._state.phase[0]) == GamePhase.MOVE_ROBBER
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            [3, 0, 0, 0, 0],  # wrong total (owes 4)
+            [0, 0, 4, 0, 0],  # right total, but exceeds the hand
+        ],
+    )
+    def test_invalid_vector_rejected(self, bad: list[int]) -> None:
+        e = self._discard_env()
+        before = np.asarray(e._state.player_resources)
+        at = jnp.asarray([int(ActionType.DISCARD)], dtype=jnp.int32)
+        e.step(at, self._discard_params(bad))
+        assert int(e.infos["result"][0]) == ActionResult.INVALID.value
+        assert np.array_equal(np.asarray(e._state.player_resources), before)
+        assert int(e._state.phase[0]) == GamePhase.DISCARD
+
+
 def _states_equal(a: Any, b: Any) -> bool:
     """Full BoardState equality (the PRNG key compared on its raw data)."""
     for field in a._fields:
