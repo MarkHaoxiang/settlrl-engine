@@ -102,7 +102,6 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
     # -- spaces -----------------------------------------------------------
 
     def _build_observation_space(self) -> spaces.Dict:
-        self._env.reset(self._seed)
         sample = self._env.observe(0)
         inner: dict[str, spaces.Space[Any]] = {}
         for key, value in sample.items():
@@ -189,11 +188,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         return self.possible_agents[int(self._env.agent_selection[0])]
 
     def _action_mask(self) -> np.ndarray:
-        """Binary legality vector over the flat action set for the acting player.
-
-        Read from the batched env's cached flat-legality sweep (refreshed after
-        every step) rather than recomputed.
-        """
+        """Binary legality vector over the flat action set for the acting player."""
         return np.asarray(self._env._avail[0]).astype(np.int8)
 
     def _apply(self, flat: int) -> None:

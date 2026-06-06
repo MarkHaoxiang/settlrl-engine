@@ -28,6 +28,7 @@ install_import_hook(
         "catan_engine.mechanics.setup",
         "catan_engine.mechanics.trade",
         "catan_engine.mechanics.development",
+        "catan_engine.mechanics.turn",
     ],
     "beartype.beartype",
 )

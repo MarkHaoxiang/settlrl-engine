@@ -44,11 +44,10 @@ from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState
 from catan_engine.mechanics.awards import (
     resolve_step,
-    road_build_gate,
-    settlement_break_gate,
+    road_build_needed,
+    settlement_break_needed,
 )
 from catan_engine.mechanics.common import (
-    SUCCESS,
     ActionResult,
     ActionTypeArray,
     IndexAvail,
@@ -217,19 +216,17 @@ def apply_action(
     state, result = jax.lax.switch(
         action_type, _APPLY_BRANCHES, layout, state, params, available
     )
-    # Only a successful BuildRoad can extend a road length and only a successful
-    # BuildSettlement can break one, so every other lane skips the DFS; the
-    # build gates tighten that further (see awards.py).
-    player = state.current_player.astype(jnp.int32)
+    # Only a gated BuildRoad / BuildSettlement can change a road length; every
+    # other lane skips the DFS (see awards.py).
     lr_needed = jnp.where(
         action_type == ActionType.BUILD_ROAD,
-        road_build_gate(state, player),
+        road_build_needed(state, result),
         jnp.where(
             action_type == ActionType.BUILD_SETTLEMENT,
-            settlement_break_gate(state, params.idx, player),
+            settlement_break_needed(state, params.idx, result),
             False,
         ),
-    ) & (result == SUCCESS)
+    )
     return resolve_step(state, result, lr_needed)
 
 
@@ -340,10 +337,9 @@ def flat_legality(
 ) -> jax.Array:
     """``(B,)`` legality of each lane's ``(action_type, idx, target)`` move.
 
-    Maps the action back to its flat row and gathers the bit from the cached
-    ``(B, N_FLAT)`` mask ``avail_flat``. An action that is not a row of the flat
-    table (out-of-range params) reads ``False`` (the row decode fails the identity
-    check).
+    Gathers each lane's bit from the ``(B, N_FLAT)`` mask ``avail_flat``. An
+    action that is not a row of the flat table (out-of-range params) reads
+    ``False``.
     """
     pack = (action_type * _IDX_RANGE + idx) * _TGT_RANGE + (target - _TGT_MIN)
     pack = jnp.clip(pack, 0, _REVERSE_J.shape[0] - 1)
@@ -429,12 +425,9 @@ def _sweep_pair(
 
 
 def _flat_available_for(layout: BoardLayout, state: BoardState) -> jax.Array:
-    """``(N_FLAT,)`` legality of every flat action for one game -- switch-free.
+    """``(N_FLAT,)`` legality of every flat action for one game.
 
-    Each action type's legality core is ``vmap``-ed over its own slice of the
-    flat table (board closed over, not replicated) and scattered back into the
-    flat mask, reproducing :func:`action_available` over the table without the
-    ``lax.switch`` branch blow-up.
+    Equivalent to :func:`action_available` over every row of the flat table.
     """
     out = jnp.zeros(_N_FLAT, dtype=bool)
     for core, pos, idxs in _INDEX_AVAIL:

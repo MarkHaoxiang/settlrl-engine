@@ -106,7 +106,8 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Functional core: one batched (ActionType, ActionParams) action per game.
 # ---------------------------------------------------------------------------
-_step = jax.jit(jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0)))
+_apply_action_v = jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0))
+_step = jax.jit(_apply_action_v)
 _available = jax.jit(jax.vmap(action_available, in_axes=(0, 0, 0, 0)))
 
 
@@ -115,11 +116,8 @@ def step(
 ) -> tuple[BoardState, ResultCode]:
     """Apply one (batched) action per game; return (new state, ActionResult codes).
 
-    Computes the per-action legality once (via the switch-based
-    :func:`action_available`, exact for any params) and hands it to ``apply_action``
-    -- no branch recomputes avail. ``BatchedCatanEnv`` instead reads legality from
-    its cached flat-legality sweep; this functional entry stays self-validating for
-    callers (tests / the reference oracle) that pass arbitrary actions.
+    Self-validating for arbitrary params: legality is computed internally, and
+    an illegal action leaves its lane unchanged with ``INVALID``.
     """
     available = _available(board[0], board[1], action_type, params)
     new_state, result = _step(board[0], board[1], action_type, params, available)
@@ -143,7 +141,8 @@ def _total_vp_single(state: BoardState) -> jax.Array:
     return jax.vmap(lambda p: player_total_vp(state, p))(players)
 
 
-_total_vp_b = jax.jit(jax.vmap(_total_vp_single))
+_total_vp_v = jax.vmap(_total_vp_single)
+_total_vp_b = jax.jit(_total_vp_v)
 
 
 _agent_selection_b = jax.jit(jax.vmap(agent_selection_single))
@@ -154,11 +153,8 @@ def _random_action_single(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Sample a uniformly-random *legal* flat action for one game.
 
-    The single-game core behind :meth:`BatchedCatanEnv.random_actions`: takes the
-    lane's cached flat legality mask ``avail_flat`` (``(N_FLAT,)``) and the argmax
-    of uniform noise over its legal entries. Returns the chosen action's
-    ``(action_type, idx, target)`` straight from the static flat table. The mask
-    is read from the env's cache (computed once per step), not recomputed here.
+    Takes the lane's ``(N_FLAT,)`` flat legality mask and returns the chosen
+    action's ``(action_type, idx, target)``.
     """
     # Random legal action: score legal moves with uniform noise and take the
     # argmax (illegal scored -1, so only picked if the lane has no legal move).
@@ -173,10 +169,8 @@ def _random_actions_b(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Sample a random legal action per lane: ``(action_type, idx, target)``.
 
-    Splits ``key`` per lane *inside* the trace (so the split fuses into the XLA
-    graph rather than dispatching eagerly every step) and maps
-    :func:`_random_action_single` over the batch. ``avail_flat`` is the cached
-    ``(B, N_FLAT)`` flat-legality sweep -- no avail is recomputed here.
+    ``avail_flat`` is the ``(B, N_FLAT)`` flat-legality sweep; ``key`` is split
+    per lane.
     """
     keys = jax.random.split(key, avail_flat.shape[0])
     return jax.vmap(_random_action_single, in_axes=(0, 0))(avail_flat, keys)
@@ -184,12 +178,9 @@ def _random_actions_b(
 
 @jax.jit
 def _type_mask_from_flat(avail_flat: jax.Array) -> jax.Array:
-    """``(B, N_ACTION_TYPES)`` per-action-type legality, reduced from the cache.
-
-    OR the cached ``(B, N_FLAT)`` flat mask over each action type's rows (its
-    concrete moves): an action type is legal iff some concrete move of that type
-    is. This is the single legality source -- no separate per-type avail sweep.
-    """
+    """``(B, N_ACTION_TYPES)`` per-action-type legality, reduced from the
+    ``(B, N_FLAT)`` flat mask: an action type is legal iff some concrete move
+    of that type is."""
     b = avail_flat.shape[0]
     return jnp.zeros((b, N_ACTION_TYPES), jnp.bool_).at[:, _ATYPE_J].max(avail_flat)
 
@@ -322,10 +313,6 @@ class BatchedCatanEnv:
         count reaches zero, then the phase advances to MOVE_ROBBER.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
-        # The whole step -- gate the chosen action with the cached legality, apply,
-        # score reward / termination, auto-reset finished lanes, and refresh the vps
-        # and legality cache for the next step -- is one fused jit dispatch (small
-        # batches are dispatch-bound, so collapsing ~5 kernels into 1 is the win).
         (
             self._layout,
             self._state,
@@ -469,11 +456,7 @@ class BatchedCatanEnv:
         return self._obs_for(sel)
 
     def action_mask(self) -> jax.Array:
-        """``(B, N_ACTION_TYPES)`` -- which action types the acting player can use.
-
-        Reduced from the cached flat-legality sweep (:attr:`_avail`) -- no separate
-        per-type avail computation.
-        """
+        """``(B, N_ACTION_TYPES)`` -- which action types the acting player can use."""
         return cast(jax.Array, _type_mask_from_flat(self._avail))
 
     def available_indices(self, action_type: int | ActionType) -> jax.Array:
@@ -499,11 +482,8 @@ class BatchedCatanEnv:
     ) -> tuple[ActionTypeArray, ActionParams]:
         """A uniformly-random *legal* action per lane (the random-rollout driver).
 
-        Reads the cached flat-legality sweep (:attr:`_avail`, computed once per
-        step) and samples one legal action per lane via a per-lane masked argmax --
-        no avail is recomputed here. A lane with no legal action yields an INVALID
-        action and simply stalls until its next auto-reset. ``key`` is a JAX PRNG
-        key, split per lane for the choice.
+        A lane with no legal action yields an INVALID action and simply stalls
+        until its next auto-reset. ``key`` is a JAX PRNG key, split per lane.
         """
         atype, idx, target = _random_actions_b(self._avail, key)
         return atype, ActionParams(idx=idx, target=target)
@@ -659,29 +639,18 @@ def _env_step_core(
     jax.Array,
     jax.Array,
 ]:
-    """One whole ``BatchedCatanEnv.step`` as a single fused ``jit`` dispatch.
-
-    Gates the chosen action with the cached flat legality, applies the avail-free
-    core, scores reward / termination, auto-resets finished lanes, and refreshes the
-    per-player VPs and the legality cache for the next step. Returns the new
+    """One whole ``BatchedCatanEnv.step``: gate the chosen action with the
+    cached flat legality, apply it, score reward / termination, auto-reset
+    finished lanes, and refresh the VP / legality caches. Returns the new
     ``(layout, state, reward, terminations, truncations, result, vps, avail, key)``.
-    Collapsing what were ~5 separate kernels (gate+apply, two VP sweeps, auto-reset,
-    legality refresh) into one removes the per-step dispatch overhead that dominates
-    small-batch throughput; the cache refresh rides along for free.
 
-    ``reward_mode`` (``"sparse"`` / ``"vp_delta"``), ``auto_reset``, and
-    ``number_placement`` / ``n_players`` (forwarded to the auto-reset board
-    construction) are static,
-    so their Python branches are resolved at trace time. ``key`` is threaded (split
-    for auto-reset, returned unchanged when ``auto_reset`` is False).
+    ``key`` is threaded: split for auto-reset, returned unchanged when
+    ``auto_reset`` is False.
     """
-    # Gate: read the chosen action's legality from the cache (no avail recompute).
     legal = flat_legality(avail_flat, action_type, params.idx, params.target)
-    applied, result = jax.vmap(apply_action, in_axes=(0, 0, 0, 0, 0))(
-        layout, state, action_type, params, legal
-    )
+    applied, result = _apply_action_v(layout, state, action_type, params, legal)
 
-    vps_after = jax.vmap(_total_vp_single)(applied)
+    vps_after = _total_vp_v(applied)
     done_lane = jnp.any(vps_after >= VICTORY_POINTS_TO_WIN, axis=1)  # (B,)
 
     if reward_mode == "vp_delta":
@@ -699,7 +668,7 @@ def _env_step_core(
     else:
         new_layout, new_state = layout, applied
 
-    new_vps = jax.vmap(_total_vp_single)(new_state)
+    new_vps = _total_vp_v(new_state)
     new_avail = jax.vmap(_flat_available_for)(new_layout, new_state)
     return (
         new_layout,

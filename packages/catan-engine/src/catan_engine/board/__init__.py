@@ -1,7 +1,7 @@
 """Top-level Board type and convenience helpers for constructing / shaping a
 batched game state. These are deliberately action-agnostic (they only touch
-layout + state arrays) so that ``board.py`` stays free of import cycles with the
-action layer."""
+layout + state arrays) so the ``board`` package stays free of import cycles
+with the action layer."""
 
 from __future__ import annotations
 

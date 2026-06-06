@@ -14,7 +14,13 @@ import jax.numpy as jnp
 
 from catan_engine.board import Board
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import BoardState, GamePhase, tree_select
+from catan_engine.board.state import (
+    BoardState,
+    BoolScalar,
+    GamePhase,
+    IntScalar,
+    tree_select,
+)
 from catan_engine.mechanics.common import (
     INVALID,
     SUCCESS,
@@ -24,13 +30,15 @@ from catan_engine.mechanics.common import (
 )
 
 
-def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> Mask:
+def _end_turn_avail(
+    layout: BoardLayout, state: BoardState, params: None
+) -> BoolScalar:
     return main_after_roll(state)
 
 
 def _end_turn_apply(
-    layout: BoardLayout, state: BoardState, params: None, available: Mask
-) -> tuple[BoardState, ResultCode]:
+    layout: BoardLayout, state: BoardState, params: None, available: BoolScalar
+) -> tuple[BoardState, IntScalar]:
     nxt = (state.current_player.astype(jnp.int32) + 1) % state.n_players
     cand = state._replace(
         dice_roll=jnp.uint8(0),

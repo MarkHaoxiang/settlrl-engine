@@ -151,11 +151,31 @@ def settlement_break_gate(
     return cast(jax.Array, hit)
 
 
-road_build_gate_b = jax.jit(jax.vmap(road_build_gate))
-"""Batched (per-lane) :func:`road_build_gate`."""
+def road_build_needed(state: BoardState, result: IntScalar) -> BoolScalar:
+    """Longest Road recompute gate for a just-applied BuildRoad: the build
+    succeeded and the builder (the current player) passes
+    :func:`road_build_gate`."""
+    player = state.current_player.astype(jnp.int32)
+    return cast(jax.Array, (result == SUCCESS) & road_build_gate(state, player))
 
-settlement_break_gate_b = jax.jit(jax.vmap(settlement_break_gate))
-"""Batched (per-lane) :func:`settlement_break_gate`."""
+
+def settlement_break_needed(
+    state: BoardState, vertex: IntScalar, result: IntScalar
+) -> BoolScalar:
+    """Longest Road recompute gate for a just-applied BuildSettlement on
+    ``vertex``: the build succeeded and passes :func:`settlement_break_gate`
+    for the builder (the current player)."""
+    player = state.current_player.astype(jnp.int32)
+    return cast(
+        jax.Array, (result == SUCCESS) & settlement_break_gate(state, vertex, player)
+    )
+
+
+road_build_needed_b = jax.jit(jax.vmap(road_build_needed))
+"""Batched (per-lane) :func:`road_build_needed`."""
+
+settlement_break_needed_b = jax.jit(jax.vmap(settlement_break_needed))
+"""Batched (per-lane) :func:`settlement_break_needed`."""
 
 
 def recompute_awards(
