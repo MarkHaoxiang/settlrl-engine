@@ -44,6 +44,7 @@ from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState
 from catan_engine.mechanics.awards import resolve_step
 from catan_engine.mechanics.common import (
+    SUCCESS,
     ActionResult,
     ActionTypeArray,
     IndexAvail,
@@ -212,7 +213,13 @@ def apply_action(
     state, result = jax.lax.switch(
         action_type, _APPLY_BRANCHES, layout, state, params, available
     )
-    return resolve_step(state, result)
+    # Only a successful BuildRoad can extend a road length and only a successful
+    # BuildSettlement can break one, so every other lane skips the DFS.
+    lr_needed = (
+        (action_type == ActionType.BUILD_ROAD)
+        | (action_type == ActionType.BUILD_SETTLEMENT)
+    ) & (result == SUCCESS)
+    return resolve_step(state, result, lr_needed)
 
 
 def action_available(

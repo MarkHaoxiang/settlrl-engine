@@ -171,7 +171,10 @@ def build_road_step(board: Board, edge: IndexParam) -> tuple[BoardState, ResultC
     """
     available = _build_road_avail_b(board[0], board[1], edge)
     state, result = _build_road_apply_b(board[0], board[1], edge, available)
-    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
+    return cast(
+        "tuple[BoardState, ResultCode]",
+        awards.resolve_step_b(state, result, result == SUCCESS),
+    )
 
 
 # ===========================================================================
@@ -233,7 +236,10 @@ def build_settlement_step(
     """
     available = _build_settlement_avail_b(board[0], board[1], vertex)
     state, result = _build_settlement_apply_b(board[0], board[1], vertex, available)
-    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
+    return cast(
+        "tuple[BoardState, ResultCode]",
+        awards.resolve_step_b(state, result, result == SUCCESS),
+    )
 
 
 # ===========================================================================
@@ -290,4 +296,9 @@ def build_city_step(board: Board, vertex: IndexParam) -> tuple[BoardState, Resul
     """
     available = _build_city_avail_b(board[0], board[1], vertex)
     state, result = _build_city_apply_b(board[0], board[1], vertex, available)
-    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
+    # A city upgrade moves no roads and keeps the vertex owner, so the Longest
+    # Road DFS is skipped.
+    return cast(
+        "tuple[BoardState, ResultCode]",
+        awards.resolve_step_b(state, result, jnp.zeros_like(result, jnp.bool_)),
+    )

@@ -93,6 +93,26 @@ class TestLongestRoadAward:
                 f"seed={seed}: len"
             )
 
+    def test_needed_false_keeps_stored_award(self) -> None:
+        # With ``needed=False`` the stored holder/length survive untouched even
+        # though a from-scratch recompute would reassign them; ``needed=True``
+        # recomputes as usual.
+        state = _single(_tie_state(owner=NO_INDEX))
+        kept = awards.recompute_longest_road(state, jnp.bool_(False))
+        assert int(kept.longest_road_owner) == NO_INDEX
+        assert int(kept.longest_road_len) == 0
+        # Same state, gate open: players 1 and 2 tie at 5 with no holder, so the
+        # card stays unheld -- but a sole leader is taken.
+        solo = state._replace(
+            edge_road=state.edge_road.at[_ROAD_P2[-1]].set(0)  # break the tie
+        )
+        got = awards.recompute_longest_road(solo, jnp.bool_(True))
+        assert int(got.longest_road_owner) == 1
+        assert int(got.longest_road_len) == 5
+        # And the gated version of the same call keeps the empty award.
+        ungot = awards.recompute_longest_road(solo, jnp.bool_(False))
+        assert int(ungot.longest_road_owner) == NO_INDEX
+
 
 # Two vertex-disjoint 5-segment roads (chosen from the board geometry) plus a
 # single segment for player 0, used to construct Longest Road ties.

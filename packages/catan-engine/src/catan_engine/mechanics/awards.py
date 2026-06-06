@@ -60,18 +60,23 @@ _ADJ_NBR = jnp.asarray(
 
 
 def longest_road_length(
-    edge_road: EdgeRoadVec, vertex_owner: VertexOwnerVec, player: IntScalar
+    edge_road: EdgeRoadVec,
+    vertex_owner: VertexOwnerVec,
+    player: IntScalar,
+    needed: BoolScalar | bool = True,
 ) -> IntScalar:
     """Length of the player's longest continuous road (trail).
 
     A trail may not reuse an edge and may not pass *through* a vertex occupied
     by an opponent (it may start or end there). Fully traceable / vmappable.
+    When ``needed`` is False the result is 0 and the DFS is seeded empty, so
+    under ``vmap`` a masked-off lane adds no loop iterations.
     """
     # Explicit-stack DFS: each owned edge is seeded in both directions as a
     # length-1 frame; expansion proceeds only from passable vertices, which
     # handles the opponent-as-endpoint rule.
     target = player + 1
-    mine = edge_road == target  # (N_EDGES,) bool
+    mine = (edge_road == target) & needed  # (N_EDGES,) bool
 
     # Compact rank of each owned edge (a running count over `mine`): doubles as
     # both its bit position in the int32 used-edge mask and its seed slot. A
@@ -177,18 +182,28 @@ def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.
     return new_owner.astype(jnp.uint8)
 
 
-def recompute_longest_road(state: BoardState) -> BoardState:
-    """Reassign Longest Road (need >= 5; see ``_reassign_award`` for the tie rule)."""
+def recompute_longest_road(
+    state: BoardState, needed: BoolScalar | bool = True
+) -> BoardState:
+    """Reassign Longest Road (need >= 5; see ``_reassign_award`` for the tie rule).
+
+    When ``needed`` is False the stored holder/length are kept unchanged (and the
+    DFS is seeded empty -- see :func:`longest_road_length`); callers pass False
+    for actions that cannot change any road length.
+    """
     n = state.n_players
-    lengths = jax.vmap(longest_road_length, in_axes=(None, None, 0))(
-        state.edge_road, state.vertex_owner, jnp.arange(n, dtype=jnp.int32)
+    lengths = jax.vmap(longest_road_length, in_axes=(None, None, 0, None))(
+        state.edge_road, state.vertex_owner, jnp.arange(n, dtype=jnp.int32), needed
     )
     new_owner = _reassign_award(lengths, state.longest_road_owner, 5)
     has_owner = new_owner != jnp.uint8(NO_INDEX)
     new_len = jnp.where(
         has_owner, lengths[jnp.clip(new_owner.astype(jnp.int32), 0, n - 1)], 0
     ).astype(jnp.uint8)
-    return state._replace(longest_road_owner=new_owner, longest_road_len=new_len)
+    return state._replace(
+        longest_road_owner=jnp.where(needed, new_owner, state.longest_road_owner),
+        longest_road_len=jnp.where(needed, new_len, state.longest_road_len),
+    )
 
 
 def recompute_largest_army(state: BoardState) -> BoardState:
@@ -211,12 +226,22 @@ def recompute_largest_army(state: BoardState) -> BoardState:
 # the DFS for both on every action. ``apply_action`` calls this once after the
 # switch; the standalone ``*_step`` wrappers whose action can change an award or
 # win the game route their core output through it.
+#
+# The Longest Road DFS is further gated per lane (``longest_road_needed``): only
+# a successful BuildRoad can extend a length and only a successful
+# BuildSettlement can break one (setup placements stay below the 5-road
+# threshold, and edges never disappear), so every other lane keeps its stored
+# holder/length and contributes zero iterations to the vmapped while_loop.
 # ===========================================================================
 
 
-def recompute_awards(state: BoardState) -> BoardState:
+def recompute_awards(
+    state: BoardState, longest_road_needed: BoolScalar | bool = True
+) -> BoardState:
     """Recompute both award holders (Longest Road, then Largest Army)."""
-    return recompute_largest_army(recompute_longest_road(state))
+    return recompute_largest_army(
+        recompute_longest_road(state, longest_road_needed)
+    )
 
 
 def _any_player_won(state: BoardState) -> BoolScalar:
@@ -228,16 +253,20 @@ def _any_player_won(state: BoardState) -> BoolScalar:
 
 
 def resolve_step(
-    state: BoardState, result: IntScalar
+    state: BoardState,
+    result: IntScalar,
+    longest_road_needed: BoolScalar | bool = True,
 ) -> tuple[BoardState, IntScalar]:
     """Stage 2 of an action: recompute awards, then resolve the win.
 
     Recomputes the Longest Road / Largest Army holders for the post-core state
     and upgrades a ``SUCCESS`` result to ``GAME_COMPLETE`` when the move brought a
     player to the win threshold (an ``INVALID`` move left the board unchanged, so
-    the recompute is a no-op and the code is preserved).
+    the recompute is a no-op and the code is preserved). ``longest_road_needed``
+    gates the Longest Road recompute (see :func:`recompute_longest_road`); pass
+    False for actions that cannot change any road length.
     """
-    state = recompute_awards(state)
+    state = recompute_awards(state, longest_road_needed)
     won = _any_player_won(state)
     upgraded = jnp.where((result == SUCCESS) & won, GAME_COMPLETE, result)
     return state, upgraded

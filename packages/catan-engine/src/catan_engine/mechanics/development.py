@@ -136,7 +136,10 @@ def buy_development_card_step(
     """
     available = _buy_dev_avail_b(board[0], board[1], None)
     state, result = _buy_dev_apply_b(board[0], board[1], None, available)
-    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
+    return cast(
+        "tuple[BoardState, ResultCode]",
+        awards.resolve_step_b(state, result, jnp.zeros_like(result, jnp.bool_)),
+    )
 
 
 # ===========================================================================
@@ -389,4 +392,7 @@ def play_knight_step(
     """
     available = _knight_avail_b(board[0], board[1], params)
     state, result = _knight_apply_b(board[0], board[1], params, available)
-    return cast("tuple[BoardState, ResultCode]", awards.resolve_step_b(state, result))
+    return cast(
+        "tuple[BoardState, ResultCode]",
+        awards.resolve_step_b(state, result, jnp.zeros_like(result, jnp.bool_)),
+    )
