@@ -4,12 +4,19 @@ Throughput benchmarks for the RL environments under random legal play, built on
 [pytest-benchmark](https://pytest-benchmark.readthedocs.io/). Two rollouts are
 measured:
 
-- **`test_batched_env_random_rollout[N]`** — a batch of games stepped in lockstep
-  through `BatchedCatanEnv` (the vectorised surface), one random legal action per
-  lane per step. Swept over batch sizes `N` ∈ {1, 10, 100} (grouped together in
-  the output) to show how the per-step cost amortises across the batch.
-- **`test_aec_env_random_rollout`** — a single game played turn-at-a-time through
-  the PettingZoo `CatanAECEnv`.
+- **`test_batched_env_random_rollout[N-Pp]`** — a batch of games stepped in
+  lockstep through `BatchedCatanEnv` (the vectorised surface), one random legal
+  action per lane per step. Swept over batch sizes `N` ∈ {1, 8, 64, 512}
+  (grouped per player count in the output) to show how the per-step cost
+  amortises across the batch.
+- **`test_aec_env_random_rollout[Pp]`** — a single game played turn-at-a-time
+  through the PettingZoo `CatanAECEnv`.
+
+Both are swept over player counts `P` ∈ {2, 4} and over devices: `cpu` always,
+plus `cuda` when an NVIDIA GPU is usable (see below) — otherwise the CUDA
+variants are skipped. Each variant pins its device explicitly, so the CPU
+numbers stay CPU numbers even on a machine where the GPU is JAX's default
+backend.
 
 Both pick only *legal* moves (screened by the engine's own action mask), so every
 action type is exercised, including the forced discard / move-robber after a 7.
@@ -42,9 +49,25 @@ numbers are steady-state throughput, not first-call latency.
 
 # Run a single benchmark.
 ./run_benchmarks.sh -k batched
+
+# Only the GPU variants.
+./run_benchmarks.sh -k cuda
 ```
 
 See `pytest-benchmark --help` for the full set of `--benchmark-*` flags.
+
+## Running on GPU
+
+The CUDA variants need the engine's `cuda` extra (Linux + NVIDIA driver only;
+the wheels bundle the CUDA runtime, so no system CUDA toolkit is required):
+
+```bash
+uv sync --package catan-engine --extra cuda
+```
+
+After that, `./run_benchmarks.sh` picks up the GPU automatically and runs both
+the `cpu` and `cuda` variants. Without the extra (or without a GPU), the `cuda`
+variants report as skipped.
 
 ## Profiling
 
