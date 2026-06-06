@@ -7,8 +7,8 @@ from jaxtyping import Array, Bool, Int, Key, UInt8
 
 from catan_engine.board.dev_cards import (
     DEV_CARD_COUNTS,
-    DevCardDeckArray,
     N_DEV_CARD_TYPES,
+    DevCardDeckArray,
     PlayerDevCardHandArray,
     PlayerPlayedKnightsArray,
 )

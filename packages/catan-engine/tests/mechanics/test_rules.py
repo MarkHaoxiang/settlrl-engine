@@ -1,7 +1,7 @@
-"""Equivalence tests: the traceable rule modules (``awards`` / ``dice`` / ``trade``
-and the ``common`` economy helpers) must match the trusted single-game oracle
-(the ``catan-reference`` package, via ``tests.conversion``) across randomized
-boards."""
+"""Equivalence tests: the traceable rule modules (``longest_road`` / ``dice`` /
+``trade`` and the ``common`` economy helpers) must match the trusted single-game
+oracle (the ``catan-reference`` package, via ``tests.conversion``) across
+randomized boards."""
 
 import jax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ from expecttest import TestCase
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from catan_engine.mechanics import awards, common, dice, trade
+from catan_engine.mechanics import common, dice, longest_road, trade
 from tests import conversion as reference
 from tests.mechanics._occupancy import random_occupancy, single as _single
 from catan_engine.board.layout import (
@@ -30,7 +30,7 @@ _VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
 
 
 # Compile the single-game DFS once; reused across calls (static shapes).
-_LRL = jax.jit(awards.longest_road_length)
+_LRL = jax.jit(longest_road.longest_road_length)
 
 
 def _random_occupancy(seed: int) -> tuple[np.ndarray, np.ndarray]:

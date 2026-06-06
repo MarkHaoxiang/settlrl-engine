@@ -22,6 +22,7 @@ install_import_hook(
     [
         "catan_engine.mechanics.placement",
         "catan_engine.mechanics.awards",
+        "catan_engine.mechanics.longest_road",
         "catan_engine.mechanics.dice",
         "catan_engine.mechanics.robber",
         "catan_engine.mechanics.setup",

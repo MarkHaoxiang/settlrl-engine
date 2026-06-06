@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from catan_engine.mechanics import awards
+from catan_engine.mechanics import awards, longest_road
 from catan_engine.mechanics.action import ActionParams, ActionType, apply_action
 from catan_engine.board import make_board
 from catan_engine.board.layout import N_EDGES
@@ -147,7 +147,11 @@ class TestLongestRoadTie:
     def test_tie_lengths_are_as_expected(self) -> None:
         s = _single(_tie_state(NO_INDEX))
         lens = [
-            int(awards.longest_road_length(s.edge_road, s.vertex_owner, jnp.int32(p)))
+            int(
+                longest_road.longest_road_length(
+                    s.edge_road, s.vertex_owner, jnp.int32(p)
+                )
+            )
             for p in range(N_PLAYERS)
         ]
         assert lens == [1, 5, 5, 0]

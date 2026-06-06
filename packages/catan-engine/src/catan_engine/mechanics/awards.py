@@ -1,8 +1,8 @@
-"""Longest Road and Largest Army computation and award reassignment.
+"""Longest Road and Largest Army award reassignment and step resolution.
 
-The longest-road length is the hard piece: it is the longest *trail* (no repeated
-edge) in the player's road subgraph that may not pass *through* an opponent-owned
-vertex (it may start or end there).
+The longest-road *length* itself (the trail DFS) lives in
+:mod:`catan_engine.mechanics.longest_road`; this module turns per-player
+lengths/knights into award holders and resolves the win.
 """
 
 from __future__ import annotations
@@ -12,151 +12,30 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
-from catan_engine.board.layout import EDGE_V, MAX_VERTEX_DEGREE, N_EDGES, N_VERTICES
+from catan_engine.board.layout import MAX_VERTEX_DEGREE, N_EDGES, N_VERTICES
 from catan_engine.board.state import (
     NO_INDEX,
     VICTORY_POINTS_TO_WIN,
     BoardState,
     BoolScalar,
-    EdgeRoadVec,
     IntScalar,
-    VertexOwnerVec,
 )
 from catan_engine.mechanics.common import (
     GAME_COMPLETE,
     SUCCESS,
     player_total_vp,
 )
+from catan_engine.mechanics.longest_road import (
+    ADJ_DEG,
+    ADJ_EDGE,
+    ADJ_INDPTR,
+    longest_road_length,
+)
 
 # int32 "unclaimed" award marker (the uint8 NO_INDEX as stored on BoardState).
 # This is the award-holder sentinel, unrelated to any geometry padding.
 _NONE = jnp.int32(NO_INDEX)
-
-# Generous bound for the longest-road DFS stack. We seed at most 2 * MAX_ROADS
-# (=30) owned-edge frames and the live DFS frontier adds only depth * (maxdeg-1)
-# ~= 15 * 2 on top; this leaves a wide margin. _DUMP is a scratch slot above any
-# live frame where non-owned edges park their (never-popped) seeds.
-STACK_CAP = 2 * N_EDGES + 128
-_DUMP = STACK_CAP - 1
-
-# Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built
-# once at import. Each undirected edge is listed under both endpoints; entries
-# are grouped by source vertex so vertex v owns the slice
-# [_ADJ_INDPTR[v], _ADJ_INDPTR[v + 1]). The DFS reads slots by degree mask
-# (slot < deg), never a padding value.
-_E = np.asarray(EDGE_V)
-_src = np.concatenate([_E[:, 0], _E[:, 1]])
-_order = np.argsort(_src, kind="stable")
-_src = _src[_order]
-_counts = np.bincount(_src, minlength=N_VERTICES)
-_ADJ_INDPTR = jnp.asarray(np.concatenate([[0], np.cumsum(_counts)]), dtype=jnp.int32)
-_ADJ_EDGE = jnp.asarray(
-    np.concatenate([np.arange(N_EDGES), np.arange(N_EDGES)])[_order], dtype=jnp.int32
-)
-_ADJ_NBR = jnp.asarray(
-    np.concatenate([_E[:, 1], _E[:, 0]])[_order], dtype=jnp.int32
-)
-
-
-def longest_road_length(
-    edge_road: EdgeRoadVec,
-    vertex_owner: VertexOwnerVec,
-    player: IntScalar,
-    needed: BoolScalar | bool = True,
-) -> IntScalar:
-    """Length of the player's longest continuous road (trail).
-
-    A trail may not reuse an edge and may not pass *through* a vertex occupied
-    by an opponent (it may start or end there). Fully traceable / vmappable.
-    When ``needed`` is False the result is 0 and the DFS is seeded empty, so
-    under ``vmap`` a masked-off lane adds no loop iterations.
-    """
-    # Explicit-stack DFS: each owned edge is seeded in both directions as a
-    # length-1 frame; expansion proceeds only from passable vertices, which
-    # handles the opponent-as-endpoint rule.
-    owner_code = player + 1  # edge_road / vertex_owner store player + 1, 0 = empty
-    mine = (edge_road == owner_code) & needed  # (N_EDGES,) bool
-
-    # owned_rank[e]: rank of edge e among the player's owned edges -- the k-th
-    # owned edge, in edge-id order, has rank k-1. A rank doubles as the edge's
-    # bit position in the int32 used-edge mask (a player owns <= MAX_ROADS = 15
-    # < 32 edges) and as its seed slot. Non-owned edges get a clamped junk rank
-    # the `mine[e]` guard never reads, and seed into a throwaway slot that is
-    # never popped.
-    owned_rank = jnp.clip(jnp.cumsum(mine.astype(jnp.int32)) - 1, 0, 31)  # (N_EDGES,)
-    n_owned = jnp.sum(mine.astype(jnp.int32))
-
-    # Seed only owned edges, compacted to the front: forward seeds (land on
-    # EDGE_V[:, 1]) fill slots [0, n_owned), backward (land on EDGE_V[:, 0]) fill
-    # [n_owned, 2 * n_owned); each starts a length-1 trail with only its own bit
-    # set. Non-owned edges scatter to slot _DUMP (> any live frame, never popped).
-    seed_used = jnp.where(mine, jnp.int32(1) << owned_rank, jnp.int32(0))
-    seed_len = jnp.where(mine, jnp.int32(1), jnp.int32(0))
-    fwd_slot = jnp.where(mine, owned_rank, _DUMP)
-    bwd_slot = jnp.where(mine, n_owned + owned_rank, _DUMP)
-
-    # A stack frame (slot i across the three arrays) is one partial trail:
-    # the vertex its tip stands on, its length, and its used-edge set.
-    stack_tip = (
-        jnp.zeros((STACK_CAP,), jnp.int32)
-        .at[fwd_slot]
-        .set(EDGE_V[:, 1])
-        .at[bwd_slot]
-        .set(EDGE_V[:, 0])
-    )
-    stack_len = (
-        jnp.zeros((STACK_CAP,), jnp.int32)
-        .at[fwd_slot]
-        .set(seed_len)
-        .at[bwd_slot]
-        .set(seed_len)
-    )
-    stack_used = (
-        jnp.zeros((STACK_CAP,), jnp.int32)
-        .at[fwd_slot]
-        .set(seed_used)
-        .at[bwd_slot]
-        .set(seed_used)
-    )
-    sp = jnp.int32(2) * n_owned
-    best = jnp.int32(0)
-
-    def cond(carry: tuple) -> jax.Array:
-        return cast(jax.Array, carry[3] > 0)
-
-    def body(carry: tuple) -> tuple:
-        stack_tip, stack_len, stack_used, sp, best = carry
-        sp = sp - 1
-        tip = stack_tip[sp]
-        used = stack_used[sp]
-        length = stack_len[sp]
-        best = jnp.maximum(best, length)
-        owner = vertex_owner[tip]
-        passable = (owner == 0) | (owner == owner_code)
-
-        start = _ADJ_INDPTR[tip]
-        deg = _ADJ_INDPTR[tip + 1] - start
-        st = (stack_tip, stack_len, stack_used, sp)
-        for slot in range(MAX_VERTEX_DEGREE):
-            s_tip, s_len, s_used, sp_i = st
-            idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
-            e = _ADJ_EDGE[idx]
-            nbr = _ADJ_NBR[idx]
-            bit = jnp.int32(1) << owned_rank[e]
-            valid = (slot < deg) & passable & mine[e] & ((used & bit) == 0)
-            s_tip = s_tip.at[sp_i].set(jnp.where(valid, nbr, s_tip[sp_i]))
-            s_len = s_len.at[sp_i].set(jnp.where(valid, length + 1, s_len[sp_i]))
-            s_used = s_used.at[sp_i].set(jnp.where(valid, used | bit, s_used[sp_i]))
-            sp_i = sp_i + valid.astype(jnp.int32)
-            st = (s_tip, s_len, s_used, sp_i)
-
-        stack_tip, stack_len, stack_used, sp = st
-        return (stack_tip, stack_len, stack_used, sp, best)
-
-    carry = jax.lax.while_loop(cond, body, (stack_tip, stack_len, stack_used, sp, best))
-    return cast(jax.Array, carry[4])
 
 
 def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.Array:
@@ -258,13 +137,13 @@ def settlement_break_gate(
     """Whether a settlement just built on ``vertex`` by ``player`` could break
     an opponent's road: some single opponent owns >= 2 of the vertex's edges."""
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
-    start = _ADJ_INDPTR[v]
-    deg = _ADJ_INDPTR[v + 1] - start
+    start = ADJ_INDPTR[v]
+    deg = ADJ_DEG[v]
     target = player.astype(jnp.int32) + 1
     owners = []
     for slot in range(MAX_VERTEX_DEGREE):
         idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
-        o = state.edge_road[_ADJ_EDGE[idx]].astype(jnp.int32)
+        o = state.edge_road[ADJ_EDGE[idx]].astype(jnp.int32)
         owners.append(jnp.where(slot < deg, o, 0))
     hit = jnp.bool_(False)
     for a, b in combinations(owners, 2):
@@ -283,9 +162,7 @@ def recompute_awards(
     state: BoardState, longest_road_needed: BoolScalar | bool = True
 ) -> BoardState:
     """Recompute both award holders (Longest Road, then Largest Army)."""
-    return recompute_largest_army(
-        recompute_longest_road(state, longest_road_needed)
-    )
+    return recompute_largest_army(recompute_longest_road(state, longest_road_needed))
 
 
 def _any_player_won(state: BoardState) -> BoolScalar:
