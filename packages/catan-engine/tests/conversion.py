@@ -157,7 +157,7 @@ def _build_game(layout: ref.Layout, state: BoardState, b: int) -> ref.Game:
     knights = np.asarray(state.knights_played[b])
     pending = np.asarray(state.pending_discard[b])
     current_player = int(state.current_player[b])
-    n_players = int(state.n_players[b])
+    n_players = state.n_players
 
     players: list[ref.Player] = []
     for p in range(n_players):

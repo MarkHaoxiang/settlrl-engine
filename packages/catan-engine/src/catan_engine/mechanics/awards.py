@@ -14,7 +14,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from catan_engine.board.layout import EDGE_V, MAX_VERTEX_DEGREE, N_EDGES, N_VERTICES
-from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import (
     NO_INDEX,
     VICTORY_POINTS_TO_WIN,
@@ -166,7 +165,7 @@ def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.
     leaders = qualifies & (counts == top)
     n_leaders = jnp.sum(leaders.astype(jnp.int32))
     holder_leads = jnp.where(
-        owner == _NONE, False, leaders[jnp.clip(owner, 0, N_PLAYERS - 1)]
+        owner == _NONE, False, leaders[jnp.clip(owner, 0, counts.shape[0] - 1)]
     )
     first_leader = jnp.argmax(leaders).astype(jnp.int32)
     taken = jnp.where(
@@ -180,13 +179,14 @@ def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.
 
 def recompute_longest_road(state: BoardState) -> BoardState:
     """Reassign Longest Road (need >= 5; see ``_reassign_award`` for the tie rule)."""
+    n = state.n_players
     lengths = jax.vmap(longest_road_length, in_axes=(None, None, 0))(
-        state.edge_road, state.vertex_owner, jnp.arange(N_PLAYERS, dtype=jnp.int32)
+        state.edge_road, state.vertex_owner, jnp.arange(n, dtype=jnp.int32)
     )
     new_owner = _reassign_award(lengths, state.longest_road_owner, 5)
     has_owner = new_owner != jnp.uint8(NO_INDEX)
     new_len = jnp.where(
-        has_owner, lengths[jnp.clip(new_owner.astype(jnp.int32), 0, N_PLAYERS - 1)], 0
+        has_owner, lengths[jnp.clip(new_owner.astype(jnp.int32), 0, n - 1)], 0
     ).astype(jnp.uint8)
     return state._replace(longest_road_owner=new_owner, longest_road_len=new_len)
 
@@ -222,7 +222,7 @@ def recompute_awards(state: BoardState) -> BoardState:
 def _any_player_won(state: BoardState) -> BoolScalar:
     """True if any player's total VP has reached the win threshold."""
     vps = jnp.stack(
-        [player_total_vp(state, jnp.int32(p)) for p in range(N_PLAYERS)]
+        [player_total_vp(state, jnp.int32(p)) for p in range(state.n_players)]
     )
     return jnp.any(vps >= VICTORY_POINTS_TO_WIN)
 

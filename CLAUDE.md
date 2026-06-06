@@ -20,3 +20,5 @@ Before finishing any session, ensure the mypy checker passes:
 ```bash
 uv run --package catan-engine mypy packages/catan-engine/src packages/catan-engine/tests
 ```
+
+When CUDA is available (check `jax.devices("cuda")` or `nvidia-smi`), always run benchmarks directly on the GPU (`-k cuda`) — skip the CPU benchmark runs. Without CUDA, run CPU-only (`JAX_PLATFORMS=cpu`, or `-k cpu` for the benchmarks).

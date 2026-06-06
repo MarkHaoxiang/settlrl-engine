@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, UInt8
 
-N_PLAYERS = 4
+N_PLAYERS = 4  # maximum seats; per-player arrays are sized to the seated count
 N_RESOURCES = 5  # Tile indices 0-4: SHEEP, WHEAT, WOOD, BRICK, ORE (excludes DESERT)
 BANK_INITIAL = 19  # starting count of each resource type in the bank
 
@@ -11,11 +11,9 @@ ROAD_COST: tuple[int, ...] = (0, 0, 1, 1, 0)
 SETTLEMENT_COST: tuple[int, ...] = (1, 1, 1, 1, 0)
 CITY_COST: tuple[int, ...] = (0, 2, 0, 0, 3)
 
-PlayerResourcesArray = UInt8[
-    Array, f"batch players={N_PLAYERS} resources={N_RESOURCES}"
-]
+PlayerResourcesArray = UInt8[Array, f"batch players resources={N_RESOURCES}"]
 # Single-game (un-batched) view, used by the rule modules.
-PlayerResourcesVec = UInt8[Array, f"players={N_PLAYERS} resources={N_RESOURCES}"]
+PlayerResourcesVec = UInt8[Array, f"players resources={N_RESOURCES}"]
 
 
 def bank_stock(player_resources: jax.Array, resource: jax.Array) -> jax.Array:

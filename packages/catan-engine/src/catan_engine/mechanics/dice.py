@@ -13,7 +13,7 @@ import jax.numpy as jnp
 
 from catan_engine.board import Board
 from catan_engine.board.layout import N_TILES, TILE_V, BoardLayout
-from catan_engine.board.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
+from catan_engine.board.resources import BANK_INITIAL, N_RESOURCES
 from catan_engine.board.state import (
     CITY,
     SETTLEMENT,
@@ -62,11 +62,11 @@ def distribute_resources(
         * produces[:, None]
     )
     amt = jnp.where(c_owner > 0, amt, 0).astype(jnp.int32)
-    pl = jnp.clip(c_owner.astype(jnp.int32) - 1, 0, N_PLAYERS - 1)
+    pl = jnp.clip(c_owner.astype(jnp.int32) - 1, 0, state.n_players - 1)
     res_idx = jnp.broadcast_to(
         layout.tile_resource[:, None].astype(jnp.int32), (N_TILES, 6)
     )
-    gains = jnp.zeros((N_PLAYERS, N_RESOURCES), jnp.int32).at[
+    gains = jnp.zeros((state.n_players, N_RESOURCES), jnp.int32).at[
         pl.reshape(-1), res_idx.reshape(-1)
     ].add(amt.reshape(-1))
 

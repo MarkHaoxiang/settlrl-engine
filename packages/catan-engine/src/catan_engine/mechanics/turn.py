@@ -31,9 +31,7 @@ def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> Mas
 def _end_turn_apply(
     layout: BoardLayout, state: BoardState, params: None, available: Mask
 ) -> tuple[BoardState, ResultCode]:
-    nxt = (state.current_player.astype(jnp.int32) + 1) % state.n_players.astype(
-        jnp.int32
-    )
+    nxt = (state.current_player.astype(jnp.int32) + 1) % state.n_players
     cand = state._replace(
         dice_roll=jnp.uint8(0),
         has_rolled=jnp.uint8(0),

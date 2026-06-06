@@ -27,9 +27,7 @@ def test_setup_order_is_snake() -> None:
     assert setup.setup_order(2) == [0, 1, 1, 0]
     # The traceable snake (`_setup_player`) agrees with the host-side order.
     for n in range(2, N_PLAYERS + 1):
-        got = [
-            int(setup._setup_player(jnp.int32(i), jnp.int32(n))) for i in range(2 * n)
-        ]
+        got = [int(setup._setup_player(jnp.int32(i), n)) for i in range(2 * n)]
         assert got == setup.setup_order(n)
 
 

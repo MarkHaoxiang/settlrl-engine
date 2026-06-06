@@ -20,7 +20,7 @@ import jax.numpy as jnp
 from catan_engine.board import Board
 from catan_engine.board.dev_cards import DevCard, DevDeckVec, N_DEV_CARD_TYPES
 from catan_engine.board.layout import N_TILES, BoardLayout
-from catan_engine.board.resources import N_PLAYERS, N_RESOURCES, bank_stock
+from catan_engine.board.resources import N_RESOURCES, bank_stock
 from catan_engine.board.state import (
     BoardState,
     BoolScalar,
@@ -50,7 +50,7 @@ from catan_engine.mechanics.common import (
 def playable_dev(state: BoardState, player: IntScalar, card: int) -> BoolScalar:
     """True if ``player`` holds a playable copy of ``card`` (not bought this turn).
 
-    Single-actor invariant: ``dev_hand`` is per-player ``(N_PLAYERS, N_DEV_CARD_TYPES)``
+    Single-actor invariant: ``dev_hand`` is per-player ``(n_players, N_DEV_CARD_TYPES)``
     but ``dev_bought`` is per-GAME ``(N_DEV_CARD_TYPES,)``, so subtracting the
     game-global ``dev_bought[card]`` from a specific player's hand is only correct
     because exactly one player acts per turn (``current_player``) and ``dev_bought``
@@ -159,9 +159,11 @@ def _monopoly_apply(
 ) -> tuple[BoardState, IntScalar]:
     player = state.current_player.astype(jnp.int32)
     r = jnp.clip(resource, 0, N_RESOURCES - 1)
-    res = state.player_resources.astype(jnp.int32)  # (N_PLAYERS, N_RESOURCES)
+    res = state.player_resources.astype(jnp.int32)  # (n_players, N_RESOURCES)
     taken = res[:, r].sum() - res[player, r]
-    col = jnp.zeros((N_PLAYERS,), jnp.int32).at[player].set(res[player, r] + taken)
+    col = (
+        jnp.zeros((state.n_players,), jnp.int32).at[player].set(res[player, r] + taken)
+    )
     res = res.at[:, r].set(col)
     new_hand = state.dev_hand.astype(jnp.int32).at[player, DevCard.MONOPOLY].add(-1)
     cand = state._replace(

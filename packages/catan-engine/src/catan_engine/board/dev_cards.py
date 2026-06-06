@@ -2,8 +2,6 @@ from enum import IntEnum
 
 from jaxtyping import Array, UInt8
 
-from catan_engine.board.resources import N_PLAYERS
-
 N_DEV_CARD_TYPES = 5
 
 # Remaining counts per type in a full, undrawn deck.
@@ -16,9 +14,9 @@ DEV_CARD_COST: tuple[int, ...] = (1, 1, 0, 0, 1)
 
 DevCardDeckArray = UInt8[Array, f"batch dev_card_types={N_DEV_CARD_TYPES}"]
 PlayerDevCardHandArray = UInt8[
-    Array, f"batch players={N_PLAYERS} dev_card_types={N_DEV_CARD_TYPES}"
+    Array, f"batch players dev_card_types={N_DEV_CARD_TYPES}"
 ]
-PlayerPlayedKnightsArray = UInt8[Array, f"batch players={N_PLAYERS}"]
+PlayerPlayedKnightsArray = UInt8[Array, "batch players"]
 # Single-game (un-batched) view of the deck, used by the rule modules.
 DevDeckVec = UInt8[Array, f"dev_card_types={N_DEV_CARD_TYPES}"]
 

@@ -18,7 +18,7 @@ Batched adaptations of the AEC surface (documented per attribute below):
 - ``agent_selection`` is a ``(B,)`` int array (the acting player per lane), not
   a single agent id -- different lanes may be on different players' turns. In
   the DISCARD phase it points at the next player who still owes cards.
-- ``rewards`` / ``terminations`` / ``truncations`` are ``(B, N_PLAYERS)`` arrays
+- ``rewards`` / ``terminations`` / ``truncations`` are ``(B, n_players)`` arrays
   rather than ``{agent: value}`` dicts.
 - ``infos`` is a single dict of batched arrays (the acting agent varies per
   lane), carrying the action mask under ``"action_mask"`` per AEC convention.
@@ -139,7 +139,7 @@ Observation = dict[str, jax.Array]
 
 def _total_vp_single(state: BoardState) -> jax.Array:
     """Total VP (buildings + awards + VP cards) for every player in one game."""
-    players = jnp.arange(N_PLAYERS, dtype=jnp.int32)
+    players = jnp.arange(state.n_players, dtype=jnp.int32)
     return jax.vmap(lambda p: player_total_vp(state, p))(players)
 
 
@@ -227,10 +227,8 @@ class BatchedCatanEnv:
         batch_size: number of games run in parallel (the leading array axis).
         seed: PRNG seed for the initial boards and auto-reset randomness.
         n_players: players seated per game (2..4, default 4; same for every
-            lane). The per-player arrays keep their fixed ``N_PLAYERS`` axis --
-            rows at or beyond ``n_players`` belong to no one and stay zero
-            (those players never act, so ``rewards`` / ``terminations`` columns
-            past ``n_players`` are meaningless padding).
+            lane). Sizes the per-player axis of the state, observations, and
+            ``rewards`` / ``terminations`` / ``truncations``.
         reward: ``"sparse"`` (+1 to the winner on the terminal step, 0 else) or
             ``"vp_delta"`` (each player's change in total VP this step).
         auto_reset: when True (default), a lane that terminates is replaced with a
@@ -299,7 +297,7 @@ class BatchedCatanEnv:
         self._state = self._state._replace(
             robber=desert_tile(self._layout.tile_resource)
         )
-        B, P = self.batch_size, N_PLAYERS
+        B, P = self.batch_size, self.n_players
         self._reward = jnp.zeros((B, P), dtype=jnp.float32)
         self._terminations = jnp.zeros((B, P), dtype=jnp.bool_)
         self._truncations = jnp.zeros((B, P), dtype=jnp.bool_)
@@ -389,17 +387,17 @@ class BatchedCatanEnv:
 
     @property
     def rewards(self) -> jax.Array:
-        """``(B, N_PLAYERS)`` reward from the last :meth:`step`."""
+        """``(B, n_players)`` reward from the last :meth:`step`."""
         return self._reward
 
     @property
     def terminations(self) -> jax.Array:
-        """``(B, N_PLAYERS)`` per-lane game-over flags (broadcast across players)."""
+        """``(B, n_players)`` per-lane game-over flags (broadcast across players)."""
         return self._terminations
 
     @property
     def truncations(self) -> jax.Array:
-        """``(B, N_PLAYERS)`` truncation flags (always False -- no time limit)."""
+        """``(B, n_players)`` truncation flags (always False -- no time limit)."""
         return self._truncations
 
     @property
@@ -433,23 +431,25 @@ class BatchedCatanEnv:
             "tile_resource": Box((N_TILES,), "uint8", 0, 5),
             "tile_number": Box((N_TILES,), "uint8", 0, 12),
             "port_allocation": Box((N_PORTS,), "uint8", 0, 5),
-            "vertex_owner": Box((N_VERTICES,), "uint8", 0, N_PLAYERS),
+            "vertex_owner": Box((N_VERTICES,), "uint8", 0, self.n_players),
             "vertex_type": Box((N_VERTICES,), "uint8", 0, 2),
-            "edge_road": Box((N_EDGES,), "uint8", 0, N_PLAYERS),
+            "edge_road": Box((N_EDGES,), "uint8", 0, self.n_players),
             "robber": Discrete(N_TILES),
-            "victory_points": Box((N_PLAYERS,), "uint8", 0, VICTORY_POINTS_TO_WIN),
-            "knights_played": Box((N_PLAYERS,), "uint8", 0, 14),
-            "hand_size": Box((N_PLAYERS,), "int32", 0, 255),
-            "dev_card_count": Box((N_PLAYERS,), "int32", 0, 25),
-            "longest_road_owner": Discrete(N_PLAYERS + 1),
-            "largest_army_owner": Discrete(N_PLAYERS + 1),
+            "victory_points": Box(
+                (self.n_players,), "uint8", 0, VICTORY_POINTS_TO_WIN
+            ),
+            "knights_played": Box((self.n_players,), "uint8", 0, 14),
+            "hand_size": Box((self.n_players,), "int32", 0, 255),
+            "dev_card_count": Box((self.n_players,), "int32", 0, 25),
+            "longest_road_owner": Discrete(self.n_players + 1),
+            "largest_army_owner": Discrete(self.n_players + 1),
             "longest_road_len": Discrete(N_EDGES + 1),
             "bank": Box((N_RESOURCES,), "uint8", 0, BANK_INITIAL),
             "phase": Discrete(len(GamePhase)),
-            "current_player": Discrete(N_PLAYERS),
+            "current_player": Discrete(self.n_players),
             "dice_roll": Discrete(13),
             "has_rolled": Discrete(2),
-            "self": Discrete(N_PLAYERS),
+            "self": Discrete(self.n_players),
             "self_resources": Box((N_RESOURCES,), "uint8", 0, BANK_INITIAL),
             "self_dev_hand": Box((N_DEV_CARD_TYPES,), "uint8", 0, 25),
             "self_pending_discard": Discrete(256),
@@ -460,7 +460,7 @@ class BatchedCatanEnv:
     def observe(self, agent: int | str) -> Observation:
         """Partial observation from ``agent``'s point of view, across all lanes.
 
-        ``agent`` may be a player index (0..N_PLAYERS-1) or ``"player_i"``. The
+        ``agent`` may be a player index (0..n_players-1) or ``"player_i"``. The
         observer sees its own hand / dev cards in full but only public counts for
         opponents.
         """
@@ -688,8 +688,8 @@ def _env_step_core(
         reward = (vps_after - vps_before).astype(jnp.float32)
     else:  # "sparse": +1 to each winner on the terminal step (only a done lane wins).
         reward = (vps_after >= VICTORY_POINTS_TO_WIN).astype(jnp.float32)
-    terminations = jnp.broadcast_to(done_lane[:, None], (batch_size, N_PLAYERS))
-    truncations = jnp.zeros((batch_size, N_PLAYERS), dtype=jnp.bool_)
+    terminations = jnp.broadcast_to(done_lane[:, None], (batch_size, n_players))
+    truncations = jnp.zeros((batch_size, n_players), dtype=jnp.bool_)
 
     if auto_reset:
         key, subkey = jax.random.split(key)

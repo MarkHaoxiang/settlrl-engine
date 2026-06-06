@@ -47,8 +47,8 @@ VertexTypeArray = UInt8[
     Array, f"batch vertices={N_VERTICES}"
 ]  # 0=none, 1=settlement, 2=city
 EdgeRoadArray = UInt8[Array, f"batch edges={N_EDGES}"]  # 0=none, 1-4=player
-VictoryPointsArray = UInt8[Array, f"batch players={N_PLAYERS}"]
-PlayerDiscardArray = UInt8[Array, f"batch players={N_PLAYERS}"]  # cards still owed
+VictoryPointsArray = UInt8[Array, "batch players"]
+PlayerDiscardArray = UInt8[Array, "batch players"]  # cards still owed
 # Per-game scalars: phase, current_player, robber tile, counters, flags, awards.
 GameScalarArray = UInt8[Array, "batch"]
 KeyArray = Key[Array, "batch"]
@@ -62,7 +62,7 @@ KeyArray = Key[Array, "batch"]
 EdgeRoadVec = UInt8[Array, f"edges={N_EDGES}"]
 VertexOwnerVec = UInt8[Array, f"vertices={N_VERTICES}"]
 VertexTypeVec = UInt8[Array, f"vertices={N_VERTICES}"]
-PlayerMaskVec = Bool[Array, f"players={N_PLAYERS}"]
+PlayerMaskVec = Bool[Array, "players"]
 IntScalar = Int[Array, ""]  # a single int index / count (player, vertex, roll, ...)
 BoolScalar = Bool[Array, ""]  # a single legality / flag
 KeyScalar = Key[Array, ""]  # a single PRNG key
@@ -102,13 +102,9 @@ class BoardState(NamedTuple):
     Road, Largest Army and hidden Victory Point cards are added on top when a
     total is needed (see catan_engine.mechanics.action.player_total_vp).
 
-    ``n_players`` is the per-game number of seated players (2..N_PLAYERS). The
-    per-player arrays keep their fixed ``N_PLAYERS`` axis regardless; rows at or
-    beyond ``n_players`` belong to no one -- those players never take a turn
-    (the setup snake and the end-turn rotation run modulo ``n_players``), so
-    they can never own a building or hold a card, and every other rule
-    (production, discard, robber victims, awards, the win check) masks them out
-    naturally through that emptiness.
+    The per-player arrays are sized to the seated player count (2..N_PLAYERS),
+    read back via the ``n_players`` property; every game in a batch seats the
+    same number of players.
     """
 
     # -- Board occupancy ----------------------------------------------------
@@ -127,7 +123,6 @@ class BoardState(NamedTuple):
     # -- Turn / flow --------------------------------------------------------
     phase: GameScalarArray  # GamePhase
     current_player: GameScalarArray  # 0-indexed
-    n_players: GameScalarArray  # active players (2..N_PLAYERS); see note below
     setup_index: GameScalarArray  # 0..2*n_players placement counter
     dice_roll: GameScalarArray  # 0 = not rolled this turn, else 2..12
     has_rolled: GameScalarArray  # flag
@@ -143,6 +138,11 @@ class BoardState(NamedTuple):
 
     # -- Randomness ---------------------------------------------------------
     key: KeyArray  # PRNG keys for dice rolls and steals
+
+    @property
+    def n_players(self) -> int:
+        """Seated players (2..N_PLAYERS), read off the player axis (static)."""
+        return self.victory_points.shape[-1]
 
 
 def to_u8(x: jax.Array) -> jax.Array:
@@ -166,7 +166,7 @@ def make_board_state(
 ) -> BoardState:
     if not 2 <= n_players <= N_PLAYERS:
         raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
-    B = batch_size
+    B, P = batch_size, n_players
     key = key if key is not None else jax.random.key(0)
     none = jnp.full((B,), NO_INDEX, dtype=jnp.uint8)
     deck = jnp.broadcast_to(
@@ -177,21 +177,20 @@ def make_board_state(
         vertex_type=jnp.zeros((B, N_VERTICES), dtype=jnp.uint8),
         edge_road=jnp.zeros((B, N_EDGES), dtype=jnp.uint8),
         robber=jnp.zeros((B,), dtype=jnp.uint8),
-        player_resources=jnp.zeros((B, N_PLAYERS, N_RESOURCES), dtype=jnp.uint8),
-        victory_points=jnp.zeros((B, N_PLAYERS), dtype=jnp.uint8),
+        player_resources=jnp.zeros((B, P, N_RESOURCES), dtype=jnp.uint8),
+        victory_points=jnp.zeros((B, P), dtype=jnp.uint8),
         dev_deck=deck,
-        dev_hand=jnp.zeros((B, N_PLAYERS, N_DEV_CARD_TYPES), dtype=jnp.uint8),
-        knights_played=jnp.zeros((B, N_PLAYERS), dtype=jnp.uint8),
+        dev_hand=jnp.zeros((B, P, N_DEV_CARD_TYPES), dtype=jnp.uint8),
+        knights_played=jnp.zeros((B, P), dtype=jnp.uint8),
         phase=jnp.full((B,), GamePhase.SETUP_SETTLEMENT, dtype=jnp.uint8),
         current_player=jnp.zeros((B,), dtype=jnp.uint8),
-        n_players=jnp.full((B,), n_players, dtype=jnp.uint8),
         setup_index=jnp.zeros((B,), dtype=jnp.uint8),
         dice_roll=jnp.zeros((B,), dtype=jnp.uint8),
         has_rolled=jnp.zeros((B,), dtype=jnp.uint8),
         dev_played=jnp.zeros((B,), dtype=jnp.uint8),
         dev_bought=jnp.zeros((B, N_DEV_CARD_TYPES), dtype=jnp.uint8),
         free_roads=jnp.zeros((B,), dtype=jnp.uint8),
-        pending_discard=jnp.zeros((B, N_PLAYERS), dtype=jnp.uint8),
+        pending_discard=jnp.zeros((B, P), dtype=jnp.uint8),
         longest_road_owner=none,
         largest_army_owner=none,
         longest_road_len=jnp.zeros((B,), dtype=jnp.uint8),

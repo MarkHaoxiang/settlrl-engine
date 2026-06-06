@@ -16,7 +16,7 @@ import jax.numpy as jnp
 
 from catan_engine.board import Board
 from catan_engine.board.layout import N_TILES, TILE_V, BoardLayout
-from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import (
     BoardState,
     BoolScalar,
@@ -58,12 +58,13 @@ def steal(state: BoardState, thief: IntScalar, victim: IntScalar) -> BoardState:
 def robber_victim_mask(
     state: BoardState, tile: IntScalar, current: IntScalar
 ) -> PlayerMaskVec:
-    """(N_PLAYERS,) bool: players != current with a building on ``tile`` and cards."""
+    """(n_players,) bool: players != current with a building on ``tile`` and cards."""
+    n = state.n_players
     o = state.vertex_owner[TILE_V[tile]]  # (6,)
-    pl = jnp.clip(o.astype(jnp.int32) - 1, 0, N_PLAYERS - 1)
-    present = jnp.zeros((N_PLAYERS,), jnp.bool_).at[pl].max(o > 0)
+    pl = jnp.clip(o.astype(jnp.int32) - 1, 0, n - 1)
+    present = jnp.zeros((n,), jnp.bool_).at[pl].max(o > 0)
     has_cards = state.player_resources.astype(jnp.int32).sum(axis=1) > 0
-    return present & has_cards & (jnp.arange(N_PLAYERS) != current)
+    return present & has_cards & (jnp.arange(n) != current)
 
 
 # ===========================================================================
@@ -79,19 +80,19 @@ def valid_robber_victim(
     If any opponent can be robbed on ``tile``, ``victim`` must name one of them;
     otherwise the only legal choice is ``-1`` ("steal from no one").
     """
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
+    vc = jnp.clip(victim, 0, state.n_players - 1)
     mask = robber_victim_mask(state, tile, player)
     victims_exist = jnp.any(mask)
     return jnp.where(
         victims_exist,
-        (victim >= 0) & (victim < N_PLAYERS) & mask[vc],
+        (victim >= 0) & (victim < state.n_players) & mask[vc],
         victim == -1,
     )
 
 
 def apply_steal(state: BoardState, player: jax.Array, victim: IntScalar) -> BoardState:
     """Steal a random card from ``victim`` when ``victim >= 0``; else leave state."""
-    vc = jnp.clip(victim, 0, N_PLAYERS - 1)
+    vc = jnp.clip(victim, 0, state.n_players - 1)
     stolen = steal(state, player, vc)
     return tree_select(victim >= 0, stolen, state)
 

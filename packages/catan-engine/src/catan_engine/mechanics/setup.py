@@ -27,10 +27,7 @@ from catan_engine.mechanics import placement
 from catan_engine.mechanics.common import INVALID, SUCCESS, IndexParam, Mask, ResultCode
 
 # Setup placement order over the 2 * n_players starting settlements: a snake /
-# boustrophedon (0..n-1 then back n-1..0). ``n_players`` is per-game state, so
-# the cores compute the snake arithmetically (see ``_setup_player``) instead of
-# indexing a static table; this host-side helper states the same order plainly
-# for tests and inspection.
+# boustrophedon (0..n-1 then back n-1..0).
 
 
 def setup_order(n_players: int) -> list[int]:
@@ -38,7 +35,7 @@ def setup_order(n_players: int) -> list[int]:
     return list(range(n_players)) + list(range(n_players - 1, -1, -1))
 
 
-def _setup_player(setup_index: IntScalar, n_players: IntScalar) -> IntScalar:
+def _setup_player(setup_index: IntScalar, n_players: int) -> IntScalar:
     """Who places the ``setup_index``-th starting settlement (traceable snake)."""
     return jnp.where(
         setup_index < n_players, setup_index, 2 * n_players - 1 - setup_index
@@ -90,7 +87,7 @@ def _setup_settlement_apply(
     # The second settlement (placed in the reverse pass) grants resources.
     granted = grant_setup_resources(layout, placed, v, player)
     placed = tree_select(
-        state.setup_index.astype(jnp.int32) >= state.n_players.astype(jnp.int32),
+        state.setup_index.astype(jnp.int32) >= state.n_players,
         granted,
         placed,
     )
@@ -149,7 +146,7 @@ def _setup_road_apply(
 ) -> tuple[BoardState, IntScalar]:
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
-    n = state.n_players.astype(jnp.int32)
+    n = state.n_players
     new_index = state.setup_index.astype(jnp.int32) + 1
     setup_continues = new_index < 2 * n
     next_player = jnp.where(

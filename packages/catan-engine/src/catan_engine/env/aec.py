@@ -152,7 +152,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         self._cumulative_rewards[agent] = 0
         self._apply(int(action))  # type: ignore[arg-type]
 
-        reward = np.asarray(self._env.rewards[0])  # (N_PLAYERS,)
+        reward = np.asarray(self._env.rewards[0])  # (n_players,)
         done = bool(np.asarray(self._env.terminations[0, 0]))
         self.rewards = {
             a: float(reward[i]) for i, a in enumerate(self.possible_agents)

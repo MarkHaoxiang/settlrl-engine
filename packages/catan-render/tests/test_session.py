@@ -64,11 +64,11 @@ def test_game_drives_to_completion() -> None:
 
 
 def test_two_player_session() -> None:
-    # n_players=2 seats the human and one bot; the unseated players never act
-    # and a random game still drives to completion with a seated winner.
+    # n_players=2 seats the human and one bot, and a random game still drives
+    # to completion with a seated winner.
     sess = GameSession(seed=0, n_players=2)
     assert sess.acting_seat() == HUMAN_SEAT
-    assert len(sess.board[1].player_resources[0]) == 4  # arrays keep 4 rows
+    assert len(sess.board[1].player_resources[0]) == 2  # player axis = seats
     rng = sess._rng
     for _ in range(50_000):
         if sess.terminal():

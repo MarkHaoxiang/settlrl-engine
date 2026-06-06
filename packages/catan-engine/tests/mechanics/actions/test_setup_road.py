@@ -82,7 +82,7 @@ current_player=1""",
 
 def test_setup_complete(setup_road_board: Board) -> None:
     layout, st = setup_road_board
-    n_setup = 2 * int(st.n_players[0])  # the snake places 2 settlements each
+    n_setup = 2 * st.n_players  # the snake places 2 settlements each
     st = st._replace(setup_index=st.setup_index.at[0].set(n_setup - 1))
     state, result = setup_road_step((layout, st), jnp.array([_E0]))
     assert int(result[0]) == ActionResult.SUCCESS.value
