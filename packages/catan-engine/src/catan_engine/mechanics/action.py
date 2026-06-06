@@ -42,7 +42,11 @@ from catan_engine.board.layout import (
 )
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState
-from catan_engine.mechanics.awards import resolve_step
+from catan_engine.mechanics.awards import (
+    resolve_step,
+    road_build_gate,
+    settlement_break_gate,
+)
 from catan_engine.mechanics.common import (
     SUCCESS,
     ActionResult,
@@ -214,10 +218,17 @@ def apply_action(
         action_type, _APPLY_BRANCHES, layout, state, params, available
     )
     # Only a successful BuildRoad can extend a road length and only a successful
-    # BuildSettlement can break one, so every other lane skips the DFS.
-    lr_needed = (
-        (action_type == ActionType.BUILD_ROAD)
-        | (action_type == ActionType.BUILD_SETTLEMENT)
+    # BuildSettlement can break one, so every other lane skips the DFS; the
+    # build gates tighten that further (see awards.py).
+    player = state.current_player.astype(jnp.int32)
+    lr_needed = jnp.where(
+        action_type == ActionType.BUILD_ROAD,
+        road_build_gate(state, player),
+        jnp.where(
+            action_type == ActionType.BUILD_SETTLEMENT,
+            settlement_break_gate(state, params.idx, player),
+            False,
+        ),
     ) & (result == SUCCESS)
     return resolve_step(state, result, lr_needed)
 

@@ -171,9 +171,11 @@ def build_road_step(board: Board, edge: IndexParam) -> tuple[BoardState, ResultC
     """
     available = _build_road_avail_b(board[0], board[1], edge)
     state, result = _build_road_apply_b(board[0], board[1], edge, available)
+    player = state.current_player.astype(jnp.int32)
+    needed = (result == SUCCESS) & awards.road_build_gate_b(state, player)
     return cast(
         "tuple[BoardState, ResultCode]",
-        awards.resolve_step_b(state, result, result == SUCCESS),
+        awards.resolve_step_b(state, result, needed),
     )
 
 
@@ -236,9 +238,13 @@ def build_settlement_step(
     """
     available = _build_settlement_avail_b(board[0], board[1], vertex)
     state, result = _build_settlement_apply_b(board[0], board[1], vertex, available)
+    player = state.current_player.astype(jnp.int32)
+    needed = (result == SUCCESS) & awards.settlement_break_gate_b(
+        state, vertex, player
+    )
     return cast(
         "tuple[BoardState, ResultCode]",
-        awards.resolve_step_b(state, result, result == SUCCESS),
+        awards.resolve_step_b(state, result, needed),
     )
 
 

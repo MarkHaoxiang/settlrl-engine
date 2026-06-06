@@ -7,6 +7,7 @@ vertex (it may start or end there).
 
 from __future__ import annotations
 
+from itertools import combinations
 from typing import cast
 
 import jax
@@ -75,27 +76,30 @@ def longest_road_length(
     # Explicit-stack DFS: each owned edge is seeded in both directions as a
     # length-1 frame; expansion proceeds only from passable vertices, which
     # handles the opponent-as-endpoint rule.
-    target = player + 1
-    mine = (edge_road == target) & needed  # (N_EDGES,) bool
+    owner_code = player + 1  # edge_road / vertex_owner store player + 1, 0 = empty
+    mine = (edge_road == owner_code) & needed  # (N_EDGES,) bool
 
-    # Compact rank of each owned edge (a running count over `mine`): doubles as
-    # both its bit position in the int32 used-edge mask and its seed slot. A
-    # player owns at most MAX_ROADS (=15) edges, so one int32 word always suffices
-    # (15 < 32). Non-owned edges get a clamped junk rank the `mine[e]` guard never
-    # reads, and seed into a throwaway slot that is never popped.
-    local_of = jnp.clip(jnp.cumsum(mine.astype(jnp.int32)) - 1, 0, 31)  # (N_EDGES,)
+    # owned_rank[e]: rank of edge e among the player's owned edges -- the k-th
+    # owned edge, in edge-id order, has rank k-1. A rank doubles as the edge's
+    # bit position in the int32 used-edge mask (a player owns <= MAX_ROADS = 15
+    # < 32 edges) and as its seed slot. Non-owned edges get a clamped junk rank
+    # the `mine[e]` guard never reads, and seed into a throwaway slot that is
+    # never popped.
+    owned_rank = jnp.clip(jnp.cumsum(mine.astype(jnp.int32)) - 1, 0, 31)  # (N_EDGES,)
     n_owned = jnp.sum(mine.astype(jnp.int32))
 
     # Seed only owned edges, compacted to the front: forward seeds (land on
     # EDGE_V[:, 1]) fill slots [0, n_owned), backward (land on EDGE_V[:, 0]) fill
     # [n_owned, 2 * n_owned); each starts a length-1 trail with only its own bit
     # set. Non-owned edges scatter to slot _DUMP (> any live frame, never popped).
-    seed_word = jnp.where(mine, jnp.int32(1) << local_of, jnp.int32(0))
+    seed_used = jnp.where(mine, jnp.int32(1) << owned_rank, jnp.int32(0))
     seed_len = jnp.where(mine, jnp.int32(1), jnp.int32(0))
-    fwd_slot = jnp.where(mine, local_of, _DUMP)
-    bwd_slot = jnp.where(mine, n_owned + local_of, _DUMP)
+    fwd_slot = jnp.where(mine, owned_rank, _DUMP)
+    bwd_slot = jnp.where(mine, n_owned + owned_rank, _DUMP)
 
-    stack_v = (
+    # A stack frame (slot i across the three arrays) is one partial trail:
+    # the vertex its tip stands on, its length, and its used-edge set.
+    stack_tip = (
         jnp.zeros((STACK_CAP,), jnp.int32)
         .at[fwd_slot]
         .set(EDGE_V[:, 1])
@@ -109,12 +113,12 @@ def longest_road_length(
         .at[bwd_slot]
         .set(seed_len)
     )
-    stack_mask = (
+    stack_used = (
         jnp.zeros((STACK_CAP,), jnp.int32)
         .at[fwd_slot]
-        .set(seed_word)
+        .set(seed_used)
         .at[bwd_slot]
-        .set(seed_word)
+        .set(seed_used)
     )
     sp = jnp.int32(2) * n_owned
     best = jnp.int32(0)
@@ -123,36 +127,35 @@ def longest_road_length(
         return cast(jax.Array, carry[3] > 0)
 
     def body(carry: tuple) -> tuple:
-        stack_v, stack_len, stack_mask, sp, best = carry
+        stack_tip, stack_len, stack_used, sp, best = carry
         sp = sp - 1
-        v = stack_v[sp]
-        m = stack_mask[sp]
+        tip = stack_tip[sp]
+        used = stack_used[sp]
         length = stack_len[sp]
         best = jnp.maximum(best, length)
-        owner = vertex_owner[v]
-        can = (owner == 0) | (owner == target)
+        owner = vertex_owner[tip]
+        passable = (owner == 0) | (owner == owner_code)
 
-        start = _ADJ_INDPTR[v]
-        deg = _ADJ_INDPTR[v + 1] - start
-        st = (stack_v, stack_len, stack_mask, sp)
+        start = _ADJ_INDPTR[tip]
+        deg = _ADJ_INDPTR[tip + 1] - start
+        st = (stack_tip, stack_len, stack_used, sp)
         for slot in range(MAX_VERTEX_DEGREE):
-            sv, sl, sm, sp_i = st
+            s_tip, s_len, s_used, sp_i = st
             idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
             e = _ADJ_EDGE[idx]
-            w = _ADJ_NBR[idx]
-            bit = jnp.int32(1) << local_of[e]
-            valid = (slot < deg) & can & mine[e] & ((m & bit) == 0)
-            new_mask = m | bit
-            sv = sv.at[sp_i].set(jnp.where(valid, w, sv[sp_i]))
-            sl = sl.at[sp_i].set(jnp.where(valid, length + 1, sl[sp_i]))
-            sm = sm.at[sp_i].set(jnp.where(valid, new_mask, sm[sp_i]))
+            nbr = _ADJ_NBR[idx]
+            bit = jnp.int32(1) << owned_rank[e]
+            valid = (slot < deg) & passable & mine[e] & ((used & bit) == 0)
+            s_tip = s_tip.at[sp_i].set(jnp.where(valid, nbr, s_tip[sp_i]))
+            s_len = s_len.at[sp_i].set(jnp.where(valid, length + 1, s_len[sp_i]))
+            s_used = s_used.at[sp_i].set(jnp.where(valid, used | bit, s_used[sp_i]))
             sp_i = sp_i + valid.astype(jnp.int32)
-            st = (sv, sl, sm, sp_i)
+            st = (s_tip, s_len, s_used, sp_i)
 
-        stack_v, stack_len, stack_mask, sp = st
-        return (stack_v, stack_len, stack_mask, sp, best)
+        stack_tip, stack_len, stack_used, sp = st
+        return (stack_tip, stack_len, stack_used, sp, best)
 
-    carry = jax.lax.while_loop(cond, body, (stack_v, stack_len, stack_mask, sp, best))
+    carry = jax.lax.while_loop(cond, body, (stack_tip, stack_len, stack_used, sp, best))
     return cast(jax.Array, carry[4])
 
 
@@ -231,8 +234,49 @@ def recompute_largest_army(state: BoardState) -> BoardState:
 # a successful BuildRoad can extend a length and only a successful
 # BuildSettlement can break one (setup placements stay below the 5-road
 # threshold, and edges never disappear), so every other lane keeps its stored
-# holder/length and contributes zero iterations to the vmapped while_loop.
+# holder/length and contributes zero iterations to the vmapped while_loop. The
+# build gates below tighten this further: a trail's length is bounded by the
+# builder's road count, and a settlement severs a trail only where it passed
+# *through* the vertex, which takes two same-opponent incident edges (one edge
+# makes the vertex a trail endpoint, which an opponent building may legally be).
 # ===========================================================================
+
+
+def road_build_gate(state: BoardState, player: IntScalar) -> BoolScalar:
+    """Whether a road just built by ``player`` could change the Longest Road.
+
+    True once the builder owns at least 5 roads (the award threshold); below
+    that no trail of theirs can qualify and nobody else's length moved.
+    """
+    target = (player + 1).astype(state.edge_road.dtype)
+    return jnp.sum((state.edge_road == target).astype(jnp.int32)) >= 5
+
+
+def settlement_break_gate(
+    state: BoardState, vertex: IntScalar, player: IntScalar
+) -> BoolScalar:
+    """Whether a settlement just built on ``vertex`` by ``player`` could break
+    an opponent's road: some single opponent owns >= 2 of the vertex's edges."""
+    v = jnp.clip(vertex, 0, N_VERTICES - 1)
+    start = _ADJ_INDPTR[v]
+    deg = _ADJ_INDPTR[v + 1] - start
+    target = player.astype(jnp.int32) + 1
+    owners = []
+    for slot in range(MAX_VERTEX_DEGREE):
+        idx = jnp.clip(start + slot, 0, 2 * N_EDGES - 1)
+        o = state.edge_road[_ADJ_EDGE[idx]].astype(jnp.int32)
+        owners.append(jnp.where(slot < deg, o, 0))
+    hit = jnp.bool_(False)
+    for a, b in combinations(owners, 2):
+        hit = hit | ((a == b) & (a != 0) & (a != target))
+    return cast(jax.Array, hit)
+
+
+road_build_gate_b = jax.jit(jax.vmap(road_build_gate))
+"""Batched (per-lane) :func:`road_build_gate`."""
+
+settlement_break_gate_b = jax.jit(jax.vmap(settlement_break_gate))
+"""Batched (per-lane) :func:`settlement_break_gate`."""
 
 
 def recompute_awards(
