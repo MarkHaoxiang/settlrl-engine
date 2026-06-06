@@ -52,18 +52,23 @@ ADJ_NBR = jnp.asarray(np.concatenate([_E[:, 1], _E[:, 0]])[_order], dtype=jnp.in
 ADJ_DEG = jnp.asarray(_counts, dtype=jnp.int32)
 
 
+# A frame packs one partial trail into a single int32: bits [0, MAX_ROADS)
+# hold the used-edge set (bit owned_rank[e]), the bits above hold the tip
+# vertex (the vertex the trail's tip stands on). The trail's length is the
+# popcount of the used set, so it needs no field of its own.
+_TIP_SHIFT = MAX_ROADS
+_USED_MASK = (1 << MAX_ROADS) - 1
+
 _StackVec = Int[Array, f"stack_cap={STACK_CAP}"]
-"""One frame field across the DFS stack's slots."""
+"""The packed frames across the DFS stack's slots."""
 
 
 class _DfsState(NamedTuple):
-    """The DFS ``while_loop`` carry: the frame stack (a frame is one partial
-    trail -- tip vertex, length, used-edge set), the stack pointer delimiting
-    the live frames ``[0, sp)``, and the best length popped so far."""
+    """The DFS ``while_loop`` carry: the packed-frame stack, the stack pointer
+    delimiting the live frames ``[0, sp)``, and the best length popped so
+    far."""
 
-    stack_tip: _StackVec  # vertex the trail's tip stands on
-    stack_len: _StackVec  # road pieces used so far
-    stack_used: _StackVec  # used-edge set, bit owned_rank[e]
+    stack: _StackVec
     sp: IntScalar
     best: IntScalar
 
@@ -88,9 +93,9 @@ def longest_road_length(
     u, v = EDGE_V[:, 0], EDGE_V[:, 1]
 
     # owned_rank[e]: rank of edge e among the player's owned edges -- its bit
-    # position in the int32 used-edge mask (a player owns <= MAX_ROADS = 15 < 32
+    # position in the frame's used-edge mask (a player owns <= MAX_ROADS
     # edges). Non-owned edges get a clamped junk rank that is never read.
-    owned_rank = jnp.clip(jnp.cumsum(mine_i) - 1, 0, 31)
+    owned_rank = jnp.clip(jnp.cumsum(mine_i) - 1, 0, MAX_ROADS - 1)
 
     # Endpoint-only seeding: a maximal trail can only terminate at a vertex of
     # odd owned-degree (a pass-through consumes edges in pairs) or at an
@@ -108,15 +113,13 @@ def longest_road_length(
     # the two directions differ only in the tip (the walked-to endpoint).
     keep = jnp.concatenate([fwd_keep, bwd_keep])
     slot = jnp.where(keep, jnp.cumsum(keep.astype(jnp.int32)) - 1, _DUMP)
-
-    def seed_stack(val: jax.Array) -> jax.Array:
-        """A stack array with per-direction ``val`` scattered to the seed slots."""
-        return jnp.zeros((STACK_CAP,), jnp.int32).at[slot].set(val)
+    tip = jnp.concatenate([v, u])
+    edge_bit = jnp.tile(jnp.int32(1) << owned_rank, 2)
 
     init = _DfsState(
-        stack_tip=seed_stack(jnp.concatenate([v, u])),
-        stack_len=seed_stack(jnp.ones((2 * N_EDGES,), jnp.int32)),
-        stack_used=seed_stack(jnp.tile(jnp.int32(1) << owned_rank, 2)),
+        stack=jnp.zeros((STACK_CAP,), jnp.int32)
+        .at[slot]
+        .set((tip << _TIP_SHIFT) | edge_bit),
         sp=jnp.sum(keep.astype(jnp.int32)),
         best=jnp.int32(0),
     )
@@ -125,12 +128,12 @@ def longest_road_length(
         return dfs.sp > 0
 
     def body(dfs: _DfsState) -> _DfsState:
-        stack_tip, stack_len, stack_used = dfs.stack_tip, dfs.stack_len, dfs.stack_used
+        stack = dfs.stack
         sp = dfs.sp - 1
-        tip = stack_tip[sp]
-        used = stack_used[sp]
-        length = stack_len[sp]
-        best = jnp.maximum(dfs.best, length)
+        frame = stack[sp]
+        tip = frame >> _TIP_SHIFT
+        used = frame & _USED_MASK
+        best = jnp.maximum(dfs.best, jax.lax.population_count(used))
 
         start = ADJ_INDPTR[tip]
         deg = ADJ_DEG[tip]
@@ -140,16 +143,11 @@ def longest_road_length(
             edge_bit = jnp.int32(1) << owned_rank[e]
             valid = (slot < deg) & passable[tip] & mine[e] & ((used & edge_bit) == 0)
 
-            stack_tip = stack_tip.at[sp].set(jnp.where(valid, nbr, stack_tip[sp]))
-            stack_len = stack_len.at[sp].set(
-                jnp.where(valid, length + 1, stack_len[sp])
-            )
-            stack_used = stack_used.at[sp].set(
-                jnp.where(valid, used | edge_bit, stack_used[sp])
-            )
+            child = (nbr << _TIP_SHIFT) | used | edge_bit
+            stack = stack.at[sp].set(jnp.where(valid, child, stack[sp]))
             sp = sp + valid.astype(jnp.int32)
 
-        return _DfsState(stack_tip, stack_len, stack_used, sp, best)
+        return _DfsState(stack, sp, best)
 
     final = jax.lax.while_loop(cond, body, init)
     return final.best
