@@ -95,13 +95,23 @@ __all__ = [
     "ActionResult",
     "ActionType",
     "N_ACTION_TYPES",
+    "N_FLAT",
     "BatchedCatanEnv",
     "Box",
     "Discrete",
     "Observation",
+    "flat_to_action",
     "step",
     "available",
 ]
+
+N_FLAT = _N_FLAT
+"""Size of the flat action space (one index per concrete move)."""
+
+
+def flat_to_action(flat: jax.Array) -> tuple[ActionTypeArray, ActionParams]:
+    """Decode flat action indices (any shape) into ``(action_type, ActionParams)``."""
+    return _ATYPE_J[flat], ActionParams(idx=_IDX_J[flat], target=_TARGET_J[flat])
 
 # ---------------------------------------------------------------------------
 # Functional core: one batched (ActionType, ActionParams) action per game.
@@ -458,6 +468,11 @@ class BatchedCatanEnv:
     def action_mask(self) -> jax.Array:
         """``(B, N_ACTION_TYPES)`` -- which action types the acting player can use."""
         return cast(jax.Array, _type_mask_from_flat(self._avail))
+
+    def flat_mask(self) -> jax.Array:
+        """``(B, N_FLAT)`` -- legality of every concrete flat action for the
+        acting player per lane (decode a chosen index with :func:`flat_to_action`)."""
+        return self._avail
 
     def available_indices(self, action_type: int | ActionType) -> jax.Array:
         """``(B, D)`` legality over the primary index of an index-parameterized action.
