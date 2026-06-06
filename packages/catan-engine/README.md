@@ -14,7 +14,7 @@ uv sync
 
 ## What it provides
 
-- **Board setup** — randomly generated boards with terrain, number tokens, and ports.
+- **Board setup** — randomly generated boards with terrain, number tokens, and ports. Number tokens can be placed fully at random (default) or in the rulebook's alphabetical spiral (`number_placement="spiral"`), the balanced setup common in tournament play.
 - **Game state** — the full state of a game in progress: placements, resources, development cards, turn order, and the Longest Road / Largest Army awards.
 - **Actions** — every move a player can make, from the opening placements through building, trading, playing development cards, and ending a turn.
 - **Legality** — given a state, which actions are currently allowed.

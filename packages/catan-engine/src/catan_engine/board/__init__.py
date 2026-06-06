@@ -5,6 +5,8 @@ action layer."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
 
@@ -20,14 +22,20 @@ from catan_engine.board.state import (
 Board = tuple[BoardLayout, BoardState]
 
 
-def make_board(batch_size: int = 1, seed: int = 0) -> Board:
+def make_board(
+    batch_size: int = 1,
+    seed: int = 0,
+    number_placement: Literal["random", "spiral"] = "random",
+) -> Board:
     """A fresh batched Board: random layout paired with a setup-phase state.
 
     The robber starts on the desert tile (rulebook); since tile positions are
-    randomised it is read off the generated layout.
+    randomised it is read off the generated layout. ``number_placement`` is
+    forwarded to :func:`make_layout` (``"spiral"`` gives the rulebook's
+    variable set-up token spiral).
     """
     key = jax.random.key(seed)
-    layout = make_layout(batch_size, key=key)
+    layout = make_layout(batch_size, key=key, number_placement=number_placement)
     state = make_board_state(batch_size, key=key)
     state = state._replace(robber=desert_tile(layout.tile_resource))
     return layout, state

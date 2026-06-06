@@ -13,6 +13,8 @@ from catan_engine.board.layout import (
     N_TILES,
     N_VERTICES,
     PORT_V,
+    SPIRAL_NUMBERS,
+    SPIRAL_TILE_ORDER,
     TILE_V,
     edge_cubes,
     edge_index,
@@ -132,6 +134,64 @@ SHP: 1
 WHT: 1
 WOD: 1""",
         )
+
+
+def _tiles_adjacent(t: int, u: int) -> bool:
+    ca, cb = tile_cube(t), tile_cube(u)
+    return tuple(sorted(abs(ca[i] - cb[i]) for i in range(3))) == (0, 1, 1)
+
+
+class TestSpiralLayout(TestCase):
+    """The rulebook "Set-up, Variable" alphabetical-spiral number placement."""
+
+    def test_spiral_path_geometry(self) -> None:
+        # Covers every tile exactly once, every step is to an adjacent hex, and
+        # the walk spirals inward: outer ring (12), middle ring (6), centre.
+        assert sorted(SPIRAL_TILE_ORDER) == list(range(N_TILES))
+        for a, b in zip(SPIRAL_TILE_ORDER, SPIRAL_TILE_ORDER[1:]):
+            assert _tiles_adjacent(a, b), f"spiral jumps from tile {a} to {b}"
+        radii = [max(abs(c) for c in tile_cube(t)) for t in SPIRAL_TILE_ORDER]
+        assert radii == [2] * 12 + [1] * 6 + [0]
+
+    @given(st.integers(min_value=0, max_value=2**31))
+    @settings(max_examples=20, deadline=None)
+    def test_numbers_follow_spiral(self, seed: int) -> None:
+        # Walking the spiral and skipping the desert must read off exactly the
+        # A..R token sequence; the desert itself gets no number.
+        board = make_layout(
+            batch_size=2, key=jax.random.key(seed), number_placement="spiral"
+        )
+        for lane in range(2):
+            resources = np.asarray(board.tile_resource[lane])
+            numbers = np.asarray(board.tile_number[lane])
+            walked = tuple(
+                int(numbers[t])
+                for t in SPIRAL_TILE_ORDER
+                if resources[t] != Tile.DESERT.value
+            )
+            assert walked == SPIRAL_NUMBERS
+            assert numbers[resources == Tile.DESERT.value].tolist() == [0]
+
+    @given(st.integers(min_value=0, max_value=2**31))
+    @settings(max_examples=20, deadline=None)
+    def test_red_numbers_never_adjacent(self, seed: int) -> None:
+        # The balance property tournaments use the spiral for: the A..R sequence
+        # keeps 6s and 8s apart for every possible desert position.
+        board = make_layout(
+            batch_size=1, key=jax.random.key(seed), number_placement="spiral"
+        )
+        numbers = np.asarray(board.tile_number[0])
+        red = [t for t in range(N_TILES) if numbers[t] in (6, 8)]
+        for t in red:
+            for u in red:
+                if t < u:
+                    assert not _tiles_adjacent(t, u), (
+                        f"red numbers adjacent on tiles {t} and {u}"
+                    )
+
+    def test_invalid_number_placement_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            make_layout(batch_size=1, number_placement="diagonal")  # type: ignore[arg-type]
 
 
 class TestCubeCoords(TestCase):

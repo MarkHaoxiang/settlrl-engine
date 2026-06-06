@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -173,10 +173,66 @@ def tile_cube(index: int) -> Cube:
     return _TILE_CUBE[index]
 
 
+# -- Spiral ("Set-up, Variable") number placement ------------------------------
+#
+# Rulebook Almanac, "Set-up, Variable": sort the number tokens letter side up
+# and place them on the terrain hexes in alphabetical order, starting at a
+# corner of the island and proceeding counterclockwise, spiralling toward the
+# centre; the desert is skipped (it never gets a token). The letters A..R on
+# the token backs correspond to this fixed number sequence:
+SPIRAL_NUMBERS = (5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11)
+
+
+def _spiral_tile_order() -> tuple[int, ...]:
+    """Tile indices in spiral order: the outer ring counterclockwise from the
+    rightmost corner (on the renderer's projection), then the middle ring, then
+    the centre. Consecutive tiles are always cube-adjacent (checked in tests).
+
+    Which corner the spiral starts from (and its handedness) is irrelevant to
+    the distribution of generated boards -- the terrain shuffle is invariant
+    under rotation/reflection -- so a single fixed path suffices.
+    """
+    # Counterclockwise ring steps, in order, starting upward from the right.
+    dirs = ((-1, 1, 0), (0, 1, -1), (1, 0, -1), (1, -1, 0), (0, -1, 1), (-1, 0, 1))
+    order: list[int] = []
+    for radius in (2, 1):
+        cube = (0, -radius, radius)  # ring corner in line with the start corner
+        for d in dirs:
+            for _ in range(radius):
+                order.append(tile_index(cube))
+                cube = (cube[0] + d[0], cube[1] + d[1], cube[2] + d[2])
+    order.append(tile_index((0, 0, 0)))
+    return tuple(order)
+
+
+SPIRAL_TILE_ORDER = _spiral_tile_order()
+
+# Device-side forms: spiral position -> tile index, its inverse permutation
+# (tile index -> spiral position), and the A..R token values.
+_SPIRAL_ORDER_ARR = jnp.array(SPIRAL_TILE_ORDER, dtype=jnp.int32)
+_SPIRAL_POS_ARR = jnp.argsort(_SPIRAL_ORDER_ARR)
+_SPIRAL_NUMBERS_ARR = jnp.array(SPIRAL_NUMBERS, dtype=jnp.uint8)
+
+
 def make_layout(
     batch_size: int = 1,
     key: jax.Array | None = None,
+    number_placement: Literal["random", "spiral"] = "random",
 ) -> BoardLayout:
+    """Generate a batched random :class:`BoardLayout`.
+
+    Terrain hexes and harbors are always shuffled uniformly. ``number_placement``
+    selects how the number tokens are laid on the terrain: ``"random"`` (default)
+    shuffles them uniformly, while ``"spiral"`` follows the rulebook's variable
+    set-up -- tokens A..R placed alphabetically along a counterclockwise spiral
+    from a corner toward the centre, skipping the desert -- the balanced
+    placement commonly used in tournament play.
+    """
+    if number_placement not in ("random", "spiral"):
+        raise ValueError(
+            "number_placement must be 'random' or 'spiral', "
+            f"got {number_placement!r}"
+        )
     B = batch_size
     key = key if key is not None else jax.random.key(0)
     key, k1, k2, k3 = jax.random.split(key, 4)
@@ -205,6 +261,17 @@ def make_layout(
     allocation_idxs = jax.vmap(lambda k: jax.random.permutation(k, N_TILES))(keys)
     tile_resource = tile_resource[batch_idx, allocation_idxs]
     tile_number = tile_number[batch_idx, allocation_idxs]
+
+    if number_placement == "spiral":
+        # Deal the tokens A..R along the spiral, skipping the desert. ``token``
+        # is the exclusive running count of non-desert tiles in spiral order --
+        # the alphabetical token index each tile receives (clamped only to keep
+        # the desert's discarded gather in bounds).
+        not_desert = tile_resource[:, _SPIRAL_ORDER_ARR] != Tile.DESERT.value
+        token = jnp.cumsum(not_desert, axis=1) - not_desert
+        vals = _SPIRAL_NUMBERS_ARR[jnp.minimum(token, len(SPIRAL_NUMBERS) - 1)]
+        on_spiral = jnp.where(not_desert, vals, 0).astype(jnp.uint8)
+        tile_number = on_spiral[:, _SPIRAL_POS_ARR]
 
     port_allocation = jnp.array(
         [
