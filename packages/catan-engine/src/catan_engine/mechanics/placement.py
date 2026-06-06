@@ -1,14 +1,8 @@
 """Settlement / road placement: legality geometry and the build action cores.
 
-Vertex incidence is computed by scattering per-edge values onto their endpoints
-over the COO ``edge_index`` (``EDGE_V``), rather than gathering through padded
-vertex->edge reverse maps -- the JAX analogue of PyG message passing.
-
-The lower half holds the ``BuildRoad`` / ``BuildSettlement`` / ``BuildCity``
-action cores, which compose the placement-legality predicates above with the
-economy helpers in ``common``. The cores apply only the core state change; the
-Longest Road award and win check are resolved once per step by
-``awards.resolve_step`` (run after dispatch, not inside each core).
+The ``BuildRoad`` / ``BuildSettlement`` / ``BuildCity`` cores apply only the
+core state change; the Longest Road award and win check are resolved once per
+step by ``awards.resolve_step``.
 """
 
 from __future__ import annotations

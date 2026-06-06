@@ -1,14 +1,5 @@
-"""Maritime trade rules: the best bank/port exchange ratio for a resource.
-
-Lives here rather than in ``port.py`` because the port *rule* needs the board
-geometry (``layout.PORT_V``) and ``layout`` already imports ``port`` for the
-``Port`` enum -- colocating would create an import cycle. ``port.py`` stays the
-pure ``Port`` enum; ``trade.py`` is the rule over it.
-
-Port membership is a per-vertex node feature derived by scattering over the dense
-``PORT_V`` map (each port owns two vertices), so no padded vertex->port reverse
-map / sentinel is needed.
-"""
+"""Maritime trade rules: the best bank/port exchange ratio for a resource,
+and the ``MaritimeTrade`` action core."""
 
 from __future__ import annotations
 

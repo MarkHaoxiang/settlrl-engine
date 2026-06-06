@@ -2,9 +2,7 @@
 
 The longest-road length is the hard piece: it is the longest *trail* (no repeated
 edge) in the player's road subgraph that may not pass *through* an opponent-owned
-vertex (it may start or end there). It is implemented as an explicit-stack
-iterative DFS via ``lax.while_loop`` so it stays fully traceable / vmappable;
-each frame carries its used-edge set as a packed int32 bitmask.
+vertex (it may start or end there).
 """
 
 from __future__ import annotations
@@ -68,17 +66,11 @@ def longest_road_length(
     """Length of the player's longest continuous road (trail).
 
     A trail may not reuse an edge and may not pass *through* a vertex occupied
-    by an opponent (it may start or end there). Implemented as an explicit-stack
-    iterative DFS so it is fully traceable / vmappable.
-
-    Each *owned* edge is seeded in both directions (a length-1 frame having
-    already traversed that edge, landing on the far vertex); the DFS then only
-    *expands* from passable vertices, which handles the opponent-as-endpoint rule
-    and lets a trail pass through an empty interior vertex whose two endpoints are
-    opponents. Non-owned edges need no seed: every trail begins with an owned
-    edge, so that edge's own directional seed already starts it -- seeding the
-    rest would only re-explore the same trails from each interior vertex.
+    by an opponent (it may start or end there). Fully traceable / vmappable.
     """
+    # Explicit-stack DFS: each owned edge is seeded in both directions as a
+    # length-1 frame; expansion proceeds only from passable vertices, which
+    # handles the opponent-as-endpoint rule.
     target = player + 1
     mine = edge_road == target  # (N_EDGES,) bool
 
@@ -188,11 +180,8 @@ def _reassign_award(counts: jax.Array, owner: jax.Array, threshold: int) -> jax.
 
 def recompute_longest_road(state: BoardState) -> BoardState:
     """Reassign Longest Road (need >= 5; see ``_reassign_award`` for the tie rule)."""
-    lengths = jnp.stack(
-        [
-            longest_road_length(state.edge_road, state.vertex_owner, jnp.int32(p))
-            for p in range(N_PLAYERS)
-        ]
+    lengths = jax.vmap(longest_road_length, in_axes=(None, None, 0))(
+        state.edge_road, state.vertex_owner, jnp.arange(N_PLAYERS, dtype=jnp.int32)
     )
     new_owner = _reassign_award(lengths, state.longest_road_owner, 5)
     has_owner = new_owner != jnp.uint8(NO_INDEX)
@@ -203,11 +192,9 @@ def recompute_longest_road(state: BoardState) -> BoardState:
 
 
 def recompute_largest_army(state: BoardState) -> BoardState:
-    """Reassign Largest Army (need >= 3; see ``_reassign_award`` for the tie rule).
-
-    In real play knights never decrease, so a holder is always among the leaders
-    and the "tie among non-holders" branch is unreachable here.
-    """
+    """Reassign Largest Army (need >= 3; see ``_reassign_award`` for the tie rule)."""
+    # Knights never decrease, so a holder is always among the leaders and the
+    # "tie among non-holders" branch is unreachable here.
     new_owner = _reassign_award(
         state.knights_played.astype(jnp.int32), state.largest_army_owner, 3
     )

@@ -146,8 +146,7 @@ class ActionParams(NamedTuple):
       EndTurn) read nothing.
 
     ``target`` follows the ``victim == -1`` ("steal from no one") convention for
-    the robber actions. (``idx`` rather than ``index`` because ``NamedTuple``
-    reserves the ``index`` attribute.)
+    the robber actions.
     """
 
     idx: IndexParam  # primary index
@@ -205,18 +204,10 @@ def apply_action(
     """Apply ``action_type`` (single game) and return (new state, ActionResult code).
 
     ``available`` is the precomputed legality of this ``(action_type, params)``
-    move: the caller computes avail *once* and passes it in, and the chosen branch
-    gates its core state change on it (``tree_select`` / INVALID). No branch
-    recomputes avail -- under ``vmap`` every branch runs regardless of which action
-    was chosen, so an internal avail call would be paid ~15x per lane. Callers
-    obtain ``available`` either from :func:`action_available` (the switch-based
-    avail, exact for any params) or from a cached flat-legality sweep (see
-    :func:`flat_legality`).
-
-    Two stages: the ``lax.switch`` applies the chosen action's *core* state change
-    (stage 1), then :func:`awards.resolve_step` recomputes the awards and resolves
-    the win *once* (stage 2). Keeping the award sweep out of the per-action
-    branches avoids running the expensive Longest Road DFS in every branch.
+    move: if unset the state is returned unchanged with ``INVALID``. Obtain it
+    from :func:`action_available` (exact for any params) or a cached
+    flat-legality sweep (see :func:`flat_legality`). Awards are recomputed and a
+    winning move returns ``GAME_COMPLETE``.
     """
     state, result = jax.lax.switch(
         action_type, _APPLY_BRANCHES, layout, state, params, available

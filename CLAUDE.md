@@ -11,6 +11,8 @@ When you change code, check whether the relevant module-level docs (per-package 
 
 Keep docs concise. User-facing docs (READMEs) should describe what something does and how to use it — no implementation details — and keep abstractions clear; leave internal/technical notes to `CLAUDE.md`.
 
+Comments should be concise. Doc comments (docstrings) describe only the contract to callers — behavior not evident from the signature; no implementation detail, design motivation, or perf notes (those belong in the per-package `CLAUDE.md`, or are simply omitted).
+
 ## Checks
 
 Before finishing any session, ensure the mypy checker passes:
