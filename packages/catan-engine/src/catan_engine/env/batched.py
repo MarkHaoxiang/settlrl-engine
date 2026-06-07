@@ -89,6 +89,14 @@ from catan_engine.board.state import (
     GamePhase,
     make_board_state,
 )
+from catan_engine.belief import (
+    BeliefState,
+    PlayerBelief,
+    censor,
+    make_belief,
+    player_belief,
+    update_belief,
+)
 
 __all__ = [
     "ActionParams",
@@ -97,9 +105,11 @@ __all__ = [
     "N_ACTION_TYPES",
     "N_FLAT",
     "BatchedCatanEnv",
+    "BeliefState",
     "Box",
     "Discrete",
     "Observation",
+    "PlayerBelief",
     "flat_to_action",
     "step",
     "available",
@@ -162,35 +172,56 @@ _total_vp_v = jax.vmap(_total_vp_single)
 _total_vp_b = jax.jit(_total_vp_v)
 
 
-_agent_selection_b = jax.jit(jax.vmap(agent_selection_single))
-
-
-def _random_action_single(
-    avail_flat: jax.Array, key: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Sample a uniformly-random *legal* flat action for one game.
-
-    Takes the lane's ``(N_FLAT,)`` flat legality mask and returns the chosen
-    action's ``(action_type, idx, target)``.
-    """
-    # Random legal action: score legal moves with uniform noise and take the
-    # argmax (illegal scored -1, so only picked if the lane has no legal move).
-    noise = jax.random.uniform(key, (_N_FLAT,))
-    chosen = jnp.argmax(jnp.where(avail_flat, noise, -1.0))
-    return _ATYPE_J[chosen], _IDX_J[chosen], _TARGET_J[chosen]
+_agent_selection_v = jax.vmap(agent_selection_single)
+_agent_selection_b = jax.jit(_agent_selection_v)
 
 
 @jax.jit
 def _random_actions_b(
     avail_flat: jax.Array, key: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Sample a random legal action per lane: ``(action_type, idx, target)``.
+    """Sample a uniformly-random legal action per lane: ``(action_type, idx,
+    target)``.
 
-    ``avail_flat`` is the ``(B, N_FLAT)`` flat-legality sweep; ``key`` is split
-    per lane.
+    ``avail_flat`` is the ``(B, N_FLAT)`` flat-legality sweep. Legal moves are
+    scored with uniform noise and the per-lane argmax is taken (illegal scored
+    -1, so only picked if the lane has no legal move).
     """
-    keys = jax.random.split(key, avail_flat.shape[0])
-    return jax.vmap(_random_action_single, in_axes=(0, 0))(avail_flat, keys)
+    noise = jax.random.uniform(key, avail_flat.shape)
+    chosen = jnp.argmax(jnp.where(avail_flat, noise, -1.0), axis=1)
+    return _ATYPE_J[chosen], _IDX_J[chosen], _TARGET_J[chosen]
+
+
+# ---------------------------------------------------------------------------
+# Belief tracking (optional; see catan_engine.belief).
+# ---------------------------------------------------------------------------
+_update_belief_v = jax.vmap(update_belief)
+_censor_b = jax.jit(jax.vmap(censor, in_axes=(0, 0, None)), static_argnums=2)
+_player_belief_b = jax.jit(
+    jax.vmap(player_belief, in_axes=(0, 0, None)), static_argnums=2
+)
+
+
+@functools.partial(jax.jit, static_argnames=("batch_size", "n_players"))
+def _belief_step_core(
+    belief: BeliefState,
+    before: BoardState,
+    after: BoardState,
+    action_type: jax.Array,
+    params: ActionParams,
+    reset_lane: jax.Array,
+    batch_size: int,
+    n_players: int,
+) -> BeliefState:
+    """Advance the batched belief across one env step; reset replaced lanes."""
+    updated = _update_belief_v(belief, before, after, action_type, params)
+    fresh = make_belief(batch_size, n_players)
+    return BeliefState(
+        *(
+            _where_lane(reset_lane, f, u)
+            for f, u in zip(fresh, updated, strict=True)
+        )
+    )
 
 
 @jax.jit
@@ -247,6 +278,9 @@ class BatchedCatanEnv:
             uniformly; ``"spiral"`` lays them in the rulebook's variable set-up
             spiral (tournament-style balanced boards). Applied to the initial
             boards and to auto-reset replacements.
+        track_beliefs: when True, maintain a :class:`BeliefState` (per-observer
+            card counting; see ``catan_engine.belief``) across steps and
+            auto-resets, read via :attr:`beliefs` / :meth:`belief_view`.
 
     The action consumed by :meth:`step` is the engine's
     ``(action_type, ActionParams)`` pair with a leading batch axis -- one action
@@ -264,6 +298,7 @@ class BatchedCatanEnv:
         auto_reset: bool = True,
         number_placement: Literal["random", "spiral"] = "random",
         n_players: int = N_PLAYERS,
+        track_beliefs: bool = False,
     ) -> None:
         if reward not in ("sparse", "vp_delta"):
             raise ValueError(f"reward must be 'sparse' or 'vp_delta', got {reward!r}")
@@ -279,6 +314,7 @@ class BatchedCatanEnv:
         self.auto_reset = auto_reset
         self.number_placement = number_placement
         self.n_players = n_players
+        self.track_beliefs = track_beliefs
         self.possible_agents = [f"player_{i}" for i in range(n_players)]
         self.agents = list(self.possible_agents)
         self.num_agents = n_players
@@ -315,6 +351,10 @@ class BatchedCatanEnv:
         # once and reused by step (to gate the chosen action), random_actions, and
         # action_mask -- the single legality source. Refreshed after every step.
         self._avail = cast(jax.Array, _flat_available_b(self._layout, self._state))
+        self._agent_sel = cast(jax.Array, _agent_selection_b(self._state))
+        self._belief: BeliefState | None = (
+            make_belief(self.batch_size, self.n_players) if self.track_beliefs else None
+        )
         self.agents = list(self.possible_agents)
 
     def step(self, action_type: ActionTypeArray, params: ActionParams) -> None:
@@ -330,15 +370,16 @@ class BatchedCatanEnv:
         count reaches zero, then the phase advances to MOVE_ROBBER.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
+        before = self._state
         (
             self._layout,
             self._state,
             self._reward,
             self._terminations,
-            self._truncations,
             self._result,
             self._vps,
             self._avail,
+            self._agent_sel,
             self._key,
         ) = _env_step_core(
             self._layout,
@@ -354,6 +395,25 @@ class BatchedCatanEnv:
             self.number_placement,
             self.n_players,
         )
+        if self._belief is not None:
+            # Auto-reset replaces done lanes with fresh games, so their beliefs
+            # restart too; without auto-reset a done lane freezes (every further
+            # action is INVALID, a belief no-op).
+            reset_lane = (
+                self._terminations[:, 0]
+                if self.auto_reset
+                else jnp.zeros((self.batch_size,), dtype=jnp.bool_)
+            )
+            self._belief = _belief_step_core(
+                self._belief,
+                before,
+                self._state,
+                at,
+                params,
+                reset_lane,
+                self.batch_size,
+                self.n_players,
+            )
 
     def last(
         self,
@@ -386,8 +446,12 @@ class BatchedCatanEnv:
 
     @property
     def agent_selection(self) -> jax.Array:
-        """``(B,)`` int array of the acting player per lane (batched AEC)."""
-        return cast(jax.Array, _agent_selection_b(self._state))
+        """``(B,)`` int array of the acting player per lane (batched AEC).
+
+        Cached: refreshed by :meth:`reset` / :meth:`step` / :meth:`rollout`, so
+        reading it costs nothing.
+        """
+        return self._agent_sel
 
     @property
     def rewards(self) -> jax.Array:
@@ -418,6 +482,27 @@ class BatchedCatanEnv:
     def board(self) -> Board:
         """The underlying batched ``(BoardLayout, BoardState)``."""
         return self._layout, self._state
+
+    @property
+    def beliefs(self) -> BeliefState:
+        """The tracked batched :class:`BeliefState` (requires ``track_beliefs``)."""
+        if self._belief is None:
+            raise RuntimeError("belief tracking is off; pass track_beliefs=True")
+        return self._belief
+
+    def belief_view(self, agent: int | str) -> tuple[BoardState, PlayerBelief]:
+        """``agent``'s honest view across all lanes (requires ``track_beliefs``).
+
+        Returns the censored states (no field the observer couldn't know; see
+        :func:`catan_engine.belief.censor`) and the matching
+        :class:`PlayerBelief` slices, both batched.
+        """
+        me = self._agent_index(agent)
+        beliefs = self.beliefs
+        return (
+            cast(BoardState, _censor_b(self._state, beliefs, me)),
+            cast(PlayerBelief, _player_belief_b(self._state, beliefs, me)),
+        )
 
     # -- Spaces -----------------------------------------------------------
 
@@ -509,6 +594,45 @@ class BatchedCatanEnv:
         """
         atype, idx, target = _random_actions_b(self._avail, key)
         return atype, ActionParams(idx=idx, target=target)
+
+    def rollout(self, key: jax.Array, n_steps: int) -> jax.Array:
+        """Advance every lane ``n_steps`` steps under uniformly-random legal play.
+
+        One fused jit dispatch (a ``lax.scan``) instead of ``n_steps`` round
+        trips through :meth:`random_actions` + :meth:`step` -- the trajectory is
+        identical to that loop for the same ``key``. Afterwards the env reflects
+        the final step (``rewards`` / ``terminations`` / ``infos`` / beliefs).
+        Returns the ``(B, n_players)`` reward summed over the window (under
+        ``"sparse"`` reward: each player's win count). Compiles once per
+        distinct ``n_steps``.
+        """
+        (
+            self._layout,
+            self._state,
+            self._avail,
+            self._vps,
+            self._belief,
+            (self._reward, self._terminations, self._result, self._agent_sel),
+            self._key,
+            cum_reward,
+        ) = _rollout_core(
+            self._layout,
+            self._state,
+            self._avail,
+            self._vps,
+            self._belief,
+            (self._reward, self._terminations, self._result, self._agent_sel),
+            self._key,
+            key,
+            n_steps,
+            self.batch_size,
+            self.reward_mode,
+            self.auto_reset,
+            self.number_placement,
+            self.n_players,
+            self.track_beliefs,
+        )
+        return cast(jax.Array, cum_reward)
 
     # -- Internals --------------------------------------------------------
 
@@ -655,16 +779,17 @@ def _env_step_core(
     BoardState,
     jax.Array,
     jax.Array,
-    jax.Array,
     ResultCode,
+    jax.Array,
     jax.Array,
     jax.Array,
     jax.Array,
 ]:
     """One whole ``BatchedCatanEnv.step``: gate the chosen action with the
     cached flat legality, apply it, score reward / termination, auto-reset
-    finished lanes, and refresh the VP / legality caches. Returns the new
-    ``(layout, state, reward, terminations, truncations, result, vps, avail, key)``.
+    finished lanes, and refresh the VP / legality / acting-player caches.
+    Returns the new
+    ``(layout, state, reward, terminations, result, vps, avail, agent_sel, key)``.
 
     ``key`` is threaded: split for auto-reset, returned unchanged when
     ``auto_reset`` is False.
@@ -680,26 +805,151 @@ def _env_step_core(
     else:  # "sparse": +1 to each winner on the terminal step (only a done lane wins).
         reward = (vps_after >= VICTORY_POINTS_TO_WIN).astype(jnp.float32)
     terminations = jnp.broadcast_to(done_lane[:, None], (batch_size, n_players))
-    truncations = jnp.zeros((batch_size, n_players), dtype=jnp.bool_)
 
     if auto_reset:
         key, subkey = jax.random.split(key)
         new_layout, new_state = _auto_reset_core(
             layout, applied, done_lane, subkey, batch_size, number_placement, n_players
         )
+        # A reset lane is a fresh board (0 VP everywhere); the others kept
+        # ``applied``, whose VPs were just computed.
+        new_vps = jnp.where(done_lane[:, None], 0, vps_after)
     else:
         new_layout, new_state = layout, applied
+        new_vps = vps_after
 
-    new_vps = _total_vp_v(new_state)
     new_avail = jax.vmap(_flat_available_for)(new_layout, new_state)
+    agent_sel = _agent_selection_v(new_state)
     return (
         new_layout,
         new_state,
         reward,
         terminations,
-        truncations,
         result,
         new_vps,
         new_avail,
+        agent_sel,
         key,
     )
+
+
+# The per-step env fields refreshed by ``_env_step_core``, bundled so the scan
+# carry and the env assignment stay in one place: (reward, terminations,
+# result, agent_sel).
+_StepExtras = tuple[jax.Array, jax.Array, ResultCode, jax.Array]
+
+
+@functools.partial(
+    jax.jit,
+    static_argnames=(
+        "n_steps",
+        "batch_size",
+        "reward_mode",
+        "auto_reset",
+        "number_placement",
+        "n_players",
+        "track_beliefs",
+    ),
+)
+def _rollout_core(
+    layout: BoardLayout,
+    state: BoardState,
+    avail_flat: jax.Array,
+    vps: jax.Array,
+    belief: BeliefState | None,
+    extras: _StepExtras,
+    env_key: jax.Array,
+    sample_key: jax.Array,
+    n_steps: int,
+    batch_size: int,
+    reward_mode: str,
+    auto_reset: bool,
+    number_placement: Literal["random", "spiral"],
+    n_players: int,
+    track_beliefs: bool,
+) -> tuple[
+    BoardLayout,
+    BoardState,
+    jax.Array,
+    jax.Array,
+    BeliefState | None,
+    _StepExtras,
+    jax.Array,
+    jax.Array,
+]:
+    """``n_steps`` random-action env steps as one ``lax.scan``.
+
+    Each iteration replays the per-step driver exactly -- split ``sample_key``,
+    sample a legal action per lane (``_random_actions_b``), run
+    ``_env_step_core`` (and the belief update when ``track_beliefs``) -- so a
+    rollout matches the equivalent ``random_actions`` + ``step`` loop
+    trajectory for the same key. Returns the final carry plus the ``(B,
+    n_players)`` reward summed over the window.
+    """
+    Carry = tuple[
+        BoardLayout,
+        BoardState,
+        jax.Array,
+        jax.Array,
+        BeliefState | None,
+        _StepExtras,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+    ]
+
+    def body(carry: Carry, _: None) -> tuple[Carry, None]:
+        layout, state, avail, vps, belief, _extras, env_key, sample_key, cum = carry
+        sample_key, k_act = jax.random.split(sample_key)
+        atype, idx, target = _random_actions_b(avail, k_act)
+        params = ActionParams(idx=idx, target=target)
+        before = state
+        (
+            layout,
+            state,
+            reward,
+            terminations,
+            result,
+            vps,
+            avail,
+            agent_sel,
+            env_key,
+        ) = _env_step_core(
+            layout,
+            state,
+            atype,
+            params,
+            avail,
+            vps,
+            env_key,
+            batch_size,
+            reward_mode,
+            auto_reset,
+            number_placement,
+            n_players,
+        )
+        if track_beliefs:
+            assert belief is not None
+            reset_lane = (
+                terminations[:, 0]
+                if auto_reset
+                else jnp.zeros((batch_size,), dtype=jnp.bool_)
+            )
+            belief = _belief_step_core(
+                belief, before, state, atype, params, reset_lane,
+                batch_size, n_players,
+            )
+        new_extras: _StepExtras = (reward, terminations, result, agent_sel)
+        new_carry: Carry = (
+            layout, state, avail, vps, belief, new_extras,
+            env_key, sample_key, cum + reward,
+        )
+        return new_carry, None
+
+    cum0 = jnp.zeros((batch_size, n_players), dtype=jnp.float32)
+    init: Carry = (
+        layout, state, avail_flat, vps, belief, extras, env_key, sample_key, cum0
+    )
+    carry, _ = jax.lax.scan(body, init, None, length=n_steps)
+    layout, state, avail, vps, belief, extras, env_key, _sample_key, cum = carry
+    return layout, state, avail, vps, belief, extras, env_key, cum

@@ -68,6 +68,15 @@ def _batched_rollout(
         np.asarray(env.board[1].phase)  # force device->host sync, honest timing
 
 
+def _batched_rollout_scan(
+    seed: int, batch_size: int, n_players: int, steps: int, device: str
+) -> None:
+    with jax.default_device(jax.devices(device)[0]):
+        env = BatchedCatanEnv(batch_size=batch_size, n_players=n_players, seed=seed)
+        env.rollout(jax.random.key(seed), steps)
+        np.asarray(env.board[1].phase)  # force device->host sync, honest timing
+
+
 def _aec_rollout(seed: int, n_players: int, steps: int, device: str) -> None:
     with jax.default_device(jax.devices(device)[0]):
         e = CatanAECEnv(n_players=n_players, seed=seed)
@@ -103,6 +112,32 @@ def test_batched_env_random_rollout(
     )
     benchmark(
         lambda: _batched_rollout(
+            seed=0,
+            batch_size=batch_size,
+            n_players=n_players,
+            steps=steps,
+            device=device,
+        )
+    )
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("n_players", [2, 4], ids=lambda n: f"{n}p")
+@pytest.mark.parametrize("batch_size", [1, 8, 64, 512])
+def test_batched_env_rollout_scan(
+    benchmark: Any, batch_size: int, n_players: int, device: str
+) -> None:
+    """Throughput of the fused ``rollout`` (one ``lax.scan`` dispatch per
+    window) -- the same random play as ``test_batched_env_random_rollout``
+    without the per-step host round trips."""
+    steps = 500
+    benchmark.group = f"batched_env_rollout_scan[{n_players}p-{device}]"
+    _batched_rollout_scan(  # warm up JIT
+        seed=0, batch_size=batch_size, n_players=n_players, steps=steps, device=device
+    )
+    benchmark(
+        lambda: _batched_rollout_scan(
             seed=0,
             batch_size=batch_size,
             n_players=n_players,

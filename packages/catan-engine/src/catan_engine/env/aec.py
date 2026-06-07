@@ -61,6 +61,8 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         number_placement: ``"random"`` or ``"spiral"`` number-token placement
             (see ``BatchedCatanEnv``).
         n_players: players seated (2..4, default 4); sets the agent list.
+        track_beliefs: maintain per-observer card counting (see
+            ``BatchedCatanEnv``).
     """
 
     metadata = {"render_modes": ["human", "ansi"], "name": "catan_aec_v0"}
@@ -72,6 +74,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         render_mode: str | None = None,
         number_placement: Literal["random", "spiral"] = "random",
         n_players: int = N_PLAYERS,
+        track_beliefs: bool = False,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
@@ -83,6 +86,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
             auto_reset=False,
             number_placement=number_placement,
             n_players=n_players,
+            track_beliefs=track_beliefs,
         )
         self.possible_agents = list(self._env.possible_agents)
         self._index = {a: i for i, a in enumerate(self.possible_agents)}
@@ -205,6 +209,7 @@ def env(
     render_mode: str | None = None,
     number_placement: Literal["random", "spiral"] = "random",
     n_players: int = N_PLAYERS,
+    track_beliefs: bool = False,
 ) -> CatanAECEnv:
     """PettingZoo-style constructor returning a :class:`CatanAECEnv`."""
     return CatanAECEnv(
@@ -213,4 +218,5 @@ def env(
         render_mode=render_mode,
         number_placement=number_placement,
         n_players=n_players,
+        track_beliefs=track_beliefs,
     )

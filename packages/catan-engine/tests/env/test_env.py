@@ -159,6 +159,9 @@ class TestBatchedCatanEnv:
             current_player=e._state.current_player.at[0].set(0),
             pending_discard=e._state.pending_discard.at[0, 2].set(4),
         )
+        # agent_selection is cached and refreshed by step/reset, so drive one
+        # step; END_TURN is illegal during DISCARD and leaves the poked state.
+        e.step(jnp.asarray([int(ActionType.END_TURN)], jnp.int32), _batch_params([0]))
         assert int(e.agent_selection[0]) == 2
 
     def test_auto_reset_only_terminated_lane(self) -> None:
@@ -343,3 +346,45 @@ class TestCacheGatedStep:
         assert int(e.infos["result"][0]) == ActionResult.INVALID.value
         assert np.array_equal(np.asarray(e._state.vertex_owner), before)
         assert _states_equal(e._state, f_state)
+
+
+class TestRollout:
+    """``rollout(key, n)`` is one fused scan over the same per-step driver, so
+    it must reproduce the ``random_actions`` + ``step`` loop bit-for-bit."""
+
+    @pytest.mark.parametrize("track_beliefs", [False, True])
+    def test_rollout_matches_step_loop(self, track_beliefs: bool) -> None:
+        n_steps, key = 60, jax.random.key(7)
+        loop = BatchedCatanEnv(batch_size=4, seed=5, track_beliefs=track_beliefs)
+        fused = BatchedCatanEnv(batch_size=4, seed=5, track_beliefs=track_beliefs)
+
+        total = jnp.zeros((4, loop.n_players), jnp.float32)
+        k = key
+        for _ in range(n_steps):
+            k, sub = jax.random.split(k)
+            at, params = loop.random_actions(sub)
+            loop.step(at, params)
+            total = total + loop.rewards
+
+        cum = fused.rollout(key, n_steps)
+
+        assert _states_equal(loop._state, fused._state)
+        for name in ("_avail", "_vps", "_reward", "_terminations", "_result"):
+            assert np.array_equal(
+                np.asarray(getattr(loop, name)), np.asarray(getattr(fused, name))
+            ), name
+        assert np.array_equal(
+            np.asarray(loop.agent_selection), np.asarray(fused.agent_selection)
+        )
+        assert np.array_equal(np.asarray(total), np.asarray(cum))
+        if track_beliefs:
+            for lf, ff in zip(loop.beliefs, fused.beliefs, strict=True):
+                assert np.array_equal(np.asarray(lf), np.asarray(ff))
+
+    def test_rollout_reward_counts_wins(self) -> None:
+        # Sparse reward: the summed rollout reward counts terminal-step wins, so
+        # over a long window it is non-negative integers (and usually nonzero).
+        e = BatchedCatanEnv(batch_size=8, seed=0)
+        cum = np.asarray(e.rollout(jax.random.key(1), 800))
+        assert cum.shape == (8, e.n_players)
+        assert (cum >= 0).all() and (cum == cum.astype(int)).all()

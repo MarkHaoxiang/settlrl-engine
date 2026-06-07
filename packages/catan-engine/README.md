@@ -27,6 +27,8 @@ uv sync --package catan-engine --extra cuda
 - **Legality** — given a state, which actions are currently allowed.
 - **Environment** — a multi-agent environment that follows the PettingZoo Agent-Environment-Cycle conventions, with each player taking turns. It reports observations, rewards, legal-action masks, and when a game is over, and it runs a batch of games in parallel for reinforcement-learning rollouts (finished games restart automatically).
 - **2–4 players** — games seat 4 players by default; pass `n_players` (2, 3, or 4) when creating a board or environment to play with fewer, under the unchanged base rules.
+- **Beliefs** — optional card counting (`track_beliefs=True`): the environment tracks, for every player, provable bounds on what each opponent holds, using only information that player could see. Agents can read this honest view (`belief_view`) instead of the true state, so they never act on hidden cards.
+- **Game records** — `catan_engine.record` saves a complete game as readable JSON (the configuration plus every move played, with dice outcomes) and replays it deterministically: `record_game` plays and records a game, `GameRecord.to_json` / `from_json` serialise it, and `replay` re-steps it move by move, verifying it against the engine as it goes.
 
 A game is driven by repeatedly asking which actions are available and applying one of them. Many games can be advanced together in a single step.
 
