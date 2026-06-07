@@ -12,7 +12,7 @@ from catan_engine.belief import PlayerBelief
 from catan_engine.board import Board
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, BoardState, IntScalar
-from catan_engine.env import available, flat_available, flat_to_action
+from catan_engine.env import N_FLAT, available, flat_available, flat_to_action
 from catan_engine.mechanics.action import apply_action
 from catan_engine.mechanics.common import agent_selection_single, player_total_vp
 
@@ -21,6 +21,9 @@ from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import ValueFunction, heuristic_value
 
 _ILLEGAL = -1e9  # prior logit for illegal moves
+
+# Static decode of every flat row, for the root's one-step value sweep.
+_ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 
 
 def _terminal(state: BoardState) -> jax.Array:
@@ -43,19 +46,26 @@ def make_mcts(
     num_simulations: int = 32,
     max_num_considered_actions: int = 16,
     value_scale: float = 20.0,
+    prior_scale: float = 1.0,
 ) -> BeliefPolicy:
     """Gumbel-MuZero search using the engine itself as the dynamics model.
 
-    Each simulation expands one node: the chosen flat action is applied with
-    :func:`apply_action`, the child's legal moves become its prior, and
-    ``tanh(value / value_scale)`` evaluated for the child's player-to-move is
-    its leaf value. Transitions discount by -1 when the player-to-move
-    switches and a win backs up as a +/-1 reward into an absorbing terminal —
-    exact zero-sum framing for two players, the *paranoid* reduction (every
-    opponent maximizes against the mover) beyond. The censored root is made
-    concrete with one :func:`~catan_agents.shared.sample.sample_world` draw,
-    so the search runs in a world consistent with what the seat knows and
-    samples its own dice / steals / dev draws.
+    The root prior is a heuristic *policy*: every legal action's one-step
+    successor is scored with ``value`` and the scores (divided by
+    ``prior_scale``) become the root logits, so the Gumbel candidate set
+    starts from the value function's ranking rather than a uniform sample of
+    the 560-action space — the search refines lookahead instead of replacing
+    it. Each simulation expands one node: the chosen flat action is applied
+    with :func:`apply_action`, the child's legal moves become its (uniform)
+    prior, and ``tanh(value / value_scale)`` evaluated for the child's
+    player-to-move is its leaf value. Transitions discount by -1 when the
+    player-to-move switches and a win backs up as a +/-1 reward into an
+    absorbing terminal — exact zero-sum framing for two players, the
+    *paranoid* reduction (every opponent maximizes against the mover) beyond.
+    The censored root is made concrete with one
+    :func:`~catan_agents.shared.sample.sample_world` draw, so the search runs
+    in a world consistent with what the seat knows and samples its own dice /
+    steals / dev draws.
     """
 
     def leaf_value(layout: BoardLayout, state: BoardState, p: jax.Array) -> jax.Array:
@@ -101,9 +111,16 @@ def make_mcts(
     ) -> FlatAction:
         k_world, k_search = jax.random.split(key)
         state = sample_world(k_world, state, belief, player)
+        # Heuristic root prior: the one-step value sweep over all legal moves.
+        successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
+            layout, state, _ROW_TYPE, _ROW_PARAMS, mask
+        )
+        root_vals = jax.vmap(value, in_axes=(None, 0, None))(
+            layout, successors, player
+        )
         batched: Any = jax.tree.map(lambda x: x[None], (layout, state))
         root = mctx.RootFnOutput(  # type: ignore[call-arg]  # chex dataclass
-            prior_logits=jnp.where(mask, 0.0, _ILLEGAL)[None],
+            prior_logits=jnp.where(mask, root_vals / prior_scale, _ILLEGAL)[None],
             value=leaf_value(layout, state, player)[None],
             embedding=batched,
         )

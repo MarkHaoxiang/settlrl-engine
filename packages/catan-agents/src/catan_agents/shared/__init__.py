@@ -11,7 +11,12 @@ from catan_agents.shared.policy import (
     Policy,
 )
 from catan_agents.shared.sample import sample_world
-from catan_agents.shared.value import Value, ValueFunction, heuristic_value
+from catan_agents.shared.value import (
+    Value,
+    ValueFunction,
+    heuristic_value,
+    make_heuristic,
+)
 
 __all__ = [
     "AgentSpec",
@@ -25,6 +30,7 @@ __all__ = [
     "evaluate",
     "greedy_policy",
     "heuristic_value",
+    "make_heuristic",
     "random_policy",
     "sample_world",
 ]

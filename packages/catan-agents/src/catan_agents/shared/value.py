@@ -15,9 +15,22 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from catan_engine.board.dev_cards import DEV_CARD_COUNTS, DevCard
-from catan_engine.board.layout import N_TILES, N_VERTICES, TILE_V, BoardLayout
-from catan_engine.board.state import BoardState, IntScalar
+from catan_engine.board.dev_cards import DEV_CARD_COST, DEV_CARD_COUNTS, DevCard
+from catan_engine.board.layout import (
+    EDGE_V,
+    N_TILES,
+    N_VERTICES,
+    PORT_V,
+    TILE_V,
+    BoardLayout,
+)
+from catan_engine.board.resources import CITY_COST, SETTLEMENT_COST
+from catan_engine.board.state import (
+    MAX_SETTLEMENTS,
+    SETTLEMENT,
+    BoardState,
+    IntScalar,
+)
 
 Value = Float[Array, ""]
 """A scalar state score for one player: higher is better, arbitrary scale."""
@@ -49,56 +62,136 @@ def vertex_pips(tile_number: jax.Array) -> Float[Array, f"vertices={N_VERTICES}"
     return acc.at[TILE_V.reshape(-1)].add(jnp.repeat(pips, TILE_V.shape[1]))
 
 
-# Heuristic weights. Victory points dominate; production pips reward good
-# placements; sqrt of each resource count values a diverse, discard-resistant
-# hand; held dev cards carry their expected VP-card share for opponents.
-_W_VP = 10.0
-_W_PROD = 1.0
-_W_HAND = 0.3
-_W_DEV = 1.5
 _VP_CARD_SHARE = float(DEV_CARD_COUNTS[DevCard.VICTORY_POINT]) / float(
     sum(DEV_CARD_COUNTS)
 )
+_SETTLEMENT_COST_ARR = jnp.asarray(SETTLEMENT_COST, jnp.float32)
+_CITY_COST_ARR = jnp.asarray(CITY_COST, jnp.float32)
+_DEV_COST_ARR = jnp.asarray(DEV_CARD_COST, jnp.float32)
 
 
-def _strength(
-    layout: BoardLayout, state: BoardState, p: jax.Array, exact_dev: jax.Array
-) -> jax.Array:
-    """One player's heuristic score; ``exact_dev`` switches own/inferred dev info."""
-    # Public VP: buildings plus awards.
-    vp = state.victory_points[p].astype(jnp.float32)
-    vp += 2.0 * (state.longest_road_owner == p)
-    vp += 2.0 * (state.largest_army_owner == p)
-    # Production: pips of tiles adjacent to own buildings (city counts twice),
-    # robber tile blocked.
-    pips = tile_pips(layout.tile_number)
-    pips = pips * (jnp.arange(N_TILES) != state.robber)
-    weight = (state.vertex_owner[TILE_V] == p + 1) * state.vertex_type[TILE_V]
-    production = pips @ weight.sum(axis=1).astype(jnp.float32)
-    # Hand: diminishing per-resource value favours diversity and makes the
-    # cheapest discard the most-held resource.
-    hand = jnp.sqrt(state.player_resources[p].astype(jnp.float32)).sum()
-    # Dev cards: own hand is exact (VP cards at full VP weight); an opponent's
-    # is a count whose VP-card share is its prior over the deck composition.
-    n_dev = state.dev_hand[p].astype(jnp.float32).sum()
-    own_vp_cards = state.dev_hand[p, DevCard.VICTORY_POINT].astype(jnp.float32)
-    dev_vp = jnp.where(exact_dev, own_vp_cards, n_dev * _VP_CARD_SHARE)
-    return (
-        _W_VP * (vp + dev_vp) + _W_PROD * production + _W_HAND * hand + _W_DEV * n_dev
-    )
+def make_heuristic(
+    *,
+    w_vp: float = 10.0,
+    w_prod: float = 1.0,
+    w_hand: float = 0.3,
+    w_over: float = 0.4,
+    w_dev: float = 1.5,
+    w_spot: float = 0.5,
+    w_road: float = 0.15,
+    w_prog: float = 2.0,
+    w_knight: float = 0.5,
+    w_diverse: float = 0.6,
+    w_port: float = 0.0,
+) -> ValueFunction:
+    """Build a weighted heuristic value function (see :func:`heuristic_value`).
 
-
-def heuristic_value(
-    layout: BoardLayout, state: BoardState, player: IntScalar
-) -> Value:
-    """Hand-written heuristic: ``player``'s strength minus the best opponent's.
-
-    Strength weighs victory points (awards and VP cards included), pip-weighted
-    production of own buildings (robber-aware), hand diversity, and held dev
-    cards.
+    Terms per player: total VP (awards and VP cards included; opponents' VP
+    cards by their deck-share prior), pip-weighted production of own buildings
+    (robber-aware, city double), distinct resource types produced, hand
+    diversity (sqrt per type) with a discard-risk penalty per card over seven,
+    held dev cards, expansion (pips of the best settlement spot buildable right
+    now, and own roads), completeness of the closest affordable build, and
+    knights played toward Largest Army. The value is the player's strength
+    minus the best opponent's.
     """
-    players = jnp.arange(state.n_players)
-    strengths = jax.vmap(lambda q: _strength(layout, state, q, q == player))(players)
-    mine = strengths[player]
-    best_other = jnp.max(jnp.where(players == player, -jnp.inf, strengths))
-    return mine - best_other
+
+    def strength(
+        layout: BoardLayout, state: BoardState, p: jax.Array, exact_dev: jax.Array
+    ) -> jax.Array:
+        vp = state.victory_points[p].astype(jnp.float32)
+        vp += 2.0 * (state.longest_road_owner == p)
+        vp += 2.0 * (state.largest_army_owner == p)
+        # Production: per-tile pips of own buildings (city counts twice),
+        # robber tile blocked; aggregated per resource for the diversity term.
+        pips = tile_pips(layout.tile_number)
+        pips = pips * (jnp.arange(N_TILES) != state.robber)
+        weight = (
+            ((state.vertex_owner[TILE_V] == p + 1) * state.vertex_type[TILE_V])
+            .sum(axis=1)
+            .astype(jnp.float32)
+        )
+        per_tile = pips * weight  # (T,)
+        per_res = (
+            jnp.zeros((5,), jnp.float32)
+            .at[layout.tile_resource.astype(jnp.int32) % 5]  # desert pips are 0
+            .add(per_tile)
+        )
+        production = per_res.sum()
+        diversity = (per_res > 0).sum().astype(jnp.float32)
+
+        res = state.player_resources[p].astype(jnp.float32)
+        hand = jnp.sqrt(res).sum()
+        over = jnp.maximum(res.sum() - 7.0, 0.0)
+
+        n_dev = state.dev_hand[p].astype(jnp.float32).sum()
+        own_vp_cards = state.dev_hand[p, DevCard.VICTORY_POINT].astype(jnp.float32)
+        dev_vp = jnp.where(exact_dev, own_vp_cards, n_dev * _VP_CARD_SHARE)
+
+        # Expansion: settlement spots buildable right now (empty, distance
+        # rule, touching an own road) — what makes a road worth its cost.
+        own_road = state.edge_road == p + 1
+        occ = state.vertex_owner > 0
+        u, v = EDGE_V[:, 0], EDGE_V[:, 1]
+        nb_occ = jnp.zeros((N_VERTICES,), bool).at[u].max(occ[v]).at[v].max(occ[u])
+        touched = (
+            jnp.zeros((N_VERTICES,), bool).at[u].max(own_road).at[v].max(own_road)
+        )
+        is_settlement = (state.vertex_owner == p + 1) & (
+            state.vertex_type == SETTLEMENT
+        )
+        in_stock = is_settlement.sum() < MAX_SETTLEMENTS
+        spot = ~occ & ~nb_occ & touched & in_stock
+        best_spot = jnp.max(jnp.where(spot, vertex_pips(layout.tile_number), 0.0))
+        n_roads = own_road.sum().astype(jnp.float32)
+
+        # Progress toward the closest next build (gated on it being usable).
+        def completeness(cost: jax.Array) -> jax.Array:
+            return jnp.minimum(res, cost).sum() / cost.sum()
+
+        deck_left = state.dev_deck.astype(jnp.int32).sum() > 0
+        progress = jnp.max(
+            jnp.stack(
+                [
+                    completeness(_SETTLEMENT_COST_ARR) * jnp.any(spot),
+                    completeness(_CITY_COST_ARR) * jnp.any(is_settlement),
+                    completeness(_DEV_COST_ARR) * deck_left,
+                ]
+            )
+        )
+
+        knights = jnp.minimum(state.knights_played[p].astype(jnp.float32), 3.0)
+
+        # Ports: trading power from own buildings on port vertices (a 2:1 port
+        # is worth more when its resource is produced; 3:1 counts once).
+        on_port = (state.vertex_owner[PORT_V] == p + 1).any(axis=1)  # (P_ports,)
+        ports = on_port.sum().astype(jnp.float32)
+
+        return (
+            w_vp * (vp + dev_vp)
+            + w_prod * production
+            + w_diverse * diversity
+            + w_hand * hand
+            - w_over * over
+            + w_dev * n_dev
+            + w_spot * best_spot
+            + w_road * n_roads
+            + w_prog * progress
+            + w_knight * knights
+            + w_port * ports
+        )
+
+    def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+        players = jnp.arange(state.n_players)
+        strengths = jax.vmap(lambda q: strength(layout, state, q, q == player))(
+            players
+        )
+        mine = strengths[player]
+        best_other = jnp.max(jnp.where(players == player, -jnp.inf, strengths))
+        return mine - best_other
+
+    return value
+
+
+heuristic_value = make_heuristic()
+"""The shipped heuristic, at the weights that won the 2-player CLI tournament."""

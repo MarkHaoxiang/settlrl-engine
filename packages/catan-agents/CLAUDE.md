@@ -40,14 +40,25 @@ varying sharpness.
   `fori_loop` is `_MAX_DEAL` = 95 iterations (the bank bound), trivial at the
   once-per-root call rate.
 - `value.py` — `ValueFunction` protocol: single-game `(layout, state, player)
-  -> scalar`, higher better, arbitrary scale. `heuristic_value` = own strength
-  minus best opponent's; strength = 10·VP (buildings + awards + VP cards — own
-  exact, opponents' expected via the deck's 5/25 VP share over their count) +
-  pips of own buildings (city 2x, robber tile zeroed) + 0.3·Σ√(resource counts)
-  (diversity; makes the cheapest discard the most-held resource) + 1.5·dev
-  count. On a *sampled* world the "hidden" fields it reads are belief-consistent
-  samples, so it stays honest. Also hosts `tile_pips` / `vertex_pips` (used by
-  greedy too).
+  -> scalar`, higher better, arbitrary scale. `make_heuristic(**weights)` builds
+  a weighted strength function; `heuristic_value = make_heuristic()` is the
+  shipped default. Strength terms (defaults): 10·VP (buildings + awards + VP
+  cards — own exact, opponents' expected via the deck's 5/25 VP share over
+  their count) + 1.0·production pips of own buildings (city 2x, robber tile
+  zeroed) + 0.6·distinct resource types produced + 0.3·Σ√(resource counts)
+  (diversity; makes the cheapest discard the most-held resource) − 0.4·cards
+  over 7 (discard risk) + 1.5·dev count + 0.5·pips of the best settlement spot
+  buildable *right now* (empty + distance rule + touching an own road, gated on
+  stock — this is what makes a road worth its cost; without it lookahead never
+  expanded and lost to scripted greedy 34%) + 0.15·own roads + 2.0·completeness
+  of the closest next build (settlement/city/dev, each gated on usability) +
+  0.5·knights toward Largest Army (capped at 3). Value = own strength − best
+  opponent's. Tuning evidence (2p seat-swapped CLI matches, 200-700 games):
+  expansion+progress terms took lookahead-vs-greedy from 34% to 86.5%; the
+  diversity term is worth ~55% head-to-head over without; w_spot 1.0 vs 0.5 and
+  a port-count term (`w_port`, default 0) measured neutral. On a *sampled*
+  world the "hidden" fields it reads are belief-consistent samples, so it stays
+  honest. Also hosts `tile_pips` / `vertex_pips` (used by greedy too).
 - `baselines.py` — `random_policy`: uniform noise over `N_FLAT`, masked argmax
   (the same trick as the engine's `_random_action_single`).
 - `greedy.py` — `greedy_policy`: a static `(N_FLAT,)` base score from an
@@ -92,8 +103,14 @@ can exploit.
   `vmap(value)` over successors + 1e-4 tie-break noise, masked argmax.
   `lookahead_policy = make_greedy(heuristic_value)`.
 - `mcts.py` — `make_mcts(value, num_simulations=32, max_num_considered_actions
-  =16, value_scale=20) -> BeliefPolicy`: `mctx.gumbel_muzero_policy` with the
-  engine as `recurrent_fn` and embedding = batched `(layout, state)`. Frame
+  =16, value_scale=20, prior_scale=1.0) -> BeliefPolicy`:
+  `mctx.gumbel_muzero_policy` with the engine as `recurrent_fn` and embedding =
+  batched `(layout, state)`. The **root prior is the one-step value sweep**
+  (the same 560-successor `vmap(apply_action)` as lookahead, logits =
+  `value/prior_scale`): with a uniform prior the 16 Gumbel candidates were a
+  random subset of 560 and mcts lost to lookahead 6%; the informed prior took
+  it to 37% vs lookahead and 86% vs greedy. In-tree child priors stay
+  uniform-over-legal (a per-expansion sweep would cost 560×). Frame
   convention: priors/values are the node's player-to-move's (root: the seat
   asked to act); `discount` is -1 when the mover switches, +1 when the same
   player continues (multi-move turns), 0 into terminals (absorbing — avail is
@@ -102,10 +119,15 @@ can exploit.
   heuristic's scale is commensurate with the ±1 terminal reward. Exact
   zero-sum framing at 2 players; at 3-4 the sign-flip discount is the
   *paranoid* reduction (every opponent maximizes against the mover) — a known
-  approximation, scalar backups can't express max^n. Single-game policy:
-  batch-of-1 inside, composes under outer `vmap`/`jit` (verified). The
-  `# type: ignore[call-arg]` on the mctx dataclass constructors is for chex
-  dataclasses being opaque to mypy.
+  approximation, scalar backups can't express max^n. **Known limitation:**
+  search currently *subtracts* value relative to its own root prior (37% vs
+  lookahead, flat across 64 sims / 8 candidates and value_scale 60) — each
+  in-tree child commits a single sampled dice/steal/draw outcome, so deeper
+  search plans against fixed chance samples (strategy fusion over chance
+  nodes); fixing it needs chance-node / afterstate handling, not more
+  simulations. Single-game policy: batch-of-1 inside, composes under outer
+  `vmap`/`jit` (verified). The `# type: ignore[call-arg]` on the mctx
+  dataclass constructors is for chex dataclasses being opaque to mypy.
 
 ## cli.py
 

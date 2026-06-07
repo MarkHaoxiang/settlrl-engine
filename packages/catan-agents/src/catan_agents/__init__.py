@@ -14,6 +14,7 @@ from catan_agents.shared import (
     evaluate,
     greedy_policy,
     heuristic_value,
+    make_heuristic,
     random_policy,
     sample_world,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "heuristic_value",
     "lookahead_policy",
     "make_greedy",
+    "make_heuristic",
     "make_mcts",
     "mcts_policy",
     "random_policy",
