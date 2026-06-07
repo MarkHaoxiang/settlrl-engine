@@ -8,6 +8,7 @@ itself, and that a full game can be driven to a terminal state with a winner.
 
 import numpy as np
 import pytest
+from catan_engine.record import GameRecord, replay
 
 from catan_render.bots import supported_counts
 from catan_render.session import HUMAN, GameSession
@@ -220,3 +221,26 @@ def test_log_rolls_and_win() -> None:
     wins = [e for e in entries if e.kind == "win"]
     assert len(wins) == 1
     assert wins[0].player == sess.status().winner
+
+
+def test_record_exports_a_replayable_game() -> None:
+    sess = GameSession(seed=3, n_players=2, seats=["random", "random"])
+    sess._run_bots()  # all-bot game plays itself out
+    rec = sess.record()
+    assert rec.winner == sess.status().winner
+    assert rec.meta == {"seats": ["random", "random"]}
+    assert len(rec.moves) > 10  # the full trace, not the capped log
+    # The JSON roundtrips and the engine replays it without complaint.
+    rec2 = GameRecord.from_json(rec.to_json())
+    boards = list(replay(rec2))
+    assert len(boards) == len(rec.moves)
+
+
+def test_record_of_running_game_has_no_winner() -> None:
+    sess = GameSession(seed=0)
+    sess.apply(int(sess.legal_flat()[0]))
+    rec = sess.record()
+    assert rec.winner is None
+    assert [m.flat for m in rec.moves] == [rec.moves[0].flat]
+    sess.reset(seed=1)
+    assert sess.record().moves == ()  # reset starts a fresh trace

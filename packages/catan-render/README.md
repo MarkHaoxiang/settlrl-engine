@@ -86,7 +86,8 @@ uv run pytest packages/catan-render/tests
 | `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot. `409` if the move is illegal |
 | `POST /api/game/bot` | Play one due bot move; the snapshot's `bot_move` says who played what (null when it's a human's turn) |
 | `POST /api/game/chat` | Append a chat message to the game log `{ "text": <string>, "player": <seat> \| null }` |
-| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports (the two-player search agents are 2-only) |
+| `GET /api/game/record` | Download the game as a `catan_engine.record` JSON transcript — self-contained and replayable (`winner` is null while the game is running) |
+| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports |
 | `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral", "seats": ["human" \| <bot kind>, ...] }` (one entry per seat; default: you + 3 random bots) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 

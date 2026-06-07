@@ -12,7 +12,9 @@ The session exposes just what the server needs: the underlying engine board
 (for ``convert.board_to_model``), the legal flat-action indices for the acting
 player, a small status snapshot (phase / dice / whose turn / winner), and the
 game's chat / log -- every move is logged as it is played, chat messages are
-appended via :meth:`GameSession.add_chat`, and reset starts a fresh log.
+appended via :meth:`GameSession.add_chat`, and reset starts a fresh log. The
+full move trace is also kept, so :meth:`GameSession.record` can export the
+game as a replayable ``catan_engine.record.GameRecord`` at any point.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import numpy as np
 from catan_engine.env.aec import CatanAECEnv
 from catan_engine.board import Board
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, GamePhase
+from catan_engine.record import GameRecord, Move
 
 from .actions import decode_actions
 from .bots import POLICIES, bot_act
@@ -99,8 +102,16 @@ class GameSession:
             )
         self.seats: list[str] = list(seats)
         self.seed = seed
+        self.number_placement: Literal["random", "spiral"] = number_placement
         self.env = CatanAECEnv(
-            seed=seed, n_players=self.n_players, number_placement=number_placement
+            seed=seed,
+            n_players=self.n_players,
+            number_placement=number_placement,
+            # Belief seats read the env's honest per-observer card counting.
+            track_beliefs=any(
+                kind != HUMAN and POLICIES[kind].observes == "belief"
+                for kind in self.seats
+            ),
         )
         # Dedicated key so bot choices are reproducible per seed and independent
         # of the engine's own randomness.
@@ -108,6 +119,8 @@ class GameSession:
         self._log: list[LogEntryModel] = []
         self._log_id = 0
         self._win_logged = False
+        # Full move trace for GameRecord export (unlike the capped chat log).
+        self._moves: list[Move] = []
 
     # -- engine views -----------------------------------------------------
 
@@ -170,6 +183,18 @@ class GameSession:
         """Append a chat line (``player`` is its seat; ``None``: a spectator)."""
         self._push_log("chat", player=player, text=text)
 
+    def record(self) -> GameRecord:
+        """The game so far as a replayable ``catan_engine.record.GameRecord``
+        (seats noted in ``meta``; ``winner`` is None while still running)."""
+        return GameRecord(
+            seed=self.seed,
+            n_players=self.n_players,
+            number_placement=self.number_placement,
+            moves=tuple(self._moves),
+            winner=self.winner(),
+            meta={"seats": self.seats},
+        )
+
     def _push_log(
         self,
         kind: Literal["move", "chat", "win"],
@@ -190,11 +215,13 @@ class GameSession:
     def _log_move(self, seat: int, flat: int) -> None:
         """Log a just-played move (and the win, once the game ends)."""
         action = decode_actions([flat])[0]
-        text = (
-            f"rolled {int(self.env._env._state.dice_roll[0])}"
+        dice = (
+            int(self.env._env._state.dice_roll[0])
             if action.type == "roll_dice"
-            else action.label
+            else None
         )
+        self._moves.append(Move(player=seat, flat=flat, dice=dice))
+        text = f"rolled {dice}" if dice is not None else action.label
         self._push_log("move", player=seat, action_type=action.type, text=text)
         winner = self.winner()
         if winner is not None and not self._win_logged:

@@ -213,6 +213,19 @@ def test_chat_endpoint_appends_to_log() -> None:
     assert client.post("/api/game/reset", json={"seed": 1}).json()["log"] == []
 
 
+def test_record_endpoint_exports_the_game() -> None:
+    game = client.get("/api/game").json()
+    client.post("/api/game/action", json={"flat": game["actions"][0]["flat"]})
+    resp = client.get("/api/game/record")
+    assert resp.status_code == 200
+    doc = resp.json()
+    assert doc["version"] == 1
+    assert doc["n_players"] == 4 and doc["winner"] is None
+    assert doc["meta"]["seats"] == ["human", "random", "random", "random"]
+    (move,) = doc["moves"]
+    assert move["player"] == 0 and move["type"] == "setup_settlement"
+
+
 def test_chat_rejects_blank_text_and_bad_seat() -> None:
     assert client.post("/api/game/chat", json={"text": "   "}).status_code == 422
     assert client.post("/api/game/chat", json={"text": "hi", "player": 9}).status_code == 422

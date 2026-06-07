@@ -1,11 +1,11 @@
 """Bot seats: the catan-agents registry adapted to the renderer's single game.
 
 ``POLICIES`` is catan-agents' registry (name -> ``AgentSpec``); a spec declares
-which protocol its policy speaks (observation- or state-based) and the seat
-counts it supports (the two-player lookahead / mcts agents are only offered in
-two-player games). :func:`bot_act` hides the dispatch: it slices the single
+which protocol its policy speaks (observation- or belief-based) and the seat
+counts it supports. :func:`bot_act` hides the dispatch: it slices the single
 game out of the renderer's batch-of-one env and calls the policy through the
-right protocol.
+right protocol (belief seats read the env's honest ``belief_view``, so the env
+must be built with ``track_beliefs=True`` when any are seated).
 """
 
 from typing import cast
@@ -13,13 +13,13 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 from catan_agents import POLICIES, AgentSpec
-from catan_agents.shared.policy import Policy, StatePolicy
+from catan_agents.shared.policy import BeliefPolicy, Policy
 from catan_engine.env import BatchedCatanEnv
 
 __all__ = ["POLICIES", "AgentSpec", "bot_act", "supported_counts"]
 
 # Jitted policies, compiled once per kind across sessions.
-_BOT_ACTS: dict[str, Policy | StatePolicy] = {}
+_BOT_ACTS: dict[str, Policy | BeliefPolicy] = {}
 
 
 def supported_counts() -> dict[str, list[int]]:
@@ -36,7 +36,10 @@ def bot_act(kind: str, key: jax.Array, benv: BatchedCatanEnv, seat: int) -> int:
     if spec.observes == "observation":
         obs = {k: v[0] for k, v in benv.observe(seat).items()}
         return int(cast(Policy, _BOT_ACTS[kind])(key, obs, mask))
-    layout, state = jax.tree.map(lambda x: x[0], benv.board)
+    layout = jax.tree.map(lambda x: x[0], benv.board[0])
+    state, belief = jax.tree.map(lambda x: x[0], benv.belief_view(seat))
     return int(
-        cast(StatePolicy, _BOT_ACTS[kind])(key, layout, state, jnp.int32(seat), mask)
+        cast(BeliefPolicy, _BOT_ACTS[kind])(
+            key, layout, state, belief, jnp.int32(seat), mask
+        )
     )

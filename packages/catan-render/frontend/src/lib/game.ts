@@ -136,7 +136,7 @@ export async function postReset(config: NewGameConfig): Promise<GameSnapshot> {
 }
 
 // The bot kinds the server offers for seats, each with the player counts it
-// supports (the two-player search agents are 2-only).
+// supports.
 export async function fetchBots(): Promise<Record<string, number[]>> {
   return api<Record<string, number[]>>("/api/bots");
 }

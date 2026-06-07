@@ -114,10 +114,19 @@ def post_bot_step() -> GameModel:
         return _game_model(bot_move=move)
 
 
+@app.get("/api/game/record")
+def get_record() -> Response:
+    """The current game as ``catan_engine.record`` JSON -- a self-contained,
+    replayable transcript (``winner`` is null while the game is running)."""
+    with _LOCK:
+        body = _SESSION.record().to_json()
+    return Response(content=body, media_type="application/json")
+
+
 @app.get("/api/bots")
 def get_bots() -> dict[str, list[int]]:
     """Bot kinds available for seats (catan-agents names), each with the
-    player counts it supports (the two-player search agents are 2-only)."""
+    player counts it supports."""
     return supported_counts()
 
 
