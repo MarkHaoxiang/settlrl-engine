@@ -13,6 +13,12 @@ repos:
         language: system
         types_or: [python, pyi]
         require_serial: true
+      - id: stack-bound-doc
+        name: stack-bound doc up to date
+        entry: bash -c 'uv run python packages/catan-engine/tools/gen_stack_bound_doc.py && git diff --exit-code packages/catan-engine/docs/longest-road-stack-bound.html'
+        language: system
+        pass_filenames: false
+        files: ^packages/catan-engine/(tools/gen_stack_bound_doc\.py|docs/longest-road-stack-bound\.html)$
       - id: mypy
         name: mypy
         entry: uv run mypy packages/catan-engine/src packages/catan-engine/tests packages/catan-render/src

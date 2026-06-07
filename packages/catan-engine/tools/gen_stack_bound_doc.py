@@ -244,12 +244,10 @@ h2 { font-size: 1.25rem; margin: 2.6rem 0 0.8rem; }
   background: var(--panel); border-left: 3px solid var(--accent);
   border-radius: 6px; padding: 0.7rem 1.1rem; margin: 1.1rem 0;
 }
-.box.red { border-left-color: var(--red); }
 .box .tag {
   font-family: system-ui, sans-serif; font-weight: 600; font-size: 0.82em;
   text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);
 }
-.box.red .tag { color: var(--red); }
 .eq {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.84em; background: var(--eq); border-radius: 6px;
@@ -440,32 +438,6 @@ which is why the fuzz test
 peaks around 30. The fuzz test stays load-bearing regardless of this proof: JAX
 silently drops out-of-bounds scatter updates, so an overflow would corrupt results
 without raising.</p>
-
-<h2>5&ensp;Below 444: the resource model (open)</h2>
-
-<div class="box red"><span class="tag">Conjecture</span><br>
-peak &le; S + min(S,&thinsp;K) + K&middot;(&lfloor;&rho;&#8320;/3&rfloor; &minus; 1)
-&asymp; <strong>316</strong>, where &rho;&#8320; = 2M &minus; 2 = 28.</div>
-
-<p>The gap between 444 and the observed ~30 is about edge scarcity, which
-F1&ndash;F4 cannot see. The sharper model gives each frame the resource
-<span class="m">&rho; = 2M &minus; 2d &minus; b</span>, where b counts the
-<em>sibling edges</em> its lineage left behind when branching. Three provable facts
-&mdash; a lineage branches at most once per vertex; walking into a sibling edge
-dead-ends; an edge offers at most two sibling slots (one per endpoint) &mdash; give
-b &le; 2(M &minus; d), so &rho; &ge; 0 for every frame that can still branch. In
-&rho;-terms a chain costs 2, a branch costs 3, and seeds start at &rho;&#8320; = 28.</p>
-
-<p>Exhaustive small-instance searches (exact for K &le; 3) and policy probes up to
-K = 8 all match a growth rate of K per 3 resource, but the law is unproven. The
-obstruction: chain fronts hold the top of the stack at cost 2 per level while width
-is bought at cost 3 beneath them, so any induction keyed on a region&rsquo;s
-<em>maximum</em> resource (like &sect;3&rsquo;s) leaks back to the cost-2 rate; and
-single-block potential arguments provably cannot work, because transient overshoots
-are real (for &rho;&#8320; &equiv; 2 (mod 3) the exact peak exceeds the law by up to
-K &minus; 1). Mapping the real DFS onto the &rho;-model also needs care at the
-bottom: a frame whose two free edges are both spent siblings pushes two children
-that die on arrival. Until someone closes this, the practical cap stays 445.</p>
 
 <footer>
 Source: <span class="m">src/catan_engine/mechanics/longest_road.py</span>
