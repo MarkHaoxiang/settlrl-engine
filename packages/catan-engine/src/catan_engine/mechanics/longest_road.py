@@ -27,15 +27,18 @@ from catan_engine.board.state import (
 _POP_K = 32
 
 # Stack bound, assuming the rule invariant n_owned <= MAX_ROADS (= 15). Seeding
-# puts at most 2 * n_owned <= 30 frames on the stack. Each popped frame pushes
+# puts at most S = 2 * MAX_ROADS frames on the stack; each popped frame pushes
 # at most deg - 1 <= 2 children (the arrival edge is always in the frame's used
-# set), so a block expansion grows the stack by at most +_POP_K net; a trail's
-# length is capped at n_owned, so at most MAX_ROADS - 1 = 14 expansion levels
-# can be live (at _POP_K = 1 this bound is provably tight). The level argument
-# is heuristic for mixed-depth blocks; tests/mechanics/test_rules.py fuzzes the
-# peak sp against it. The top slot is scratch (_DUMP), never popped: dropped
-# seeds and invalid children park there.
-STACK_CAP = 2 * MAX_ROADS + (MAX_ROADS - 1) * _POP_K + 1
+# set), and pushing 2 needs two unused owned edges at the tip, so only trails
+# of length <= MAX_ROADS - 2 branch. Peak occupancy is provably at most
+# S + min(S, _POP_K) + (MAX_ROADS - 3) * _POP_K, and that is tight in the
+# abstract stack model — see docs/longest-road-stack-bound.md for the proof.
+# tests/mechanics/test_rules.py fuzzes the real peak sp against it (observed
+# 30). The top slot is scratch (_DUMP), never popped: dropped seeds and
+# invalid children park there.
+STACK_CAP = (
+    2 * MAX_ROADS + min(2 * MAX_ROADS, _POP_K) + (MAX_ROADS - 3) * _POP_K + 1
+)
 _DUMP = STACK_CAP - 1
 
 # Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built
