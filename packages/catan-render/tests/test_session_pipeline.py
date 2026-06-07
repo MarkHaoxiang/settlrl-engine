@@ -9,7 +9,7 @@ decode layer to real engine behaviour rather than to a parallel reconstruction.
 """
 
 from catan_engine.board.state import GamePhase
-from catan_engine.env.aec import _N_FLAT
+from catan_engine.env import N_FLAT
 
 from catan_render.actions import decode_actions
 from catan_render.convert import board_to_model
@@ -51,7 +51,7 @@ def test_legal_actions_decode_and_roundtrip() -> None:
 def test_illegal_action_rejected() -> None:
     sess = GameSession(seed=0)
     legal = set(int(f) for f in sess.legal_flat())
-    illegal = next(f for f in range(_N_FLAT) if f not in legal)
+    illegal = next(f for f in range(N_FLAT) if f not in legal)
     with pytest.raises(IllegalActionError):
         sess.apply(illegal)
 

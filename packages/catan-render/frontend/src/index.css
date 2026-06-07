@@ -2,9 +2,33 @@
   box-sizing: border-box;
 }
 
+/* Newly placed board pieces (roads / buildings) pop in. Applied to SVG groups:
+   the piece scales up around its own bounding box. */
+@keyframes pop-in {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.piece-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pop-in 0.35s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
 body {
   margin: 0;
-  background: #1a3a5c;
+  /* Much darker than the ocean blues, so the board reads as a lit table. */
+  background: radial-gradient(ellipse at 50% 35%, #15293d 0%, #090f17 75%);
   display: flex;
   justify-content: center;
   align-items: center;

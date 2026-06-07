@@ -1,3 +1,6 @@
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -10,35 +13,72 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from .actions import decode_actions
+from .bots import supported_counts
 from .convert import board_to_model
-from .models import BoardModel, GameModel
+from .models import BoardModel, BotMoveModel, GameModel
 from .session import GameSession, IllegalActionError
 
-app = FastAPI(title="Catan Render")
+def _warm_jit_cache() -> None:
+    """Play throwaway moves so XLA compiles before the first real click.
 
-# A single live game vs. random bots (human plays seat 0). One game at a time;
-# POST /api/game/reset starts a fresh one.
+    The first engine step in a fresh process compiles for a couple of seconds,
+    once per seat count (the compiled shapes depend on n_players). Scratch
+    sessions take that hit at startup instead of the user's first placement;
+    the in-process jit cache is shared, so the live session then steps in
+    milliseconds.
+    """
+    for n_players in (4, 2):
+        scratch = GameSession(seed=0, n_players=n_players)
+        scratch.apply(int(scratch.legal_flat()[0]))  # compiles the env step
+        scratch.apply(int(scratch.legal_flat()[0]))
+        scratch.bot_step()  # compiles the default bot policy
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    threading.Thread(target=_warm_jit_cache, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Catan Render", lifespan=_lifespan)
+
+# A single live game; each seat is a human or a bot per the last reset (an
+# all-bot game is watchable). One game at a time; POST /api/game/reset starts
+# a fresh one.
 _SESSION = GameSession()
 
+# FastAPI runs sync endpoints in a threadpool, and the session is not
+# thread-safe (concurrent requests would race its legality check and step the
+# engine twice) -- every session access is serialised.
+_LOCK = threading.Lock()
 
-def _game_model() -> GameModel:
+
+def _game_model(bot_move: BotMoveModel | None = None) -> GameModel:
     """The full Play-view snapshot: board + turn status + the human's legal moves."""
     status = _SESSION.status()
     actions = (
         decode_actions([int(f) for f in _SESSION.legal_flat()]) if status.your_turn else []
     )
-    return GameModel(board=board_to_model(_SESSION.board), status=status, actions=actions)
+    return GameModel(
+        board=board_to_model(_SESSION.board),
+        status=status,
+        actions=actions,
+        bot_move=bot_move,
+        log=_SESSION.log(),
+    )
 
 
 @app.get("/api/board")
 def get_board() -> BoardModel:
     """Board geometry + player stats (used by the Replay view and shared hook)."""
-    return board_to_model(_SESSION.board)
+    with _LOCK:
+        return board_to_model(_SESSION.board)
 
 
 @app.get("/api/game")
 def get_game() -> GameModel:
-    return _game_model()
+    with _LOCK:
+        return _game_model()
 
 
 class _ActionRequest(BaseModel):
@@ -47,25 +87,84 @@ class _ActionRequest(BaseModel):
 
 @app.post("/api/game/action")
 def post_action(req: _ActionRequest) -> GameModel:
-    try:
-        _SESSION.apply(req.flat)
-    except IllegalActionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _game_model()
+    """Apply the acting human's move (bot replies are stepped via /api/game/bot)."""
+    with _LOCK:
+        try:
+            _SESSION.apply(req.flat)
+        except IllegalActionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _game_model()
+
+
+@app.post("/api/game/bot")
+def post_bot_step() -> GameModel:
+    """Play one due bot move; the snapshot plus what was played (``bot_move``).
+
+    ``bot_move`` is null when no bot move is due (a human seat is acting or the
+    game is over) -- the client polls this until ``status.your_turn``.
+    """
+    with _LOCK:
+        seat = _SESSION.acting_seat()
+        flat = _SESSION.bot_step()
+        move = (
+            None
+            if flat is None
+            else BotMoveModel(player=seat, action=decode_actions([flat])[0])
+        )
+        return _game_model(bot_move=move)
+
+
+@app.get("/api/bots")
+def get_bots() -> dict[str, list[int]]:
+    """Bot kinds available for seats (catan-agents names), each with the
+    player counts it supports (the two-player search agents are 2-only)."""
+    return supported_counts()
+
+
+class _ChatRequest(BaseModel):
+    text: str
+    # Seat the message belongs to; None for a spectator.
+    player: int | None = None
+
+
+@app.post("/api/game/chat")
+def post_chat(req: _ChatRequest) -> GameModel:
+    """Append a chat message to the game log."""
+    text = req.text.strip()
+    if not text or len(text) > 500:
+        raise HTTPException(status_code=422, detail="chat text must be 1-500 characters")
+    with _LOCK:
+        if req.player is not None and not 0 <= req.player < _SESSION.n_players:
+            raise HTTPException(status_code=422, detail="no such seat")
+        _SESSION.add_chat(req.player, text)
+        return _game_model()
 
 
 class _ResetRequest(BaseModel):
     seed: int = 0
-    # Seats in the new game (the human + bots). The engine supports 2-4; the
-    # renderer offers 2 and 4 for now.
+    # Seats in the new game. The engine supports 2-4; the renderer offers 2
+    # and 4 for now.
     n_players: Literal[2, 4] = 4
     number_placement: Literal["random", "spiral"] = "random"
+    # What controls each seat: "human" (hotseat) or a bot kind from
+    # GET /api/bots; no seat has to be human. None seats a human on seat 0
+    # and "random" bots elsewhere.
+    seats: list[str] | None = None
 
 
 @app.post("/api/game/reset")
 def post_reset(req: _ResetRequest) -> GameModel:
-    _SESSION.reset(req.seed, n_players=req.n_players, number_placement=req.number_placement)
-    return _game_model()
+    with _LOCK:
+        try:
+            _SESSION.reset(
+                req.seed,
+                n_players=req.n_players,
+                number_placement=req.number_placement,
+                seats=req.seats,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _game_model()
 
 
 class _SPAStaticFiles(StaticFiles):

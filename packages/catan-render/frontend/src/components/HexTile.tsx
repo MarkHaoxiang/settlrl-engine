@@ -1,6 +1,15 @@
 import { hexCorners } from "../lib/hex";
 import { TERRAIN_FILL as FILL, TERRAIN_STROKE as STROKE } from "../lib/boardData";
 import type { Terrain } from "../lib/boardData";
+import TerrainIcon from "./TerrainIcon";
+
+// Where the terrain motifs sit (fractions of the hex size from the centre):
+// one above and two below the number token.
+const MOTIF_SPOTS: [number, number][] = [
+  [0, -0.52],
+  [-0.45, 0.3],
+  [0.45, 0.3],
+];
 
 interface Props {
   cx: number;
@@ -41,6 +50,15 @@ export default function HexTile({ cx, cy, size, terrain, number }: Props) {
         strokeWidth={1}
         opacity={0.4}
       />
+      {MOTIF_SPOTS.map(([dx, dy], i) => (
+        <TerrainIcon
+          key={i}
+          terrain={terrain}
+          cx={cx + dx * size}
+          cy={cy + dy * size}
+          scale={size * 0.013}
+        />
+      ))}
       {number !== undefined && (
         <g>
           <circle

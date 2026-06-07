@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import BoardView, { type BoardInteraction } from "../components/BoardView";
+import ChatPanel from "../components/ChatPanel";
 import NewGameDialog from "../components/NewGameDialog";
+import TerrainIcon from "../components/TerrainIcon";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
+import { actionMeta } from "../lib/actionMeta";
 import type { GameAction } from "../lib/game";
 import {
   PLAYER_COLORS,
@@ -23,8 +26,6 @@ import {
   selectedStyle,
 } from "../lib/ui";
 
-const LOCAL_PLAYER = 0;
-
 const RESOURCES: { key: ResourceKind; label: string }[] = [
   { key: "wood", label: "Wood" },
   { key: "brick", label: "Brick" },
@@ -33,12 +34,12 @@ const RESOURCES: { key: ResourceKind; label: string }[] = [
   { key: "ore", label: "Ore" },
 ];
 
-const DEV_CARDS: { key: DevCardKind; label: string }[] = [
-  { key: "knight", label: "Knight" },
-  { key: "road_building", label: "Roads" },
-  { key: "year_of_plenty", label: "Plenty" },
-  { key: "monopoly", label: "Mono" },
-  { key: "victory_point", label: "VP" },
+const DEV_CARDS: { key: DevCardKind; label: string; icon: string }[] = [
+  { key: "knight", label: "Knight", icon: "⚔️" },
+  { key: "road_building", label: "Road building", icon: "🚧" },
+  { key: "year_of_plenty", label: "Year of plenty", icon: "🎁" },
+  { key: "monopoly", label: "Monopoly", icon: "🎩" },
+  { key: "victory_point", label: "Victory point", icon: "⭐" },
 ];
 
 const DEV_FILL = "#5B4B8A";
@@ -58,89 +59,117 @@ const BOARD_TYPES = new Set([
 // Action types whose concrete variants are chosen from a popover list.
 const RESOURCE_TYPES = new Set(["play_monopoly", "play_year_of_plenty", "maritime_trade"]);
 
-// Button label per action type (board / parameterless / resource group buttons).
-const TYPE_LABEL: Record<string, string> = {
-  setup_settlement: "Place settlement",
-  build_settlement: "Settlement",
-  build_city: "City",
-  setup_road: "Place road",
-  build_road: "Road",
-  move_robber: "Move robber",
-  play_knight: "Knight",
-  roll_dice: "Roll dice",
-  end_turn: "End turn",
-  buy_development_card: "Buy dev card",
-  play_road_building: "Road building",
-  discard: "Discard",
-  play_monopoly: "Monopoly",
-  play_year_of_plenty: "Year of plenty",
-  maritime_trade: "Trade",
-};
-
 const PHASE_LABEL: Record<string, string> = {
-  setup_settlement: "Setup — place a settlement",
-  setup_road: "Setup — place a road",
-  roll: "Roll the dice",
-  discard: "Discard cards",
-  move_robber: "Move the robber",
-  main: "Main phase",
+  setup_settlement: "Setup",
+  setup_road: "Setup",
+  roll: "Roll",
+  discard: "Discard",
+  move_robber: "Robber",
+  main: "Main",
   game_over: "Game over",
 };
 
 const smallButton: React.CSSProperties = { ...buttonStyle, padding: "5px 12px", fontSize: 12 };
 
-function Chip({ count, label, fill, stroke }: { count: number; label: string; fill: string; stroke: string }) {
+// A hand chip: the count over a faded background icon (the card's name is the
+// hover tooltip).
+function Chip({
+  count,
+  label,
+  icon,
+  fill,
+  stroke,
+}: {
+  count: number;
+  label: string;
+  icon: React.ReactNode;
+  fill: string;
+  stroke: string;
+}) {
   const empty = count === 0;
   return (
     <div
+      title={label}
       style={{
+        position: "relative",
         display: "flex",
-        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        minWidth: 46,
-        padding: "6px 8px",
-        borderRadius: 10,
+        width: 40,
+        height: 34,
+        borderRadius: 8,
         background: fill,
         border: `2px solid ${stroke}`,
         opacity: empty ? 0.4 : 1,
       }}
     >
-      <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1, color: "#1a1a1a" }}>{count}</span>
-      <span style={{ fontSize: 10, marginTop: 2, color: "#1a1a1a", opacity: 0.8 }}>{label}</span>
+      <span
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {icon}
+      </span>
+      <span
+        style={{
+          position: "relative",
+          fontSize: 16,
+          fontWeight: 800,
+          lineHeight: 1,
+          color: "#1a1a1a",
+          // A halo in the chip colour keeps the digit legible over the icon.
+          textShadow: `0 0 4px ${fill}, 0 0 4px ${fill}, 0 0 3px ${fill}`,
+        }}
+      >
+        {count}
+      </span>
     </div>
   );
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: 10, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>{title}</span>
-      <div style={{ display: "flex", gap: 6 }}>{children}</div>
-    </div>
-  );
-}
-
-// The local player's hand: resources + dev cards by type.
-function Hand({ player }: { player: Player }) {
+// The acting human's hand: resources + dev cards by type, on a single row.
+function Hand({ player, you }: { player: Player; you: boolean }) {
   const color = PLAYER_COLORS[player.player] ?? "#888";
   const stroke = PLAYER_STROKES[player.player] ?? "#444";
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 }}>
-        <span style={{ width: 16, height: 16, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }} />
-        <span style={{ fontWeight: 700, fontSize: 14 }}>{playerName(player.player)} (you)</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 8 }}>
+        <span style={{ width: 14, height: 14, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }} />
+        <span style={{ fontWeight: 700, fontSize: 13 }}>
+          {playerName(player.player)}
+          {you ? " (you)" : ""}
+        </span>
       </div>
-      <Group title="Resources">
-        {RESOURCES.map((r) => (
-          <Chip key={r.key} count={player.resources[r.key]} label={r.label} fill={TERRAIN_FILL[r.key]} stroke={TERRAIN_STROKE[r.key]} />
-        ))}
-      </Group>
-      <Group title="Dev cards">
-        {DEV_CARDS.map((d) => (
-          <Chip key={d.key} count={player.devCardTypes[d.key]} label={d.label} fill={DEV_FILL} stroke={DEV_STROKE} />
-        ))}
-      </Group>
+      {RESOURCES.map((r) => (
+        <Chip
+          key={r.key}
+          count={player.resources[r.key]}
+          label={r.label}
+          // The board tiles' motif, so chips match the terrain they come from.
+          icon={
+            <svg width={28} height={28} viewBox="-11 -11 22 22">
+              <TerrainIcon terrain={r.key} cx={0} cy={0} scale={1.1} opacity={0.9} />
+            </svg>
+          }
+          fill={TERRAIN_FILL[r.key]}
+          stroke={TERRAIN_STROKE[r.key]}
+        />
+      ))}
+      <span style={{ width: 1, alignSelf: "stretch", background: "rgba(255,255,255,0.15)", margin: "0 8px" }} />
+      {DEV_CARDS.map((d) => (
+        <Chip
+          key={d.key}
+          count={player.devCardTypes[d.key]}
+          label={d.label}
+          icon={<span style={{ fontSize: 17, opacity: 0.8 }}>{d.icon}</span>}
+          fill={DEV_FILL}
+          stroke={DEV_STROKE}
+        />
+      ))}
     </div>
   );
 }
@@ -168,7 +197,7 @@ function ChoicePopover({ actions, onPick, onClose }: { actions: GameAction[]; on
 }
 
 export default function PlayView() {
-  const { snapshot, error, busy, act, reset } = useGame();
+  const { snapshot, error, busy, act, reset, chat } = useGame();
   const [armed, setArmed] = useState<string | null>(null);
   const [choice, setChoice] = useState<GameAction[] | null>(null);
   // Whether the new-game configuration dialog is open (shown on entry, and
@@ -233,7 +262,21 @@ export default function PlayView() {
   if (!snapshot) return <div style={overlayMsgStyle}>Loading game…</div>;
 
   const { status, board } = snapshot;
-  const me = board.players[LOCAL_PLAYER];
+  // Hotseat: the hand panel follows whichever human seat is acting (falling
+  // back to the first human while bots play out or at game over). With no
+  // human seats at all the game is a spectated bot match: no hand panel.
+  const seats = status.seats;
+  const soloHuman = seats.filter((s) => s === "human").length === 1;
+  const handSeat = seats[status.acting_player] === "human" ? status.acting_player : seats.indexOf("human");
+  const me = handSeat >= 0 ? board.players[handSeat] : null;
+  const winnerLabel =
+    status.winner == null
+      ? ""
+      : seats[status.winner] === "human"
+        ? soloHuman
+          ? "You win! 🎉"
+          : `${playerName(status.winner)} wins! 🎉`
+        : `${playerName(status.winner)} wins`;
 
   // The action buttons, derived from the distinct legal action types.
   const onTypeButton = (type: string) => {
@@ -243,84 +286,120 @@ export default function PlayView() {
   };
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
-      <BoardView board={board} interaction={interaction} />
-      <TopBar mode="Play" />
+    <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
+      {/* Board area: the chrome inside is anchored to it, not the viewport */}
+      <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
+        <BoardView board={board} interaction={interaction} />
+        <TopBar mode="Play" />
 
-      {configuring && (
-        <NewGameDialog
-          onStart={(config) => {
-            setConfiguring(false);
-            reset(config);
-          }}
-          onClose={() => setConfiguring(false)}
-        />
-      )}
+        {status.terminal && (
+          <div
+            style={{
+              ...panelStyle,
+              position: "absolute",
+              top: 70,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "10px 20px",
+              color: HIGHLIGHT,
+              fontWeight: 700,
+              zIndex: 10,
+            }}
+          >
+            {winnerLabel}
+          </div>
+        )}
 
-      {status.terminal && (
+        {/* Full-width flex strip so the panel centres without halving the
+            shrink-to-fit width (which would wrap the hand). */}
         <div
           style={{
-            ...panelStyle,
             position: "absolute",
-            top: 70,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "10px 20px",
-            color: HIGHLIGHT,
-            fontWeight: 700,
-            zIndex: 10,
-          }}
-        >
-          {status.winner === LOCAL_PLAYER ? "You win! 🎉" : `${playerName(status.winner ?? 0)} wins`}
-        </div>
-      )}
-
-      <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)" }}>
-        <div
-          style={{
-            ...panelStyle,
+            bottom: 16,
+            left: 0,
+            right: 0,
             display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            padding: "14px 18px",
-            borderRadius: 16,
-            boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
-            maxWidth: "92vw",
+            justifyContent: "center",
+            pointerEvents: "none",
           }}
         >
-          <Hand player={me} />
+          <div
+            style={{
+              ...panelStyle,
+              pointerEvents: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              padding: "10px 16px",
+              borderRadius: 16,
+              boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
+              maxWidth: "94%",
+            }}
+          >
+            {me && <Hand player={me} you={soloHuman} />}
 
-          {/* Status + actions */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 13, opacity: 0.85 }}>
-              <span style={{ fontWeight: 700 }}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
-              {status.dice_roll > 0 && <span>🎲 {status.dice_roll}</span>}
-              <span style={{ opacity: 0.7 }}>
-                {busy ? "Bots thinking…" : status.your_turn ? "Your turn" : status.terminal ? "Game over" : "Waiting…"}
-              </span>
-              {armed && BOARD_TYPES.has(armed) && !busy && (
-                <span style={{ color: HIGHLIGHT }}>Click a highlighted spot to place ({TYPE_LABEL[armed]})</span>
+            {/* Status + action buttons share one row */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                fontSize: 13,
+                flexWrap: "wrap",
+                ...(me ? { borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: 8 } : {}),
+              }}
+            >
+              <span style={{ fontWeight: 700, opacity: 0.85 }}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
+              {status.dice_roll > 0 && <span style={{ opacity: 0.85 }}>🎲 {status.dice_roll}</span>}
+              {snapshot.bot_move && (
+                <span
+                  className="fade-in"
+                  title={`${playerName(snapshot.bot_move.player)} · ${snapshot.bot_move.action.label}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: PLAYER_COLORS[snapshot.bot_move.player] ?? "#888",
+                    }}
+                  />
+                  <span style={{ fontSize: 16 }}>{actionMeta(snapshot.bot_move.action.type).icon}</span>
+                </span>
               )}
+              <span style={{ opacity: 0.6 }}>
+                {status.terminal
+                  ? "Game over"
+                  : status.your_turn
+                    ? soloHuman
+                      ? "Your turn"
+                      : `${playerName(status.acting_player)}'s turn`
+                    : `${playerName(status.acting_player)} is thinking…`}
+              </span>
+              {!status.terminal &&
+                status.your_turn &&
+                availableTypes.map((type) => (
+                  <button
+                    key={type}
+                    title={actionMeta(type).label}
+                    style={{
+                      ...buttonStyle,
+                      fontSize: 18,
+                      padding: "5px 12px",
+                      lineHeight: 1.2,
+                      ...(armed === type ? selectedStyle : {}),
+                    }}
+                    disabled={busy}
+                    onClick={() => onTypeButton(type)}
+                  >
+                    {actionMeta(type).icon}
+                  </button>
+                ))}
               <button style={{ ...smallButton, marginLeft: "auto" }} onClick={() => setConfiguring(true)}>
                 New game
               </button>
             </div>
-
-            {!status.terminal && (
-              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                {availableTypes.length === 0 && <span style={{ fontSize: 13, opacity: 0.6 }}>No moves available.</span>}
-                {availableTypes.map((type) => (
-                  <button
-                    key={type}
-                    style={{ ...buttonStyle, ...(armed === type ? selectedStyle : {}) }}
-                    disabled={busy}
-                    onClick={() => onTypeButton(type)}
-                  >
-                    {TYPE_LABEL[type] ?? type}
-                  </button>
-                ))}
-              </div>
-            )}
 
             {choice && (
               <ChoicePopover
@@ -335,6 +414,21 @@ export default function PlayView() {
           </div>
         </div>
       </div>
+
+      <ChatPanel
+        entries={snapshot.log}
+        onSend={(text) => chat(text, handSeat >= 0 ? handSeat : null)}
+      />
+
+      {configuring && (
+        <NewGameDialog
+          onStart={(config) => {
+            setConfiguring(false);
+            reset(config);
+          }}
+          onClose={() => setConfiguring(false)}
+        />
+      )}
     </div>
   );
 }

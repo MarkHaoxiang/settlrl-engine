@@ -11,7 +11,7 @@ interface Props {
 
 export default function Road({ x1, y1, x2, y2, player, width }: Props) {
   return (
-    <g>
+    <g className="piece-pop">
       <title>Player {player + 1} road</title>
       {/* Darker casing for contrast against the tile edges. */}
       <line

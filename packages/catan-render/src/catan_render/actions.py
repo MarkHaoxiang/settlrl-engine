@@ -1,22 +1,30 @@
 """Decode the AEC flat action set into JSON-friendly action descriptors.
 
-The engine's AEC wrapper enumerates every concrete move as a flat ``Discrete``
-index (the ``_ATYPE`` / ``_IDX`` / ``_TARGET`` lookup tables in
-``catan_engine.mechanics.action``). The renderer needs each
-legal index turned into something the frontend can act on: the action type, a
-human label, and — for placement / robber / resource moves — the board geometry
-or resources involved, expressed in the same cube/axial coordinates the SVG board
-already uses (reused from :mod:`catan_render.convert`).
+The engine enumerates every concrete move as a flat ``Discrete`` index
+(``catan_engine.env.N_FLAT`` rows, decoded with ``flat_to_action``). The
+renderer needs each legal index turned into something the frontend can act on:
+the action type, a human label, and — for placement / robber / resource moves —
+the board geometry or resources involved, expressed in the same cube/axial
+coordinates the SVG board already uses (reused from
+:mod:`catan_render.convert`).
 """
 
 from __future__ import annotations
 
-from catan_engine.mechanics.action import _ATYPE, _IDX, _TARGET, ActionType
+import jax.numpy as jnp
+import numpy as np
+from catan_engine.env import N_FLAT, ActionType, flat_to_action
 
 from .convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _RESOURCE_NAMES, _cube
 from .models import ActionModel, EdgeModel, HexModel
 
 __all__ = ["decode_actions", "_decode", "_RESOURCE_NAMES"]
+
+# Host-side copy of the engine's flat action table: row -> (type, idx, target).
+_row_type, _row_params = flat_to_action(jnp.arange(N_FLAT))
+_ATYPE = np.asarray(_row_type)
+_IDX = np.asarray(_row_params.idx)
+_TARGET = np.asarray(_row_params.target)
 
 # Action types grouped by the kind of board target they carry.
 _VERTEX_TYPES = {

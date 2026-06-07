@@ -39,12 +39,58 @@ interface Props {
   interaction?: BoardInteraction;
 }
 
-// Renders a Catan board (tiles, ports, roads, buildings, robber) as a zoomable
-// SVG, with per-player stat panels anchored to the viewport corners. It fills
+// Renders a Catan board (tiles, ports, roads, buildings, robber) as a zoomable,
+// pannable SVG, with per-player stat panels anchored to the viewport corners. It fills
 // its parent container, so a parent can overlay mode-specific controls on top
 // (the replay scrubber, the play action bar, a back button, …).
 export default function BoardView({ board, interaction }: Props) {
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  // Active drag-to-pan gesture; `moved` flips once past the click-vs-drag
+  // threshold, after which the pointer is captured so releasing over a board
+  // element doesn't also click it.
+  const drag = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    panX: number;
+    panY: number;
+    moved: boolean;
+  } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (drag.current) {
+      // A second touch landed: this is a pinch, not a pan.
+      drag.current = null;
+      return;
+    }
+    drag.current = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+      moved: false,
+    };
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || e.pointerId !== d.id) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) > 4) {
+      d.moved = true;
+      e.currentTarget.setPointerCapture(d.id);
+    }
+    if (d.moved) setPan({ x: d.panX + dx, y: d.panY + dy });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current?.id === e.pointerId) drag.current = null;
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   // Distance between the two active touch points during a pinch gesture.
@@ -113,6 +159,10 @@ export default function BoardView({ board, interaction }: Props) {
   return (
     <div
       ref={containerRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
       style={{
         position: "absolute",
         inset: 0,
@@ -121,9 +171,15 @@ export default function BoardView({ board, interaction }: Props) {
         justifyContent: "center",
         alignItems: "center",
         touchAction: "none",
+        cursor: "grab",
       }}
     >
-      <div style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}>
+      <div
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "center center",
+        }}
+      >
         <svg
           width={width}
           height={height}
@@ -174,13 +230,15 @@ export default function BoardView({ board, interaction }: Props) {
             );
           })}
 
-          {/* Roads sit under buildings */}
-          {board.roads.map((road, i) => {
+          {/* Roads sit under buildings. Keyed by edge identity so existing
+              pieces keep their DOM node and only newly placed ones mount
+              (and play their pop-in animation). */}
+          {board.roads.map((road) => {
             const a = cubeToPixel(road.a, HEX_SIZE);
             const b = cubeToPixel(road.b, HEX_SIZE);
             return (
               <Road
-                key={`road-${i}`}
+                key={`road-${road.a.q},${road.a.r},${road.a.s}-${road.b.q},${road.b.r},${road.b.s}`}
                 x1={a.x + offsetX}
                 y1={a.y + offsetY}
                 x2={b.x + offsetX}
@@ -198,12 +256,13 @@ export default function BoardView({ board, interaction }: Props) {
               return <Robber cx={x + offsetX} cy={y + offsetY} size={HEX_SIZE} />;
             })()}
 
-          {/* Settlements and cities sit on top */}
-          {board.buildings.map((b, i) => {
+          {/* Settlements and cities sit on top. Keyed by vertex + kind: a city
+              upgrade remounts the piece, so it pops in too. */}
+          {board.buildings.map((b) => {
             const { x, y } = cubeToPixel(b.cube, HEX_SIZE);
             return (
               <Building
-                key={`building-${i}`}
+                key={`building-${b.cube.q},${b.cube.r},${b.cube.s}-${b.kind}`}
                 cx={x + offsetX}
                 cy={y + offsetY}
                 size={HEX_SIZE * 0.3}

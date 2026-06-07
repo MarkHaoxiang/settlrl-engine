@@ -9,6 +9,8 @@ requires-python = ">=3.12"
 dependencies = [
     # [rl] pulls in pettingzoo/gymnasium, needed by the AEC env that drives /play.
     "catan-engine[rl]",
+    # Bot policies for the non-human seats.
+    "catan-agents",
     "fastapi[standard]>=0.115.0",
 ]
 
@@ -21,3 +23,4 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 catan-engine = { workspace = true }
+catan-agents = { workspace = true }

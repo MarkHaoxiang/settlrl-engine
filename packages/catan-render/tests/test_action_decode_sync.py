@@ -1,11 +1,13 @@
 """Action-decode sync: ``actions.decode_actions`` must interpret the engine's
-flat action table (``_ATYPE`` / ``_IDX`` / ``_TARGET``) exactly as the engine
-does. For every concrete move in the table we check the renderer agrees on the
-action type and resolves the parameter ``idx`` to the same board coordinate /
-resource the engine would. This catches the table being reordered, an action's
-``idx`` changing meaning, or a new action type the renderer can't decode.
+flat action table (``flat_to_action``) exactly as the engine does. For every
+concrete move in the table we check the renderer agrees on the action type and
+resolves the parameter ``idx`` to the same board coordinate / resource the
+engine would. This catches the table being reordered, an action's ``idx``
+changing meaning, or a new action type the renderer can't decode.
 """
 
+import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from catan_engine.board.layout import (
@@ -13,12 +15,16 @@ from catan_engine.board.layout import (
     tile_cube,
     vertex_cube,
 )
-from catan_engine.env.aec import _ATYPE, _IDX, _N_FLAT, _TARGET
-from catan_engine.mechanics.action import ActionType
+from catan_engine.env import N_FLAT, ActionType, flat_to_action
 
 from catan_render.actions import _RESOURCE_NAMES, _decode, decode_actions
 
-ALL_FLAT = list(range(_N_FLAT))
+_row_type, _row_params = flat_to_action(jnp.arange(N_FLAT))
+_ATYPE = np.asarray(_row_type)
+_IDX = np.asarray(_row_params.idx)
+_TARGET = np.asarray(_row_params.target)
+
+ALL_FLAT = list(range(N_FLAT))
 
 _VERTEX_TYPES = {"setup_settlement", "build_settlement", "build_city"}
 _ROAD_TYPES = {"setup_road", "build_road"}
@@ -28,7 +34,7 @@ _ROBBER_TYPES = {"move_robber", "play_knight"}
 def test_every_flat_index_decodes() -> None:
     # The whole table must round-trip without raising, and preserve its flat id.
     models = decode_actions(ALL_FLAT)
-    assert len(models) == _N_FLAT
+    assert len(models) == N_FLAT
     for flat, m in enumerate(models):
         assert m.flat == flat
         assert m.label  # every action carries a human label

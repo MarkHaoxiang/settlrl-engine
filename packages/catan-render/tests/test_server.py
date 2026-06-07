@@ -6,6 +6,8 @@ serves ``index.html`` for client-side routes. The SPA tests are skipped if the
 built frontend (``frontend/dist``) is absent.
 """
 
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -97,6 +99,123 @@ def test_reset_rejects_unsupported_player_counts() -> None:
     for bad in (1, 3, 5):
         resp = client.post("/api/game/reset", json={"seed": 0, "n_players": bad})
         assert resp.status_code == 422
+
+
+def test_bot_endpoint_steps_one_move_and_reports_it() -> None:
+    # The human plays both setup placements; then the bot seats are due.
+    for _ in range(2):
+        game = client.get("/api/game").json()
+        client.post("/api/game/action", json={"flat": game["actions"][0]["flat"]})
+    body = client.post("/api/game/bot").json()
+    assert body["bot_move"] is not None
+    assert body["bot_move"]["player"] == 1
+    assert body["bot_move"]["action"]["label"]
+    # Stepping repeatedly hands the turn back to the human...
+    for _ in range(100):
+        if body["status"]["your_turn"]:
+            break
+        body = client.post("/api/game/bot").json()
+    assert body["status"]["your_turn"]
+    # ...after which no bot move is due.
+    assert client.post("/api/game/bot").json()["bot_move"] is None
+
+
+def test_get_bots_lists_policies() -> None:
+    resp = client.get("/api/bots")
+    assert resp.status_code == 200
+    bots = resp.json()
+    assert "random" in bots and "human" not in bots
+    # Each kind maps to the player counts it supports.
+    assert set(bots["random"]) >= {2, 4}
+
+
+def test_reset_rejects_seat_kind_unsupported_at_count() -> None:
+    bots = client.get("/api/bots").json()
+    two_only = [k for k, counts in bots.items() if 2 in counts and 4 not in counts]
+    if not two_only:
+        pytest.skip("no two-player-only bot kinds")
+    resp = client.post(
+        "/api/game/reset",
+        json={"seed": 0, "n_players": 4, "seats": ["human", two_only[0], "random", "random"]},
+    )
+    assert resp.status_code == 422
+
+
+def test_reset_with_seats() -> None:
+    resp = client.post(
+        "/api/game/reset",
+        json={"seed": 7, "n_players": 2, "seats": ["human", "random"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"]["seats"] == ["human", "random"]
+
+
+def test_reset_all_bot_seats_spectates() -> None:
+    # No human seat: never your_turn, and the bot endpoint plays from move one
+    # (seat 0, a bot, opens the game).
+    resp = client.post(
+        "/api/game/reset",
+        json={"seed": 7, "n_players": 2, "seats": ["random", "random"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert not body["status"]["your_turn"]
+    assert body["actions"] == []
+    body = client.post("/api/game/bot").json()
+    assert body["bot_move"] is not None
+    assert body["bot_move"]["player"] == 0
+
+
+def test_reset_rejects_bad_seats() -> None:
+    # Unknown bot kind, and a list whose length doesn't match the seat count.
+    for bad in (["human", "clever"], ["human", "random", "random"]):
+        resp = client.post(
+            "/api/game/reset", json={"seed": 0, "n_players": 2, "seats": bad}
+        )
+        assert resp.status_code == 422
+
+
+def test_concurrent_duplicate_actions_apply_once() -> None:
+    # FastAPI handles requests in a threadpool: a double-clicked move arriving
+    # twice concurrently must apply once (the loser gets the usual 409).
+    flat = client.get("/api/game").json()["actions"][0]["flat"]
+    results: list[int] = []
+    post = lambda: results.append(  # noqa: E731
+        client.post("/api/game/action", json={"flat": flat}).status_code
+    )
+    threads = [threading.Thread(target=post) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(results) == [200, 409]
+    assert len(client.get("/api/game").json()["log"]) == 1
+
+
+def test_moves_are_logged() -> None:
+    game = client.get("/api/game").json()
+    assert game["log"] == []
+    flat = game["actions"][0]["flat"]
+    body = client.post("/api/game/action", json={"flat": flat}).json()
+    (entry,) = body["log"]
+    assert entry["kind"] == "move" and entry["player"] == 0
+    assert entry["action_type"] == "setup_settlement"
+
+
+def test_chat_endpoint_appends_to_log() -> None:
+    resp = client.post("/api/game/chat", json={"text": "  hi there  ", "player": 0})
+    assert resp.status_code == 200
+    entry = resp.json()["log"][-1]
+    assert entry["kind"] == "chat"
+    assert entry["player"] == 0
+    assert entry["text"] == "hi there"
+    # A reset starts a fresh log.
+    assert client.post("/api/game/reset", json={"seed": 1}).json()["log"] == []
+
+
+def test_chat_rejects_blank_text_and_bad_seat() -> None:
+    assert client.post("/api/game/chat", json={"text": "   "}).status_code == 422
+    assert client.post("/api/game/chat", json={"text": "hi", "player": 9}).status_code == 422
 
 
 _HAS_DIST = (server._dist / "index.html").exists()

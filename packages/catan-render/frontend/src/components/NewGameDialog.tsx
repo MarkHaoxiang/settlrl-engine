@@ -1,7 +1,8 @@
-// Modal dialog configuring a new game: players, number placement, seed.
+// Modal dialog configuring a new game: players, seat controllers, number placement, seed.
 
 import { useEffect, useState } from "react";
-import type { NewGameConfig, NumberPlacement, PlayerCount } from "../lib/game";
+import { fetchBots, HUMAN, type NewGameConfig, type NumberPlacement, type SeatKind, type PlayerCount } from "../lib/game";
+import { playerName } from "../lib/boardData";
 import { buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
 
 const labelStyle: React.CSSProperties = {
@@ -50,6 +51,22 @@ export default function NewGameDialog({
   const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
   const [numberPlacement, setNumberPlacement] = useState<NumberPlacement>("random");
   const [seed, setSeed] = useState("");
+  // One controller per possible seat; only the first nPlayers are used.
+  const [seats, setSeats] = useState<SeatKind[]>([HUMAN, "random", "random", "random"]);
+  const [bots, setBots] = useState<Record<string, number[]>>({});
+
+  useEffect(() => {
+    fetchBots().then(setBots).catch(() => setBots({}));
+  }, []);
+
+  // Bot kinds available at the chosen player count; a seat holding a kind
+  // that the new count doesn't support falls back to "random".
+  const botNames = Object.keys(bots)
+    .filter((b) => bots[b].includes(nPlayers))
+    .sort();
+  useEffect(() => {
+    setSeats((prev) => prev.map((k) => (k === HUMAN || bots[k]?.includes(nPlayers) ? k : "random")));
+  }, [nPlayers, bots]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -62,6 +79,7 @@ export default function NewGameDialog({
       seed: seed === "" ? Math.floor(Math.random() * 65536) : Number(seed),
       nPlayers,
       numberPlacement,
+      seats: seats.slice(0, nPlayers),
     });
 
   return (
@@ -83,6 +101,15 @@ export default function NewGameDialog({
       >
         <span style={{ fontSize: 18, fontWeight: 700 }}>New game</span>
         <Toggle label="Players" options={[2, 4] as const} value={nPlayers} onChange={setNPlayers} />
+        {seats.slice(0, nPlayers).map((kind, i) => (
+          <Toggle
+            key={i}
+            label={playerName(i)}
+            options={[HUMAN, ...botNames]}
+            value={kind}
+            onChange={(v) => setSeats((prev) => prev.map((p, j) => (j === i ? v : p)))}
+          />
+        ))}
         <Toggle
           label="Numbers"
           options={["random", "spiral"] as const}

@@ -4,20 +4,27 @@ Web-based renderer for catan-engine. FastAPI serves board state over a JSON API;
 
 A menu lets you choose between two modes, each at its own URL:
 
-- **Play** (`/play`) — a live, playable game against random bots. You play seat 0 (Red); the
-  backend auto-plays the other three seats. Input is hybrid: click highlighted vertices / edges
-  / tiles on the board for placements and the robber, use the bottom control-bar buttons for
-  parameterless moves (roll, end turn, buy dev card), and pick from a popover for resource moves
-  (monopoly / year-of-plenty / maritime trade). The bar also shows your hand (resources + dev
-  cards by type). On entry — and from the **New game** button — a dialog configures the next
-  game: player count (2 or 4), number-token placement (random or spiral), and an optional
-  seed; cancelling keeps the game in progress.
+- **Play** (`/play`) — a live, playable game. Each seat is configured per game as a human
+  sharing the screen (hotseat) or a bot (a `catan-agents` policy, e.g. random or greedy);
+  with no human seats the game plays itself as a spectated bot match. Input is hybrid:
+  click highlighted vertices / edges / tiles on the board for placements and the robber, use
+  the bottom control-bar icon buttons for the other moves (hover for names), and pick from a
+  popover for resource moves (monopoly / year-of-plenty / maritime trade). The bar
+  also shows the acting human's hand (resources + dev cards by type), and a chat panel on the
+  right doubles as the game log: the server logs every move as it is played (and the win), and
+  humans can post messages. A help page (`/help`, the **?** button top-left) documents the
+  controls and icons. On entry — and from the
+  **New game** button — a dialog configures the next game: player count (2 or 4), what controls
+  each seat, number-token placement (random or spiral), and an optional seed;
+  cancelling keeps the game in progress.
 - **Replay** (`/replay`, or `/replay/:gameId`) — a recorded game with playback controls. The
   playback controls are still presentation stubs.
 
 The game is driven through `catan-engine`'s single-game PettingZoo-AEC env
-(`catan_engine.env.aec`): the server holds one live game and applies your moves, then plays
-random legal moves for the bots until it is your turn again or the game ends.
+(`catan_engine.env.aec`): the server holds one live game and applies your moves. Bot seats
+are stepped one move per request (`POST /api/game/bot`), so the frontend paces them with a
+short delay and animates each move (pieces pop in, the robber slides, and the bar shows what
+each bot just played).
 
 ## Requirements
 
@@ -32,6 +39,9 @@ Run the API server and the frontend dev server in separate terminals from the re
 ```bash
 uv run catan-render
 ```
+
+The server runs JAX on CPU by default (one live game doesn't need a GPU, and JAX would
+otherwise preallocate most of its memory). Set `JAX_PLATFORMS=cuda` to override.
 
 **Terminal 2 — frontend (port 5173)**
 ```bash
@@ -72,9 +82,12 @@ uv run pytest packages/catan-render/tests
 | Endpoint | Description |
 |---|---|
 | `GET /api/board` | Returns the current board as JSON |
-| `GET /api/game` | Live game snapshot: board + turn status + your legal moves |
-| `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot (bots have already replied). `409` if the move is illegal |
-| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral" }` (default 4 seats: you + 3 bots, random tokens) |
+| `GET /api/game` | Live game snapshot: board + turn status + your legal moves + the game log |
+| `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot. `409` if the move is illegal |
+| `POST /api/game/bot` | Play one due bot move; the snapshot's `bot_move` says who played what (null when it's a human's turn) |
+| `POST /api/game/chat` | Append a chat message to the game log `{ "text": <string>, "player": <seat> \| null }` |
+| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports (the two-player search agents are 2-only) |
+| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral", "seats": ["human" \| <bot kind>, ...] }` (one entry per seat; default: you + 3 random bots) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
 Each legal move in `GET /api/game` is a decoded action descriptor carrying its `flat` index
@@ -103,30 +116,35 @@ packages/catan-render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
 │   ├── server.py        # FastAPI app: /api/board + /api/game* endpoints
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
+│   ├── bots.py          # catan-agents registry adapted to the single game (bot_act)
 │   ├── actions.py       # Decode AEC flat actions -> wire ActionModels
 │   ├── convert.py       # catan-engine Board -> BoardModel
 │   └── models.py        # Pydantic board / game / action models
 ├── tests/               # Pytest: renderer<->engine sync checks (geometry, actions, enums)
 └── frontend/
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /replay/:gameId
+        ├── App.tsx          # Routes: menu, /play, /help, /replay/:gameId
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError)
         ├── lib/boardData.ts  # Board types + palette + adaptBoard; fetches /api/board
         ├── lib/useBoard.ts   # Hook that loads the board for a view
         ├── lib/game.ts       # Live-game API client (/api/game*)
+        ├── lib/actionMeta.ts # Icon + label per action type (control bar + help page)
         ├── lib/useGame.ts    # Hook driving the live game (act / reset)
         ├── lib/ui.ts         # Shared panel / button / highlight styles
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play or Replay
         │   ├── PlayView.tsx   # Play mode: interactive board + live action bar
+        │   ├── HelpView.tsx   # Help page: controls, action icons, seats
         │   └── ReplayView.tsx # Replay mode: board + playback scrubber
         └── components/
             ├── GameShell.tsx    # Shared frame (Replay): board + back link + controls slot
             ├── TopBar.tsx       # Back-to-menu + mode label bar
-            ├── BoardView.tsx    # SVG viewport, zoom, optional click/highlight interaction
-            ├── NewGameDialog.tsx # Modal: configure players / numbers / seed for a new game
-            ├── HexTile.tsx      # Hex polygon, terrain colour, number token
+            ├── BoardView.tsx    # SVG viewport, zoom + pan, optional click/highlight interaction
+            ├── NewGameDialog.tsx # Modal: configure players / seats / numbers / seed for a new game
+            ├── ChatPanel.tsx    # Right-hand chat + game-log column (Play)
+            ├── HexTile.tsx      # Hex polygon, terrain colour + motifs, number token
+            ├── TerrainIcon.tsx  # Per-terrain silhouette motif (pine, sheep, …)
             ├── Road.tsx         # Player road along an edge
             ├── Building.tsx     # Settlement / city on a vertex
             ├── Robber.tsx       # Robber pawn on a tile

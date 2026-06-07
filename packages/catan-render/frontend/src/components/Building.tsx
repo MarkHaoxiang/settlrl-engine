@@ -31,7 +31,7 @@ function housePath(cx: number, cy: number, size: number): string {
 export default function Building({ cx, cy, size, player, kind }: Props) {
   const s = kind === "city" ? size * 1.5 : size;
   return (
-    <g>
+    <g className="piece-pop">
       <title>
         Player {player + 1} {kind}
       </title>

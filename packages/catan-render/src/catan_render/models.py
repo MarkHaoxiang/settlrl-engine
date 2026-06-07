@@ -146,6 +146,30 @@ class GameStatusModel(BaseModel):
     your_turn: bool
     terminal: bool
     winner: int | None = None
+    # What controls each seat: "human" or a bot kind (catan-agents policy name).
+    seats: list[str] = []
+
+
+class BotMoveModel(BaseModel):
+    """One just-played bot move: the seat that acted and the decoded action."""
+
+    player: int
+    action: ActionModel
+
+
+class LogEntryModel(BaseModel):
+    """One line of the game's chat / log.
+
+    ``player`` is the seat the line belongs to (``None``: a spectator's chat
+    message). Move entries carry the ``action_type`` (the client maps it to an
+    icon) and a short text (the action label, or ``"rolled N"`` for rolls).
+    """
+
+    id: int
+    kind: Literal["move", "chat", "win"]
+    player: int | None = None
+    action_type: str | None = None
+    text: str = ""
 
 
 class GameModel(BaseModel):
@@ -154,3 +178,7 @@ class GameModel(BaseModel):
     board: BoardModel
     status: GameStatusModel
     actions: list[ActionModel] = []
+    # Set on POST /api/game/bot responses: the move that endpoint just played.
+    bot_move: BotMoveModel | None = None
+    # The game's chat / log (moves, chat messages, the win), oldest first.
+    log: list[LogEntryModel] = []
