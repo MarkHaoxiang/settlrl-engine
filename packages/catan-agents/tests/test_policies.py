@@ -1,11 +1,13 @@
-"""Protocol-level tests, run against every shipped policy.
+"""Protocol-level tests, run against every shipped agent.
 
-A policy that satisfies :class:`catan_agents.Policy` must pick a legal flat
-action whenever one exists, be able to drive whole games in self-play, and be
-a pure function of its inputs (same seed -> same trajectory). Register new
-policies in ``POLICIES`` to put them under the same tests.
+An agent in the ``POLICIES`` registry must pick a legal flat action whenever
+one exists, be able to drive whole games in self-play, and be a pure function
+of its inputs (same seed -> same trajectory). Each agent is exercised at a
+player count it supports, through whichever protocol (observation / state) it
+declares.
 """
 
+from collections.abc import Callable
 from typing import cast
 
 import jax
@@ -14,13 +16,8 @@ import pytest
 
 from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
 
-from catan_agents import evaluate, greedy_policy, random_policy
-from catan_agents.policy import Policy
-
-POLICIES: dict[str, Policy] = {
-    "random": random_policy,
-    "greedy": greedy_policy,
-}
+from catan_agents import POLICIES, AgentSpec, evaluate
+from catan_agents.shared.policy import Policy, StatePolicy
 
 BATCH = 8
 
@@ -36,41 +33,51 @@ def _acting_obs(env: BatchedCatanEnv) -> Observation:
 
 
 def _self_play(
-    policy: Policy, seed: int, n_steps: int
+    spec: AgentSpec, seed: int, n_steps: int
 ) -> tuple[jax.Array, jax.Array]:
     """Drive ``n_steps`` of self-play; return the per-step ``(masks, actions)``."""
-    env = BatchedCatanEnv(batch_size=BATCH, seed=seed)
-    act = jax.jit(jax.vmap(policy))
+    env = BatchedCatanEnv(
+        batch_size=BATCH, seed=seed, n_players=max(spec.n_players)
+    )
+    act: Callable[[jax.Array], jax.Array]
+    if spec.observes == "observation":
+        obs_act = jax.jit(jax.vmap(cast(Policy, spec.policy)))
+        act = lambda keys: obs_act(keys, _acting_obs(env), env.flat_mask())  # noqa: E731
+    else:
+        state_act = jax.jit(jax.vmap(cast(StatePolicy, spec.policy)))
+        act = lambda keys: state_act(  # noqa: E731
+            keys, *env.board, env.agent_selection, env.flat_mask()
+        )
     key = jax.random.key(seed)
     masks, actions = [], []
     for _ in range(n_steps):
         key, k = jax.random.split(key)
         mask = env.flat_mask()
-        flat = act(jax.random.split(k, BATCH), _acting_obs(env), mask)
+        flat = act(jax.random.split(k, BATCH))
         masks.append(mask)
         actions.append(flat)
         env.step(*flat_to_action(flat))
     return jnp.stack(masks), jnp.stack(actions)
 
 
-@pytest.mark.parametrize("policy", POLICIES.values(), ids=POLICIES.keys())
-def test_picks_only_legal_actions(policy: Policy) -> None:
-    masks, actions = _self_play(policy, seed=0, n_steps=150)
+@pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
+def test_picks_only_legal_actions(spec: AgentSpec) -> None:
+    masks, actions = _self_play(spec, seed=0, n_steps=150)
     # Whenever a lane has any legal move, the pick must be one of them.
     legal = jnp.take_along_axis(masks, actions[..., None], axis=2)[..., 0]
     assert bool(jnp.all(~masks.any(axis=2) | legal))
 
 
-@pytest.mark.parametrize("policy", POLICIES.values(), ids=POLICIES.keys())
-def test_same_seed_reproduces_rollout(policy: Policy) -> None:
-    _, first = _self_play(policy, seed=3, n_steps=60)
-    _, second = _self_play(policy, seed=3, n_steps=60)
+@pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
+def test_same_seed_reproduces_rollout(spec: AgentSpec) -> None:
+    _, first = _self_play(spec, seed=3, n_steps=60)
+    _, second = _self_play(spec, seed=3, n_steps=60)
     assert bool(jnp.all(first == second))
 
 
-@pytest.mark.parametrize("policy", POLICIES.values(), ids=POLICIES.keys())
-def test_self_play_rollouts_complete_games(policy: Policy) -> None:
-    result = evaluate([policy, policy], n_steps=600, batch_size=BATCH, seed=0)
+@pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
+def test_self_play_rollouts_complete_games(spec: AgentSpec) -> None:
+    result = evaluate([spec, spec], n_steps=600, batch_size=BATCH, seed=0)
     assert result.wins.shape == (2,)
     assert result.episodes == int(result.wins.sum())
     assert result.episodes > 0

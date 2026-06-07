@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from catan_engine.env import N_FLAT, Observation
 
-from catan_agents.policy import FlatAction, FlatMask
+from catan_agents.shared.policy import FlatAction, FlatMask
 
 
 def random_policy(key: jax.Array, obs: Observation, mask: FlatMask) -> FlatAction:

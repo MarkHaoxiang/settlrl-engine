@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
 
-from catan_engine.board.layout import N_TILES, N_VERTICES, TILE_V
+from catan_engine.board.layout import N_TILES, N_VERTICES
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.env import (
     ActionType,
@@ -16,7 +15,8 @@ from catan_engine.env import (
     flat_to_action,
 )
 
-from catan_agents.policy import FlatAction, FlatMask
+from catan_agents.shared.policy import FlatAction, FlatMask
+from catan_agents.shared.value import tile_pips, vertex_pips
 
 # Static decode of every flat row: its action type and (idx, target) params.
 _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
@@ -58,19 +58,6 @@ _ROBBER_MOVE = (_ROW_TYPE == ActionType.MOVE_ROBBER) | (
 _DISCARD = _ROW_TYPE == ActionType.DISCARD
 
 
-def _tile_pips(tile_number: jax.Array) -> Float[Array, f"tiles={N_TILES}"]:
-    """Expected-production weight per tile: 6 - |7 - number| (0 for the desert)."""
-    n = tile_number.astype(jnp.int32)
-    return jnp.where(n == 0, 0, 6 - jnp.abs(7 - n)).astype(jnp.float32)
-
-
-def _vertex_pips(tile_number: jax.Array) -> Float[Array, f"vertices={N_VERTICES}"]:
-    """Summed pips of each vertex's adjacent tiles."""
-    pips = _tile_pips(tile_number)
-    acc = jnp.zeros((N_VERTICES,), jnp.float32)
-    return acc.at[TILE_V.reshape(-1)].add(jnp.repeat(pips, TILE_V.shape[1]))
-
-
 def greedy_policy(key: jax.Array, obs: Observation, mask: FlatMask) -> FlatAction:
     """Highest-priority legal action, ties broken uniformly at random.
 
@@ -80,15 +67,15 @@ def greedy_policy(key: jax.Array, obs: Observation, mask: FlatMask) -> FlatActio
     goes to the highest-pip tile (preferring a steal), and the discard gives up
     the most-held resource.
     """
-    vertex_pips = _vertex_pips(obs["tile_number"])
-    tile_pips = _tile_pips(obs["tile_number"])
+    v_pips = vertex_pips(obs["tile_number"])
+    t_pips = tile_pips(obs["tile_number"])
     held = obs["self_resources"].astype(jnp.float32)
     bonus = jnp.where(
         _VERTEX_BUILD,
-        vertex_pips[jnp.clip(_ROW_IDX, 0, N_VERTICES - 1)],
+        v_pips[jnp.clip(_ROW_IDX, 0, N_VERTICES - 1)],
         jnp.where(
             _ROBBER_MOVE,
-            tile_pips[jnp.clip(_ROW_IDX, 0, N_TILES - 1)] + (_ROW_TARGET >= 0),
+            t_pips[jnp.clip(_ROW_IDX, 0, N_TILES - 1)] + (_ROW_TARGET >= 0),
             jnp.where(_DISCARD, held[jnp.clip(_ROW_IDX, 0, N_RESOURCES - 1)], 0.0),
         ),
     )

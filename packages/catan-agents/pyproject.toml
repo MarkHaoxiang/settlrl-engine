@@ -11,7 +11,11 @@ dependencies = [
     "catan-engine",
     "jax[cpu]>=0.4.0",
     "jaxtyping>=0.3.10",
+    "mctx>=0.0.6",
 ]
+
+[project.scripts]
+catan-agents = "catan_agents.cli:main"
 
 [build-system]
 requires = ["hatchling"]

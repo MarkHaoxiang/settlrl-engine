@@ -103,6 +103,7 @@ __all__ = [
     "flat_to_action",
     "step",
     "available",
+    "flat_available",
 ]
 
 N_FLAT = _N_FLAT
@@ -137,6 +138,12 @@ def step(
 def available(board: Board, action_type: ActionTypeArray, params: ActionParams) -> Mask:
     """``(batch,)`` legality mask for the chosen action per game (no state change)."""
     return cast(Mask, _available(board[0], board[1], action_type, params))
+
+
+def flat_available(board: Board) -> jax.Array:
+    """``(batch, N_FLAT)`` legality of every flat action for each game's acting
+    player (the same sweep behind :meth:`BatchedCatanEnv.flat_mask`)."""
+    return cast(jax.Array, _flat_available_b(board[0], board[1]))
 
 
 # ---------------------------------------------------------------------------

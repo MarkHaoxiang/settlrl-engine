@@ -6,10 +6,14 @@ from jaxtyping import install_import_hook
 
 install_import_hook(
     [
-        "catan_agents.policy",
-        "catan_agents.baselines",
-        "catan_agents.greedy",
-        "catan_agents.evaluate",
+        "catan_agents.shared.policy",
+        "catan_agents.shared.value",
+        "catan_agents.shared.baselines",
+        "catan_agents.shared.greedy",
+        "catan_agents.shared.evaluate",
+        "catan_agents.two_player.belief",
+        "catan_agents.two_player.greedy",
+        "catan_agents.two_player.mcts",
     ],
     "beartype.beartype",
 )
