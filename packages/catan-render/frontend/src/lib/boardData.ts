@@ -1,7 +1,6 @@
 // Board types + palette, and the adapter from the server's wire format
-// (GET /api/board, snake_case) to the frontend's camelCase Board.
+// (BoardModel, snake_case) to the frontend's camelCase Board.
 
-import { api } from "./api";
 import type { Cube, CubeEdge, Hex } from "./hex";
 
 export type Terrain = "wheat" | "sheep" | "wood" | "ore" | "brick" | "desert";
@@ -121,6 +120,3 @@ export function adaptBoard(wire: BoardWire): Board {
   };
 }
 
-export async function fetchBoard(): Promise<Board> {
-  return adaptBoard(await api<BoardWire>("/api/board"));
-}

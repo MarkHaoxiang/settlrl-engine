@@ -17,8 +17,11 @@ A menu lets you choose between two modes, each at its own URL:
   **New game** button — a dialog configures the next game: player count (2 or 4), what controls
   each seat, number-token placement (random or spiral), and an optional seed;
   cancelling keeps the game in progress.
-- **Replay** (`/replay`, or `/replay/:gameId`) — a recorded game with playback controls. The
-  playback controls are still presentation stubs.
+- **Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the
+  JSON from `GET /api/game/record`) or the live game as played so far, then scrub anywhere
+  with the slider, step move by move, or press play; the log panel fills in as the game
+  advances, and the record can be saved back to a file. The server replays the record through
+  the engine once and serves the board after every move.
 
 The game is driven through `catan-engine`'s single-game PettingZoo-AEC env
 (`catan_engine.env.aec`): the server holds one live game and applies your moves. Bot seats
@@ -87,6 +90,10 @@ uv run pytest packages/catan-render/tests
 | `POST /api/game/bot` | Play one due bot move; the snapshot's `bot_move` says who played what (null when it's a human's turn) |
 | `POST /api/game/chat` | Append a chat message to the game log `{ "text": <string>, "player": <seat> \| null }` |
 | `GET /api/game/record` | Download the game as a `catan_engine.record` JSON transcript — self-contained and replayable (`winner` is null while the game is running) |
+| `POST /api/replay` | Load a game record (the `GET /api/game/record` JSON) for replay; returns the opening state. `422` if it's malformed or fails replay validation |
+| `POST /api/replay/from-game` | Load the live game (as played so far) for replay |
+| `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board): board + the moves played up to that point. `404` until a replay is loaded |
+| `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
 | `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports |
 | `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral", "seats": ["human" \| <bot kind>, ...] }` (one entry per seat; default: you + 3 random bots) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
@@ -115,8 +122,9 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/catan-render/
 ├── src/catan_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
-│   ├── server.py        # FastAPI app: /api/board + /api/game* endpoints
+│   ├── server.py        # FastAPI app: /api/board + /api/game* + /api/replay* endpoints
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
+│   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots.py          # catan-agents registry adapted to the single game (bot_act)
 │   ├── actions.py       # Decode AEC flat actions -> wire ActionModels
 │   ├── convert.py       # catan-engine Board -> BoardModel
@@ -124,12 +132,12 @@ packages/catan-render/
 ├── tests/               # Pytest: renderer<->engine sync checks (geometry, actions, enums)
 └── frontend/
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /help, /replay/:gameId
+        ├── App.tsx          # Routes: menu, /play, /help, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError)
-        ├── lib/boardData.ts  # Board types + palette + adaptBoard; fetches /api/board
-        ├── lib/useBoard.ts   # Hook that loads the board for a view
+        ├── lib/boardData.ts  # Board types + palette + adaptBoard (wire -> camelCase)
         ├── lib/game.ts       # Live-game API client (/api/game*)
+        ├── lib/replay.ts     # Replay API client (/api/replay*)
         ├── lib/actionMeta.ts # Icon + label per action type (control bar + help page)
         ├── lib/useGame.ts    # Hook driving the live game (act / reset)
         ├── lib/ui.ts         # Shared panel / button / highlight styles
@@ -137,13 +145,12 @@ packages/catan-render/
         │   ├── Menu.tsx       # Landing page: choose Play or Replay
         │   ├── PlayView.tsx   # Play mode: interactive board + live action bar
         │   ├── HelpView.tsx   # Help page: controls, action icons, seats
-        │   └── ReplayView.tsx # Replay mode: board + playback scrubber
+        │   └── ReplayView.tsx # Replay mode: load a record, scrub / step / play it
         └── components/
-            ├── GameShell.tsx    # Shared frame (Replay): board + back link + controls slot
             ├── TopBar.tsx       # Back-to-menu + mode label bar
             ├── BoardView.tsx    # SVG viewport, zoom + pan, optional click/highlight interaction
             ├── NewGameDialog.tsx # Modal: configure players / seats / numbers / seed for a new game
-            ├── ChatPanel.tsx    # Right-hand chat + game-log column (Play)
+            ├── ChatPanel.tsx    # Right-hand chat / log column (Play; read-only in Replay)
             ├── HexTile.tsx      # Hex polygon, terrain colour + motifs, number token
             ├── TerrainIcon.tsx  # Per-terrain silhouette motif (pine, sheep, …)
             ├── Road.tsx         # Player road along an edge

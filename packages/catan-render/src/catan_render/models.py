@@ -172,6 +172,21 @@ class LogEntryModel(BaseModel):
     text: str = ""
 
 
+class ReplayStateModel(BaseModel):
+    """The Replay view's snapshot after ``move`` of ``n_moves`` moves.
+
+    ``log`` holds the moves played up to that point (the win line appears only
+    at the final move); ``winner`` / ``seats`` describe the whole record.
+    """
+
+    move: int
+    n_moves: int
+    board: BoardModel
+    log: list[LogEntryModel] = []
+    winner: int | None = None
+    seats: list[str] | None = None
+
+
 class GameModel(BaseModel):
     """Everything the Play view needs after a move: board + status + legal moves."""
 

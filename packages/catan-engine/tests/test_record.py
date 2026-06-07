@@ -13,7 +13,14 @@ import numpy as np
 import pytest
 
 from catan_engine.env import BatchedCatanEnv
-from catan_engine.record import GameRecord, Move, ReplayError, record_game, replay
+from catan_engine.record import (
+    GameRecord,
+    Move,
+    ReplayError,
+    initial_board,
+    record_game,
+    replay,
+)
 
 
 @pytest.fixture(scope="module")
@@ -130,3 +137,14 @@ def test_from_json_rejects_unknown_version() -> None:
 
 def test_move_defaults() -> None:
     assert Move(player=0, flat=1).dice is None
+
+
+def test_initial_board_is_the_unplayed_opening(record2: GameRecord) -> None:
+    layout, state = initial_board(record2)
+    assert not bool((np.asarray(state.vertex_owner) != 0).any())  # nothing built
+    # Same deterministic layout as the recorded game's replay.
+    replayed_layout, _ = next(replay(record2))
+    assert all(
+        bool((a == b).all())
+        for a, b in zip(jax.tree.leaves(layout), jax.tree.leaves(replayed_layout))
+    )

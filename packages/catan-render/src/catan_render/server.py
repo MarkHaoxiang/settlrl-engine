@@ -1,3 +1,4 @@
+import json
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,10 +13,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from catan_engine.record import GameRecord, ReplayError
+
 from .actions import decode_actions
 from .bots import supported_counts
 from .convert import board_to_model
-from .models import BoardModel, BotMoveModel, GameModel
+from .models import BoardModel, BotMoveModel, GameModel, ReplayStateModel
+from .replay import ReplaySession
 from .session import GameSession, IllegalActionError
 
 def _warm_jit_cache() -> None:
@@ -120,6 +124,68 @@ def get_record() -> Response:
     replayable transcript (``winner`` is null while the game is running)."""
     with _LOCK:
         body = _SESSION.record().to_json()
+    return Response(content=body, media_type="application/json")
+
+
+# The loaded replay, if any (independent of the live game; one at a time).
+_REPLAY: ReplaySession | None = None
+_REPLAY_LOCK = threading.Lock()
+
+
+def _load_replay(record: GameRecord) -> ReplayStateModel:
+    """Replay ``record`` into a fresh session and return its opening state."""
+    global _REPLAY
+    try:
+        session = ReplaySession(record)
+    except (ReplayError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    with _REPLAY_LOCK:
+        _REPLAY = session
+        return session.state(0)
+
+
+@app.post("/api/replay")
+def post_replay(doc: dict[str, object]) -> ReplayStateModel:
+    """Load a game record (the ``catan_engine.record`` JSON document) for
+    replay; returns the opening state. ``422`` if the record is malformed or
+    fails replay validation."""
+    try:
+        record = GameRecord.from_json(json.dumps(doc))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"bad record: {exc}") from exc
+    return _load_replay(record)
+
+
+@app.post("/api/replay/from-game")
+def post_replay_from_game() -> ReplayStateModel:
+    """Load the live game (as played so far) for replay."""
+    with _LOCK:
+        record = _SESSION.record()
+    return _load_replay(record)
+
+
+@app.get("/api/replay/state")
+def get_replay_state(move: int = 0) -> ReplayStateModel:
+    """The loaded replay after ``move`` moves (0 = the opening board).
+
+    ``404`` when no replay is loaded; ``422`` when ``move`` is out of range.
+    """
+    with _REPLAY_LOCK:
+        if _REPLAY is None:
+            raise HTTPException(status_code=404, detail="no replay loaded")
+        try:
+            return _REPLAY.state(move)
+        except IndexError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/replay/record")
+def get_replay_record() -> Response:
+    """The loaded replay's record JSON (e.g. to save it to a file)."""
+    with _REPLAY_LOCK:
+        if _REPLAY is None:
+            raise HTTPException(status_code=404, detail="no replay loaded")
+        body = _REPLAY.record.to_json()
     return Response(content=body, media_type="application/json")
 
 

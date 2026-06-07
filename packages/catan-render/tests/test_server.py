@@ -21,8 +21,10 @@ client = TestClient(app)
 def _fresh_game() -> None:
     # Each test starts from a deterministic fresh game (server holds one global
     # session); reset keeps tests independent of execution order (including the
-    # seat count a previous test may have changed).
+    # seat count a previous test may have changed). Any loaded replay is
+    # dropped too.
     server._SESSION.reset(0, n_players=4)
+    server._REPLAY = None
 
 
 def test_get_board() -> None:
@@ -229,6 +231,70 @@ def test_record_endpoint_exports_the_game() -> None:
 def test_chat_rejects_blank_text_and_bad_seat() -> None:
     assert client.post("/api/game/chat", json={"text": "   "}).status_code == 422
     assert client.post("/api/game/chat", json={"text": "hi", "player": 9}).status_code == 422
+
+
+def test_replay_endpoints_load_and_scrub() -> None:
+    # Play two human moves, load the live game as a replay, and scrub it.
+    for _ in range(2):
+        game = client.get("/api/game").json()
+        client.post("/api/game/action", json={"flat": game["actions"][0]["flat"]})
+    body = client.post("/api/replay/from-game").json()
+    assert body["move"] == 0 and body["n_moves"] == 2
+    assert body["log"] == []  # nothing played yet at the opening board
+    assert body["board"]["buildings"] == []
+    # After both moves the settlement + road are on the board and in the log.
+    end = client.get("/api/replay/state", params={"move": 2}).json()
+    assert len(end["board"]["buildings"]) == 1 and len(end["board"]["roads"]) == 1
+    assert [e["action_type"] for e in end["log"]] == ["setup_settlement", "setup_road"]
+    # Out-of-range moves are rejected.
+    assert client.get("/api/replay/state", params={"move": 3}).status_code == 422
+    assert client.get("/api/replay/state", params={"move": -1}).status_code == 422
+
+
+def test_replay_upload_roundtrip() -> None:
+    game = client.get("/api/game").json()
+    client.post("/api/game/action", json={"flat": game["actions"][0]["flat"]})
+    record = client.get("/api/game/record").json()
+    body = client.post("/api/replay", json=record).json()
+    assert body["n_moves"] == 1
+    assert body["seats"] == ["human", "random", "random", "random"]
+    # The loaded record can be downloaded back unchanged.
+    assert client.get("/api/replay/record").json() == record
+
+
+def test_replay_state_404_until_loaded() -> None:
+    assert client.get("/api/replay/state").status_code == 404
+    assert client.get("/api/replay/record").status_code == 404
+
+
+def test_replay_rejects_bad_records() -> None:
+    assert client.post("/api/replay", json={"version": 99}).status_code == 422
+    # A structurally valid record whose moves don't replay (illegal move 0).
+    bad = {
+        "version": 1, "seed": 0, "n_players": 4, "number_placement": "random",
+        "winner": None,
+        "moves": [{"player": 1, "flat": 0}],
+    }
+    assert client.post("/api/replay", json=bad).status_code == 422
+
+
+def test_replay_of_finished_game_reports_winner() -> None:
+    # An all-bot game plays itself out; its replay carries the winner and the
+    # win line appears only at the final move.
+    client.post(
+        "/api/game/reset",
+        json={"seed": 7, "n_players": 2, "seats": ["random", "random"]},
+    )
+    for _ in range(50_000):
+        if client.post("/api/game/bot").json()["bot_move"] is None:
+            break
+    body = client.post("/api/replay/from-game").json()
+    n, winner = body["n_moves"], body["winner"]
+    assert winner is not None
+    end = client.get("/api/replay/state", params={"move": n}).json()
+    assert end["log"][-1]["kind"] == "win" and end["log"][-1]["player"] == winner
+    before = client.get("/api/replay/state", params={"move": n - 1}).json()
+    assert all(e["kind"] != "win" for e in before["log"])
 
 
 _HAS_DIST = (server._dist / "index.html").exists()

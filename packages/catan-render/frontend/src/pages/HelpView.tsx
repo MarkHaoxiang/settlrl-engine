@@ -108,6 +108,15 @@ export default function HelpView() {
             by type. The corner panels track every player's card counts and victory points.
           </span>
         </Section>
+
+        <Section title="Replays">
+          <span>
+            The Replay view steps through a recorded game. Load a saved record file (💾 saves one;
+            so does <code>GET /api/game/record</code>) or pull in the live game as played so far,
+            then scrub with the slider, step move by move, or press play — the log fills in as the
+            game advances.
+          </span>
+        </Section>
       </div>
     </div>
   );

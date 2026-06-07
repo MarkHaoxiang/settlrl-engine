@@ -47,7 +47,14 @@ from catan_engine.board.tile import Tile
 from catan_engine.env import ActionType, BatchedCatanEnv, N_FLAT, flat_to_action
 from catan_engine.board import Board
 
-__all__ = ["GameRecord", "Move", "ReplayError", "record_game", "replay"]
+__all__ = [
+    "GameRecord",
+    "Move",
+    "ReplayError",
+    "initial_board",
+    "record_game",
+    "replay",
+]
 
 _VERSION = 1
 
@@ -172,6 +179,11 @@ def _make_env(record: GameRecord) -> BatchedCatanEnv:
         n_players=record.n_players,
         number_placement=record.number_placement,
     )
+
+
+def initial_board(record: GameRecord) -> Board:
+    """The board a record's game opens on, before any move is played."""
+    return _make_env(record).board
 
 
 def _step_flat(env: BatchedCatanEnv, flat: int) -> None:

@@ -6,12 +6,14 @@ import { buttonStyle, panelStyle } from "../lib/ui";
 
 interface Props {
   entries: LogEntry[];
-  onSend: (text: string) => void;
+  // Omit to render a read-only log (no input row), e.g. for replays.
+  onSend?: (text: string) => void;
+  title?: string;
 }
 
 // Right-hand chat & game log column, rendering the server-side log: every
 // move lands here as an event line, and humans can type messages.
-export default function ChatPanel({ entries, onSend }: Props) {
+export default function ChatPanel({ entries, onSend, title = "Chat" }: Props) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -22,7 +24,7 @@ export default function ChatPanel({ entries, onSend }: Props) {
 
   const send = () => {
     const text = draft.trim();
-    if (text) onSend(text);
+    if (text && onSend) onSend(text);
     setDraft("");
   };
 
@@ -46,7 +48,7 @@ export default function ChatPanel({ entries, onSend }: Props) {
           padding: "12px 14px 8px",
         }}
       >
-        Chat
+        {title}
       </span>
       <div
         style={{
@@ -93,15 +95,17 @@ export default function ChatPanel({ entries, onSend }: Props) {
         ))}
         <div ref={endRef} />
       </div>
-      <div style={{ padding: 10 }}>
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Say something…"
-          style={{ ...buttonStyle, cursor: "text", width: "100%", fontSize: 12, padding: "7px 10px" }}
-        />
-      </div>
+      {onSend && (
+        <div style={{ padding: 10 }}>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+            placeholder="Say something…"
+            style={{ ...buttonStyle, cursor: "text", width: "100%", fontSize: 12, padding: "7px 10px" }}
+          />
+        </div>
+      )}
     </div>
   );
 }

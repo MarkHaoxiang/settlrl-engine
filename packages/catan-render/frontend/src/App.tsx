@@ -11,7 +11,6 @@ export default function App() {
       <Route path="/play" element={<PlayView />} />
       <Route path="/help" element={<HelpView />} />
       <Route path="/replay" element={<ReplayView />} />
-      <Route path="/replay/:gameId" element={<ReplayView />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
