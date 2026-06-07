@@ -2,21 +2,21 @@
 
 Catan-playing agents for [catan-engine](../catan-engine).
 
-Agents are pure JAX functions (`jit` / `vmap` compatible, so they can drive whole batches of games on device) that consume the engine's flat action space; decode a chosen index with `catan_engine.env.flat_to_action`. They come in two kinds, split by what a seat may legitimately see:
+Agents are pure JAX functions (`jit` / `vmap` compatible, so they can drive whole batches of games on device) that consume the engine's flat action space; decode a chosen index with `catan_engine.env.flat_to_action`. They come in two kinds, split by what a seat consumes — neither sees anything the player wouldn't:
 
-- **Observation agents** (`(key, observation, flat_mask) -> flat action`) read the acting player's partial view and work at any player count.
-- **State agents** (`(key, layout, state, player, flat_mask) -> flat action`) read the full board. With two players every resource flow is publicly inferable, so this is bookkeeping rather than cheating — these agents are offered in two-player games only.
+- **Observation agents** (`(key, observation, flat_mask) -> flat action`) read the acting player's partial view.
+- **Belief agents** (`(key, layout, censored_state, belief, player, flat_mask) -> flat action`) read the engine's honest world model: a board with every hidden field removed, plus provable bounds on what opponents hold (the engine's belief tracking — `BatchedCatanEnv(track_beliefs=True)`). They rebuild a concrete world by sampling (`sample_world`) and search in the sample.
 
-`POLICIES` maps every shipped agent by name to an `AgentSpec` (its function, which kind it is, and the player counts it supports).
+Both kinds work at any player count. `POLICIES` maps every shipped agent by name to an `AgentSpec` (its function, which kind it is, and the player counts it supports).
 
 ## Agents
 
-- `random` — uniform over the legal actions (any count).
-- `greedy` — scripted priorities (city > settlement > dev card > road), pip-weighted placement and robber moves (any count).
-- `lookahead` — one-step lookahead: applies every legal action and picks the successor the value function scores best (two-player).
-- `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator and the value function at the leaves (two-player).
+- `random` — uniform over the legal actions.
+- `greedy` — scripted priorities (city > settlement > dev card > road), pip-weighted placement and robber moves.
+- `lookahead` — one-step lookahead: applies every legal action to a sampled world and picks the successor the value function scores best.
+- `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator and the value function at the leaves.
 
-Both search agents determinize the state before searching: stochastic outcomes are their own samples (not the environment's), and the opponent's hidden dev cards are re-dealt from the deck distribution — they never act on information the seat could not know.
+The search agents act on a sampled world consistent with everything the seat knows: stochastic outcomes are their own samples (not the environment's), opponents' hidden cards are dealt from the player's honest belief — they never act on information the seat could not know. With two players the belief pins the opponent's resources exactly, so only dev-card identities are ever sampled.
 
 ## Value functions
 
@@ -49,6 +49,5 @@ mcts vs greedy: 53-47 over 100 games (mcts 53.0%)
 
 ## Layout
 
-- `catan_agents.shared` — the seat protocols, value functions, observation baselines, and `evaluate`.
-- `catan_agents.two_player` — the state agents (`lookahead`, `mcts`).
-- `catan_agents.four_player` — home for partial-information agents (belief-state / determinization); currently empty.
+- `catan_agents.shared` — the seat protocols, value functions, world sampling, observation baselines, and `evaluate`.
+- `catan_agents.search` — the model-based agents (`lookahead`, `mcts`).

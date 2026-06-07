@@ -1,16 +1,20 @@
 """The seat interfaces: pure decision functions over one game's view.
 
-Two protocols, split by what a seat may legitimately see:
+Two protocols, split by what a seat consumes — neither sees anything the
+player wouldn't:
 
-- :class:`Policy` consumes the acting player's *partial observation* and is
-  valid at any player count.
-- :class:`StatePolicy` consumes the full single-game board. With two players
-  every resource flow is publicly inferable (production follows from dice and
-  board, build/trade costs are public, every steal involves you), so reading
-  the engine state is bookkeeping, not cheating; dev cards are the one hidden
-  element and are only a distribution over the known deck composition. With
-  3-4 players opponent-to-opponent steals and discards are hidden, so state
-  seats are restricted to two-player games.
+- :class:`Policy` consumes the acting player's *partial observation* (the
+  env's dict form, meant for learned policies).
+- :class:`BeliefPolicy` consumes the engine's honest world model: a *censored*
+  ``BoardState`` (every hidden field removed — see
+  :func:`catan_engine.belief.censor`) plus the player's
+  :class:`~catan_engine.belief.PlayerBelief` (proven bounds on hidden hands).
+  Model-based agents rebuild a concrete world from the pair by sampling
+  (:func:`catan_agents.shared.sample.sample_world`) and search in the sample.
+
+Both are valid at any player count; belief sharpness, not the API, is what
+varies with the seat count (with two players the belief pins the opponent's
+resources exactly).
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from typing import Literal, Protocol, runtime_checkable
 import jax
 from jaxtyping import Array, Bool, Int
 
+from catan_engine.belief import PlayerBelief
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import BoardState, IntScalar
 from catan_engine.env import N_FLAT, Observation
@@ -49,12 +54,14 @@ class Policy(Protocol):
 
 
 @runtime_checkable
-class StatePolicy(Protocol):
-    """A single-game decision function over the full board state.
+class BeliefPolicy(Protocol):
+    """A single-game decision function over the player's honest world model.
 
-    ``layout`` / ``state`` are one game's board (no batch axis), ``player`` the
-    seat deciding, ``mask`` the flat legality of that player's moves. Same
-    return and no-legal-move conventions as :class:`Policy`.
+    ``layout`` is one game's board layout, ``state`` the *censored* board from
+    ``player``'s point of view, ``belief`` the matching
+    :class:`~catan_engine.belief.PlayerBelief`, ``mask`` the flat legality of
+    the player's moves. Same return and no-legal-move conventions as
+    :class:`Policy`.
     """
 
     def __call__(
@@ -62,6 +69,7 @@ class StatePolicy(Protocol):
         key: jax.Array,
         layout: BoardLayout,
         state: BoardState,
+        belief: PlayerBelief,
         player: IntScalar,
         mask: FlatMask,
     ) -> FlatAction: ...
@@ -72,10 +80,10 @@ class AgentSpec:
     """A shipped agent: its decision function, input kind, and seat counts.
 
     ``observes`` says which protocol ``policy`` satisfies (``"observation"`` ->
-    :class:`Policy`, ``"state"`` -> :class:`StatePolicy`); ``n_players`` holds
-    the player counts the agent may be seated at.
+    :class:`Policy`, ``"belief"`` -> :class:`BeliefPolicy`); ``n_players``
+    holds the player counts the agent may be seated at.
     """
 
-    policy: Policy | StatePolicy
-    observes: Literal["observation", "state"]
+    policy: Policy | BeliefPolicy
+    observes: Literal["observation", "belief"]
     n_players: frozenset[int]

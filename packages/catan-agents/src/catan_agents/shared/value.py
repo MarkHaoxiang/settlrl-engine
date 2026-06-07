@@ -1,10 +1,10 @@
 """State value functions: how good is this board for a given player?
 
-A :class:`ValueFunction` reads only information the player could legitimately
-infer at a two-player table: the public board, exact resource counts (all
-flows are public with two players), and dev cards as *counts* for opponents
-(their composition is a distribution over the known deck) but exact for the
-player itself.
+A :class:`ValueFunction` scores a concrete board. The search agents only ever
+hand it *sampled* worlds (see ``shared.sample``), so the "hidden" fields it
+reads there are belief-consistent samples; it still treats opponents' dev
+cards as counts (their composition is a distribution over the known deck) and
+the player's own as exact.
 """
 
 from __future__ import annotations

@@ -3,8 +3,8 @@
 An agent in the ``POLICIES`` registry must pick a legal flat action whenever
 one exists, be able to drive whole games in self-play, and be a pure function
 of its inputs (same seed -> same trajectory). Each agent is exercised at a
-player count it supports, through whichever protocol (observation / state) it
-declares.
+player count it supports, through whichever protocol (observation / belief)
+it declares.
 """
 
 from collections.abc import Callable
@@ -17,7 +17,7 @@ import pytest
 from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
 
 from catan_agents import POLICIES, AgentSpec, evaluate
-from catan_agents.shared.policy import Policy, StatePolicy
+from catan_agents.shared.policy import BeliefPolicy, Policy
 
 BATCH = 8
 
@@ -32,21 +32,34 @@ def _acting_obs(env: BatchedCatanEnv) -> Observation:
     )
 
 
+def _acting_view(env: BatchedCatanEnv) -> tuple:
+    """Per-lane ``(censored state, belief)`` of that lane's acting player."""
+    per_seat = [env.belief_view(i) for i in range(env.n_players)]
+    lanes = jnp.arange(env.batch_size)
+    return cast(
+        tuple,
+        jax.tree.map(lambda *xs: jnp.stack(xs)[env.agent_selection, lanes], *per_seat),
+    )
+
+
 def _self_play(
     spec: AgentSpec, seed: int, n_steps: int
 ) -> tuple[jax.Array, jax.Array]:
     """Drive ``n_steps`` of self-play; return the per-step ``(masks, actions)``."""
     env = BatchedCatanEnv(
-        batch_size=BATCH, seed=seed, n_players=max(spec.n_players)
+        batch_size=BATCH,
+        seed=seed,
+        n_players=max(spec.n_players),
+        track_beliefs=spec.observes == "belief",
     )
     act: Callable[[jax.Array], jax.Array]
     if spec.observes == "observation":
         obs_act = jax.jit(jax.vmap(cast(Policy, spec.policy)))
         act = lambda keys: obs_act(keys, _acting_obs(env), env.flat_mask())  # noqa: E731
     else:
-        state_act = jax.jit(jax.vmap(cast(StatePolicy, spec.policy)))
-        act = lambda keys: state_act(  # noqa: E731
-            keys, *env.board, env.agent_selection, env.flat_mask()
+        belief_act = jax.jit(jax.vmap(cast(BeliefPolicy, spec.policy)))
+        act = lambda keys: belief_act(  # noqa: E731
+            keys, env.board[0], *_acting_view(env), env.agent_selection, env.flat_mask()
         )
     key = jax.random.key(seed)
     masks, actions = [], []

@@ -10,7 +10,7 @@ import jax.numpy as jnp
 
 from catan_engine.env import BatchedCatanEnv, flat_to_action
 
-from catan_agents.shared.policy import AgentSpec, Policy, StatePolicy
+from catan_agents.shared.policy import AgentSpec, BeliefPolicy, Policy
 
 
 class EvalResult(NamedTuple):
@@ -39,11 +39,11 @@ def _seat(agent: AgentSpec | Policy, n: int, i: int) -> Seat:
     if spec.observes == "observation":
         obs_act = jax.jit(jax.vmap(cast(Policy, spec.policy)))
         return lambda keys, env, seat: obs_act(keys, env.observe(seat), env.flat_mask())
-    state_act = jax.jit(
-        jax.vmap(cast(StatePolicy, spec.policy), in_axes=(0, 0, 0, None, 0))
+    belief_act = jax.jit(
+        jax.vmap(cast(BeliefPolicy, spec.policy), in_axes=(0, 0, 0, 0, None, 0))
     )
-    return lambda keys, env, seat: state_act(
-        keys, *env.board, jnp.int32(seat), env.flat_mask()
+    return lambda keys, env, seat: belief_act(
+        keys, env.board[0], *env.belief_view(seat), jnp.int32(seat), env.flat_mask()
     )
 
 
@@ -80,6 +80,9 @@ def evaluate(
         reward="sparse",
         n_players=n,
         number_placement=number_placement,
+        track_beliefs=any(
+            isinstance(a, AgentSpec) and a.observes == "belief" for a in agents
+        ),
     )
     seats = [_seat(agent, n, i) for i, agent in enumerate(agents)]
     lanes = jnp.arange(batch_size)

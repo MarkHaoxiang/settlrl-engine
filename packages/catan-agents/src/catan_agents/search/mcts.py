@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import mctx
 
+from catan_engine.belief import PlayerBelief
 from catan_engine.board import Board
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, BoardState, IntScalar
@@ -15,9 +16,9 @@ from catan_engine.env import available, flat_available, flat_to_action
 from catan_engine.mechanics.action import apply_action
 from catan_engine.mechanics.common import agent_selection_single, player_total_vp
 
-from catan_agents.shared.policy import FlatAction, FlatMask, StatePolicy
+from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
+from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import ValueFunction, heuristic_value
-from catan_agents.two_player.belief import redeal_dev_cards
 
 _ILLEGAL = -1e9  # prior logit for illegal moves
 
@@ -42,19 +43,19 @@ def make_mcts(
     num_simulations: int = 32,
     max_num_considered_actions: int = 16,
     value_scale: float = 20.0,
-) -> StatePolicy:
+) -> BeliefPolicy:
     """Gumbel-MuZero search using the engine itself as the dynamics model.
 
     Each simulation expands one node: the chosen flat action is applied with
     :func:`apply_action`, the child's legal moves become its prior, and
     ``tanh(value / value_scale)`` evaluated for the child's player-to-move is
     its leaf value. Transitions discount by -1 when the player-to-move
-    switches (two-player zero-sum) and a win backs up as a +/-1 reward into
-    an absorbing terminal. The root state is determinized from ``key`` first:
-    its PRNG key is replaced (the search samples its own dice / steals /
-    dev-card draws) and the opponent's hidden dev-card identities are re-dealt
-    from the player's unseen pool, so the search never reads information the
-    seat could not know.
+    switches and a win backs up as a +/-1 reward into an absorbing terminal —
+    exact zero-sum framing for two players, the *paranoid* reduction (every
+    opponent maximizes against the mover) beyond. The censored root is made
+    concrete with one :func:`~catan_agents.shared.sample.sample_world` draw,
+    so the search runs in a world consistent with what the seat knows and
+    samples its own dice / steals / dev draws.
     """
 
     def leaf_value(layout: BoardLayout, state: BoardState, p: jax.Array) -> jax.Array:
@@ -94,11 +95,12 @@ def make_mcts(
         key: jax.Array,
         layout: BoardLayout,
         state: BoardState,
+        belief: PlayerBelief,
         player: IntScalar,
         mask: FlatMask,
     ) -> FlatAction:
-        k_state, k_deal, k_search = jax.random.split(key, 3)
-        state = redeal_dev_cards(k_deal, state._replace(key=k_state), player)
+        k_world, k_search = jax.random.split(key)
+        state = sample_world(k_world, state, belief, player)
         batched: Any = jax.tree.map(lambda x: x[None], (layout, state))
         root = mctx.RootFnOutput(  # type: ignore[call-arg]  # chex dataclass
             prior_logits=jnp.where(mask, 0.0, _ILLEGAL)[None],

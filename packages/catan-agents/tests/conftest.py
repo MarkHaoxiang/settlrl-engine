@@ -10,10 +10,10 @@ install_import_hook(
         "catan_agents.shared.value",
         "catan_agents.shared.baselines",
         "catan_agents.shared.greedy",
+        "catan_agents.shared.sample",
         "catan_agents.shared.evaluate",
-        "catan_agents.two_player.belief",
-        "catan_agents.two_player.greedy",
-        "catan_agents.two_player.mcts",
+        "catan_agents.search.greedy",
+        "catan_agents.search.mcts",
     ],
     "beartype.beartype",
 )
