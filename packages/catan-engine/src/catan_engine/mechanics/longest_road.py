@@ -26,16 +26,8 @@ from catan_engine.board.state import (
 # Frames popped (and expanded together) per while_loop iteration.
 _POP_K = 32
 
-# Stack bound, assuming the rule invariant n_owned <= MAX_ROADS (= 15). Seeding
-# puts at most S = 2 * MAX_ROADS frames on the stack; each popped frame pushes
-# at most deg - 1 <= 2 children (the arrival edge is always in the frame's used
-# set), and pushing 2 needs two unused owned edges at the tip, so only trails
-# of length <= MAX_ROADS - 2 branch. Peak occupancy is provably at most
-# S + min(S, _POP_K) + (MAX_ROADS - 3) * _POP_K, and that is tight in the
-# abstract stack model — see docs/longest-road-stack-bound.md for the proof.
-# tests/mechanics/test_rules.py fuzzes the real peak sp against it (observed
-# 30). The top slot is scratch (_DUMP), never popped: dropped seeds and
-# invalid children park there.
+# Proven peak occupancy plus one scratch slot (_DUMP, never popped); see
+# docs/longest-road-stack-bound.html for the proof.
 STACK_CAP = (
     2 * MAX_ROADS + min(2 * MAX_ROADS, _POP_K) + (MAX_ROADS - 3) * _POP_K + 1
 )
