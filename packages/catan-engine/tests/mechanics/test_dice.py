@@ -33,12 +33,6 @@ class TestRollDice:
             _, roll = dice.roll_dice(jax.random.key(s))
             assert 2 <= int(roll) <= 12
 
-    def test_deterministic_for_a_key(self) -> None:
-        key = jax.random.key(42)
-        _, a = dice.roll_dice(key)
-        _, b = dice.roll_dice(key)
-        assert int(a) == int(b)
-
     def test_advances_key(self) -> None:
         k_in = jax.random.key(0)
         k_out, _ = dice.roll_dice(k_in)

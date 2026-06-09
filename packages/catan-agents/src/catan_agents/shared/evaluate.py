@@ -40,10 +40,10 @@ def _seat(agent: AgentSpec | Policy, n: int, i: int) -> Seat:
         obs_act = jax.jit(jax.vmap(cast(Policy, spec.policy)))
         return lambda keys, env, seat: obs_act(keys, env.observe(seat), env.flat_mask())
     belief_act = jax.jit(
-        jax.vmap(cast(BeliefPolicy, spec.policy), in_axes=(0, 0, 0, 0, None, 0))
+        jax.vmap(cast(BeliefPolicy, spec.policy), in_axes=(0, 0, 0, None, 0))
     )
     return lambda keys, env, seat: belief_act(
-        keys, env.board[0], *env.belief_view(seat), jnp.int32(seat), env.flat_mask()
+        keys, env.board[0], env.belief_view(seat), jnp.int32(seat), env.flat_mask()
     )
 
 

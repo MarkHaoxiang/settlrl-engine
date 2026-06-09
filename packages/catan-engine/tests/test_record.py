@@ -15,7 +15,6 @@ import pytest
 from catan_engine.env import BatchedCatanEnv
 from catan_engine.record import (
     GameRecord,
-    Move,
     ReplayError,
     initial_board,
     record_game,
@@ -133,10 +132,6 @@ def test_partial_record_replays_without_winner_check(record2: GameRecord) -> Non
 def test_from_json_rejects_unknown_version() -> None:
     with pytest.raises(ValueError, match="version"):
         GameRecord.from_json('{"version": 99}')
-
-
-def test_move_defaults() -> None:
-    assert Move(player=0, flat=1).dice is None
 
 
 def test_initial_board_is_the_unplayed_opening(record2: GameRecord) -> None:

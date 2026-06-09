@@ -1,16 +1,18 @@
 """Soundness of belief tracking (``catan_engine.belief``) under random play.
 
 The contract: everything in a ``BeliefState`` is derivable from public
-information, the bounds always bracket the truth, and a censored state carries
-nothing the observer couldn't know.
+information, the bounds always bracket the truth, and a ``BeliefView`` carries
+nothing the observer couldn't know — structurally, since its type has no field
+for anything hidden.
 """
 
 import jax
 import jax.numpy as jnp
 import pytest
 
-from catan_engine.belief import make_belief
+from catan_engine.belief import PublicState
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS
+from catan_engine.board.state import BoardState
 from catan_engine.env import BatchedCatanEnv
 
 _DEV_COUNTS = jnp.asarray(DEV_CARD_COUNTS, jnp.int32)
@@ -79,37 +81,49 @@ def test_third_party_steals_create_uncertainty() -> None:
     assert int(slack.sum()) > 0
 
 
-def test_censor_hides_everything_hidden() -> None:
+_HIDDEN_FIELDS = {"player_resources", "dev_hand", "dev_deck", "dev_bought", "key"}
+
+
+def test_every_board_field_is_classified() -> None:
+    # PublicState ∪ hidden must cover BoardState exactly: a new BoardState
+    # field can't slip into (or out of) the view layer unclassified.
+    assert set(PublicState._fields) | _HIDDEN_FIELDS == set(BoardState._fields)
+    assert set(PublicState._fields) & _HIDDEN_FIELDS == set()
+
+
+def test_belief_view_carries_nothing_hidden() -> None:
     env = BatchedCatanEnv(batch_size=4, seed=4, n_players=4, track_beliefs=True)
     _rollout(env, 300)
     state = env.board[1]
     for me in range(4):
-        censored, pb = env.belief_view(me)
-        others = [p for p in range(4) if p != me]
-        # Own rows exact; opponents' dev hands gone; resources at the proven floor.
+        view = env.belief_view(me)
+        # Structural: the view's type has no field for anything hidden.
+        for name in _HIDDEN_FIELDS:
+            assert not hasattr(view, name) and not hasattr(view.public, name)
+        # The public fields are the truth's, field for field.
+        for name in PublicState._fields:
+            assert bool(jnp.all(getattr(view.public, name) == getattr(state, name)))
+        # Own knowledge is exact; bounds are the observer's slice.
+        assert bool(jnp.all(view.own_dev == state.dev_hand[:, me]))
+        assert bool(jnp.all(view.belief.res_lo == env.beliefs.res_lo[:, me]))
+        assert bool(jnp.all(view.belief.res_hi == env.beliefs.res_hi[:, me]))
+        # Own purchases survive only on the observer's turn.
+        own_turn = state.current_player.astype(jnp.int32) == me
         assert bool(
-            jnp.all(censored.player_resources[:, me] == state.player_resources[:, me])
+            jnp.all(
+                view.own_bought
+                == jnp.where(own_turn[:, None], state.dev_bought, 0)
+            )
         )
-        assert bool(jnp.all(censored.dev_hand[:, me] == state.dev_hand[:, me]))
-        assert bool(jnp.all(censored.dev_hand[:, others] == 0))
-        assert bool(
-            jnp.all(censored.player_resources[:, others] == env.beliefs.res_lo[:, me, others])
-        )
-        # The censored deck is the observer's unseen pool.
+        # The unseen dev pool by conservation.
         pool = (
             _DEV_COUNTS
             - env.beliefs.dev_played.astype(jnp.int32)
             - state.dev_hand[:, me].astype(jnp.int32)
         )
-        assert bool(jnp.all(censored.dev_deck.astype(jnp.int32) == pool))
-        # The PRNG key carries no future randomness.
-        assert bool(
-            jnp.all(
-                jax.random.key_data(censored.key)
-                == jax.random.key_data(jax.random.key(0))
-            )
-        )
+        assert bool(jnp.all(view.unseen_dev.astype(jnp.int32) == pool))
         # The public counts are the truth's.
+        pb = view.belief
         assert bool(
             jnp.all(pb.hand_size == state.player_resources.astype(jnp.int32).sum(axis=2))
         )
@@ -135,10 +149,3 @@ def test_tracking_off_raises() -> None:
     env = BatchedCatanEnv(batch_size=1, seed=0, n_players=2)
     with pytest.raises(RuntimeError, match="track_beliefs"):
         env.beliefs
-
-
-def test_make_belief_shapes() -> None:
-    b = make_belief(batch_size=3, n_players=3)
-    assert b.res_lo.shape == (3, 3, 3, 5)
-    assert b.res_hi.shape == (3, 3, 3, 5)
-    assert b.dev_played.shape == (3, 5)

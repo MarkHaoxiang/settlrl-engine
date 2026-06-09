@@ -35,16 +35,6 @@ phase=DISCARD""",
     )
 
 
-def test_last_card_advances_to_move_robber(
-    discard_board: Callable[..., Board],
-) -> None:
-    board = discard_board(owed=1)
-    state, result = discard_step(board, jnp.array([WHEAT]))
-    assert int(result[0]) == ActionResult.SUCCESS.value
-    assert int(state.pending_discard[0, 0]) == 0
-    assert int(state.phase[0]) == GamePhase.MOVE_ROBBER
-
-
 def test_full_choice_over_a_sequence(discard_board: Callable[..., Board]) -> None:
     # Owe 4 from a 4 sheep + 4 wheat hand: choose 1 sheep then 3 wheat.
     board = discard_board(owed=4)

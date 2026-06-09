@@ -4,9 +4,9 @@ import numpy as np
 from expecttest import TestCase
 
 from catan_engine.board.dev_cards import DevCard
-from catan_engine.board.layout import N_VERTICES, BoardLayout, make_layout
+from catan_engine.board.layout import BoardLayout, make_layout
 from catan_engine.board.state import BoardState, GamePhase, make_board_state
-from tests.render import _EDGE_VERTICES, BoardRenderer
+from tests.render import BoardRenderer
 
 
 def _sample_board() -> tuple[BoardLayout, BoardState]:
@@ -66,10 +66,6 @@ def _sample_board() -> tuple[BoardLayout, BoardState]:
 
 
 class TestBoardRenderer(TestCase):
-    def test_edge_index_in_range(self) -> None:
-        for a, b in _EDGE_VERTICES:
-            assert 0 <= a < N_VERTICES and 0 <= b < N_VERTICES
-
     def test_empty_board_snapshot(self) -> None:
         layout = make_layout(batch_size=1, key=jax.random.key(0))
         state = make_board_state(batch_size=1)

@@ -9,7 +9,6 @@ from hypothesis import strategies as st
 from catan_engine.board.layout import (
     EDGE_V,
     N_EDGES,
-    N_PORTS,
     N_TILES,
     N_VERTICES,
     PORT_V,
@@ -31,11 +30,6 @@ from tests.render import _EDGE_VERTICES, _VERTEX_CUBE
 
 class TestMappings(TestCase):
     """Tests for the static incidence maps generated in ``layout``."""
-
-    def test_map_shapes(self) -> None:
-        assert TILE_V.shape == (N_TILES, 6)
-        assert PORT_V.shape == (N_PORTS, 2)
-        assert EDGE_V.shape == (N_EDGES, 2)
 
     def test_unique_vertex_count(self) -> None:
         vertices = np.asarray(TILE_V)

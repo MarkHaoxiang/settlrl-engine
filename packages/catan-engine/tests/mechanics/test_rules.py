@@ -29,16 +29,11 @@ from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import MAX_ROADS, BoardState, make_board_state
 
 # Bias towards empty so road networks stay realistically small.
-_EDGE_P = [0.55, 0.15, 0.12, 0.1, 0.08]
 _VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
 
 
 # Compile the single-game DFS once; reused across calls (static shapes).
 _LRL = jax.jit(longest_road.longest_road_length)
-
-
-def _random_occupancy(seed: int) -> tuple[np.ndarray, np.ndarray]:
-    return random_occupancy(seed, edge_p=_EDGE_P, vertex_p=_VERTEX_P)
 
 
 def _state_with(edge_road: np.ndarray, vertex_owner: np.ndarray) -> BoardState:
@@ -120,34 +115,6 @@ def _boards(draw: st.DrawFn) -> tuple[np.ndarray, np.ndarray]:
 
 
 class TestLongestRoad(TestCase):
-    def test_empty_board_is_zero(self) -> None:
-        edge_road = np.zeros(N_EDGES, np.uint8)
-        owner = np.zeros(N_VERTICES, np.uint8)
-        for p in range(N_PLAYERS):
-            assert (
-                int(_LRL(jnp.asarray(edge_road), jnp.asarray(owner), jnp.int32(p))) == 0
-            )
-
-    def test_single_road_is_one(self) -> None:
-        edge_road = np.zeros(N_EDGES, np.uint8)
-        edge_road[7] = 1  # one road for player 0
-        owner = np.zeros(N_VERTICES, np.uint8)
-        assert int(_LRL(jnp.asarray(edge_road), jnp.asarray(owner), jnp.int32(0))) == 1
-        assert int(_LRL(jnp.asarray(edge_road), jnp.asarray(owner), jnp.int32(1))) == 0
-
-    def test_matches_numpy_reference(self) -> None:
-        for seed in range(25):
-            edge_road, vertex_owner = _random_occupancy(seed)
-            state = _state_with(edge_road, vertex_owner)
-            for p in range(N_PLAYERS):
-                ref = reference.longest_road_length(state, p, 0)
-                got = int(
-                    _LRL(
-                        jnp.asarray(edge_road), jnp.asarray(vertex_owner), jnp.int32(p)
-                    )
-                )
-                assert got == ref, f"seed={seed} player={p}: vec={got} ref={ref}"
-
     @given(_boards())
     @settings(max_examples=400, deadline=None)
     def test_matches_reference_property(

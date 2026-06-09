@@ -22,34 +22,49 @@ both bounds; with two players it pins the opponent's hand exactly, recovering
 "2p Catan is perfect-information up to dev-card identities" as a derived
 property rather than an assumption.
 
-``censor`` produces the matching leak-free ``BoardState``: the observer's own
-rows are exact, opponents' resources collapse to the proven minima, opponents'
-development cards return to the deck (which becomes the observer's *unseen
-pool*), and the PRNG key is a constant. A censored state is a container for
-public knowledge, not a playable position -- agents rebuild a concrete world
-from it by sampling (see catan-agents' ``sample_world``).
+``belief_view`` projects one observer's knowledge into the agent-facing
+``BeliefView``: the ``PublicState`` part of the board (the fields every seat
+sees), the observer's ``PlayerBelief`` bounds and public counts, their own
+development cards, and the unseen dev pool. The view is deliberately *not* a
+``BoardState`` -- hidden fields have no placeholders to mistake for data, so
+nothing downstream can step or evaluate it by accident. The only road back to
+a playable position is a posterior sample (see catan-agents'
+``sample_world``).
 """
 
 from __future__ import annotations
 
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Int, UInt8
 
-from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES, DevCard
+from catan_engine.board.dev_cards import (
+    DEV_CARD_COUNTS,
+    N_DEV_CARD_TYPES,
+    DevCard,
+    DevDeckVec,
+)
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
-from catan_engine.board.state import BoardState, IntScalar, to_u8
+from catan_engine.board.state import (
+    BoardState,
+    EdgeRoadVec,
+    IntScalar,
+    VertexOwnerVec,
+    VertexTypeVec,
+    to_u8,
+)
 from catan_engine.mechanics.action import ActionParams, ActionType
 
 __all__ = [
     "BeliefState",
+    "BeliefView",
     "PlayerBelief",
+    "PublicState",
+    "belief_view",
     "make_belief",
     "update_belief",
-    "player_belief",
-    "censor",
 ]
 
 # Batched aliases (BeliefState fields), following the BoardState convention of a
@@ -62,6 +77,8 @@ DevPlayedVec = UInt8[Array, f"dev_card_types={N_DEV_CARD_TYPES}"]
 PlayerResBoundsVec = UInt8[Array, f"players resources={N_RESOURCES}"]
 PlayerCountVec = Int[Array, "players"]
 ResTotalVec = Int[Array, f"resources={N_RESOURCES}"]
+PlayerU8Vec = UInt8[Array, "players"]
+U8Scalar = UInt8[Array, ""]
 
 _DEV_COUNTS = jnp.asarray(DEV_CARD_COUNTS, dtype=jnp.int32)
 
@@ -86,10 +103,10 @@ class BeliefState(NamedTuple):
 class PlayerBelief(NamedTuple):
     """One observer's slice of the belief plus the public card counts.
 
-    The form consumed by agents (single game; batch by vmapping): per-type
-    resource bounds for every player, public hand / dev-card sizes, and the
-    public per-type resource totals across all hands (the bank holds
-    ``BANK_INITIAL - res_total``).
+    Per-type resource bounds for every player (the observer's own row is
+    exact), public hand / dev-card sizes, and the public per-type resource
+    totals across all hands (the bank holds ``BANK_INITIAL - res_total``).
+    Single game; batch by vmapping.
     """
 
     res_lo: PlayerResBoundsVec
@@ -97,6 +114,60 @@ class PlayerBelief(NamedTuple):
     hand_size: PlayerCountVec
     dev_count: PlayerCountVec
     res_total: ResTotalVec
+
+
+class PublicState(NamedTuple):
+    """The publicly visible part of a ``BoardState`` (one game).
+
+    Field-for-field copies of the ``BoardState`` fields of the same names; the
+    hidden fields (``player_resources``, ``dev_hand``, ``dev_deck``,
+    ``dev_bought``, ``key``) have no counterpart here.
+    """
+
+    vertex_owner: VertexOwnerVec
+    vertex_type: VertexTypeVec
+    edge_road: EdgeRoadVec
+    robber: U8Scalar
+    victory_points: PlayerU8Vec
+    knights_played: PlayerU8Vec
+    phase: U8Scalar
+    current_player: U8Scalar
+    setup_index: U8Scalar
+    dice_roll: U8Scalar
+    has_rolled: U8Scalar
+    dev_played: U8Scalar
+    free_roads: U8Scalar
+    pending_discard: PlayerU8Vec
+    longest_road_owner: U8Scalar
+    largest_army_owner: U8Scalar
+    longest_road_len: U8Scalar
+
+    @property
+    def n_players(self) -> int:
+        """Seated players (2..N_PLAYERS), read off the player axis (static)."""
+        return self.victory_points.shape[-1]
+
+
+class BeliefView(NamedTuple):
+    """Everything one observer knows about one game -- the agent-facing seam.
+
+    The public board fields, the observer's proven resource bounds and public
+    counts, their own development hand, their own purchases this turn (zeros
+    off-turn), and the unseen dev pool (deck + opponents' hands). Not a
+    ``BoardState`` and not steppable: rebuild a playable position with a
+    posterior sample (catan-agents' ``sample_world``) first.
+    """
+
+    public: PublicState
+    belief: PlayerBelief
+    own_dev: DevDeckVec
+    own_bought: DevDeckVec
+    unseen_dev: DevDeckVec
+
+    @property
+    def n_players(self) -> int:
+        """Seated players (2..N_PLAYERS), read off the player axis (static)."""
+        return self.public.n_players
 
 
 def make_belief(batch_size: int = 1, n_players: int = N_PLAYERS) -> BeliefState:
@@ -167,13 +238,11 @@ def update_belief(
 
     # Monopoly publicly reveals every player's exact count of the named type.
     mono_r = jnp.clip(params.idx, 0, N_RESOURCES - 1)
-    mono = (action_type == ActionType.PLAY_MONOPOLY) & (
-        played[DevCard.MONOPOLY] > 0
-    )
+    mono = (action_type == ActionType.PLAY_MONOPOLY) & (played[DevCard.MONOPOLY] > 0)
 
-    def observer(o: jax.Array, lo8: jax.Array, hi8: jax.Array) -> tuple[
-        jax.Array, jax.Array
-    ]:
+    def observer(
+        o: jax.Array, lo8: jax.Array, hi8: jax.Array
+    ) -> tuple[jax.Array, jax.Array]:
         lo, hi = lo8.astype(jnp.int32), hi8.astype(jnp.int32)
         sees = ~stole | (o == thief) | (o == victim)
         # Seen flows: the typed delta is public, so both bounds track it exactly.
@@ -199,45 +268,47 @@ def update_belief(
     return BeliefState(res_lo=res_lo, res_hi=res_hi, dev_played=dev_played)
 
 
-def player_belief(
+def belief_view(
     state: BoardState, belief: BeliefState, observer: IntScalar | int
-) -> PlayerBelief:
-    """``observer``'s slice of the belief plus the public card counts (one game)."""
-    return PlayerBelief(
-        res_lo=belief.res_lo[observer],
-        res_hi=belief.res_hi[observer],
-        hand_size=state.player_resources.astype(jnp.int32).sum(axis=1),
-        dev_count=state.dev_hand.astype(jnp.int32).sum(axis=1),
-        res_total=state.player_resources.astype(jnp.int32).sum(axis=0),
-    )
-
-
-def censor(
-    state: BoardState, belief: BeliefState, observer: IntScalar | int
-) -> BoardState:
-    """``state`` with everything ``observer`` can't know removed (one game).
-
-    Opponents' resources collapse to the proven minima, their development cards
-    return to the deck (making ``dev_deck`` the observer's unseen pool),
-    ``dev_bought`` survives only for the acting observer, and the PRNG key is a
-    constant. The result is a container for public knowledge -- rebuild a
-    playable position with a posterior sample before stepping it.
-    """
-    lo = belief.res_lo[observer]
-    res = lo.at[observer].set(state.player_resources[observer])
-    dev = (
-        jnp.zeros_like(state.dev_hand).at[observer].set(state.dev_hand[observer])
-    )
-    pool = (
-        _DEV_COUNTS
-        - belief.dev_played.astype(jnp.int32)
-        - state.dev_hand[observer].astype(jnp.int32)
-    )
+) -> BeliefView:
+    """Project ``observer``'s knowledge of one game into a :class:`BeliefView`."""
+    res = state.player_resources.astype(jnp.int32)
+    own_dev = state.dev_hand[observer]
     own_turn = observer == state.current_player.astype(jnp.int32)
-    return state._replace(
-        player_resources=res,
-        dev_hand=dev,
-        dev_deck=to_u8(pool),
-        dev_bought=jnp.where(own_turn, state.dev_bought, jnp.zeros_like(state.dev_bought)),
-        key=jax.random.key(0),
+    return BeliefView(
+        public=PublicState(
+            vertex_owner=state.vertex_owner,
+            vertex_type=state.vertex_type,
+            edge_road=state.edge_road,
+            robber=state.robber,
+            victory_points=state.victory_points,
+            knights_played=state.knights_played,
+            phase=state.phase,
+            current_player=state.current_player,
+            setup_index=state.setup_index,
+            dice_roll=state.dice_roll,
+            has_rolled=state.has_rolled,
+            dev_played=state.dev_played,
+            free_roads=state.free_roads,
+            pending_discard=state.pending_discard,
+            longest_road_owner=state.longest_road_owner,
+            largest_army_owner=state.largest_army_owner,
+            longest_road_len=state.longest_road_len,
+        ),
+        belief=PlayerBelief(
+            res_lo=belief.res_lo[observer],
+            res_hi=belief.res_hi[observer],
+            hand_size=res.sum(axis=1),
+            dev_count=state.dev_hand.astype(jnp.int32).sum(axis=1),
+            res_total=res.sum(axis=0),
+        ),
+        own_dev=own_dev,
+        own_bought=jnp.where(
+            own_turn, state.dev_bought, jnp.zeros_like(state.dev_bought)
+        ),
+        unseen_dev=to_u8(
+            _DEV_COUNTS
+            - belief.dev_played.astype(jnp.int32)
+            - own_dev.astype(jnp.int32)
+        ),
     )

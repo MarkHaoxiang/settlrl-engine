@@ -1,14 +1,19 @@
-"""Determinization: turn a censored state + belief into one concrete world.
+"""Determinization: turn a player's honest view into one concrete world.
 
-``sample_world`` is the only road from a player's honest view (see
-``catan_engine.belief``) back to a playable ``BoardState``: every field
-``censor`` removed is filled with a sample consistent with the belief —
-opponents' dev hands dealt from the unseen pool, their resource hands dealt
-within the proven ``[lo, hi]`` bounds to their public sizes against the public
-per-type pool, and a fresh PRNG key (the search samples its own dice / steals
-/ draws instead of foreseeing the environment's). Model-based agents search in
-the sample; nothing hidden can reach them because nothing hidden was there to
-begin with.
+``sample_world`` is the only road from a
+:class:`~catan_engine.belief.BeliefView` back to a playable ``BoardState``:
+the public fields are copied through and every hidden field is filled with a
+sample consistent with the belief — opponents' dev hands dealt from the
+unseen pool, their resource hands dealt within the proven ``[lo, hi]`` bounds
+to their public sizes against the public per-type pool, and a fresh PRNG key
+(the search samples its own dice / steals / draws instead of foreseeing the
+environment's). Model-based agents search in the sample; nothing hidden can
+reach them because nothing hidden was there to begin with.
+
+The explicit ``BoardState(...)`` construction at the bottom is deliberate: a
+new ``BoardState`` field fails to compile here until it is classified as
+public (add it to ``PublicState``) or hidden (sample it) — hidden state can't
+leak into the view layer by omission.
 
 The resource deal draws cards one at a time proportionally to the remaining
 per-type headroom — a reasonable surrogate for the exact posterior, not the
@@ -22,7 +27,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 
-from catan_engine.belief import PlayerBelief
+from catan_engine.belief import BeliefView
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import BoardState, IntScalar, to_u8
@@ -39,13 +44,14 @@ _MAX_DEAL = 5 * 19
 
 
 def _deal_dev_hands(
-    key: jax.Array, state: BoardState, belief: PlayerBelief, player: IntScalar
-) -> BoardState:
-    """Deal every opponent's dev hand from the censored deck (the unseen pool),
-    uniformly without replacement; the remainder becomes the deck."""
-    pool = state.dev_deck
+    key: jax.Array, view: BeliefView, player: IntScalar
+) -> tuple[jax.Array, jax.Array]:
+    """Deal every opponent's dev hand from the unseen pool, uniformly without
+    replacement; returns ``(dev_hand, dev_deck)`` with the remainder as the
+    deck and the observer's own hand in its row."""
+    pool = view.unseen_dev
     need = jnp.where(
-        jnp.arange(state.n_players) == player, 0, belief.dev_count
+        jnp.arange(view.n_players) == player, 0, view.belief.dev_count
     )  # (P,)
     # Noise the pool's card slots; the top slots are taken, opponent by
     # opponent in seat order (exchangeable, so the order doesn't matter).
@@ -55,37 +61,32 @@ def _deal_dev_hands(
     owner = jnp.searchsorted(jnp.cumsum(need), rank, side="right")  # (25,)
     taken = rank < need.sum()
     hands = (
-        jnp.zeros((state.n_players, N_DEV_CARD_TYPES), jnp.int32)
+        jnp.zeros((view.n_players, N_DEV_CARD_TYPES), jnp.int32)
         .at[jnp.where(taken, owner, 0), _CARD_TYPE]
         .add(taken.astype(jnp.int32))
     )
     dealt = hands.sum(axis=0)
-    new_hand = state.dev_hand.astype(jnp.int32) + hands
-    return state._replace(
-        dev_hand=to_u8(new_hand),
-        dev_deck=to_u8(pool.astype(jnp.int32) - dealt),
-    )
+    dev_hand = hands.at[player].add(view.own_dev.astype(jnp.int32))
+    return to_u8(dev_hand), to_u8(pool.astype(jnp.int32) - dealt)
 
 
-def _deal_resources(
-    key: jax.Array, state: BoardState, belief: PlayerBelief, player: IntScalar
-) -> BoardState:
+def _deal_resources(key: jax.Array, view: BeliefView) -> jax.Array:
     """Deal every opponent's unknown resource cards within ``[lo, hi]``.
 
-    The censored rows already sit at ``lo``; each opponent draws
-    ``hand_size - lo.sum()`` more, one at a time, weighted by the per-type
-    headroom ``hi - current`` capped by the remaining public pool (with the
-    ``hi`` cap relaxed if it ever leaves no choice).
+    Rows start at ``lo`` (the observer's own row is already exact there);
+    each player draws ``hand_size - lo.sum()`` more, one at a time, weighted
+    by the per-type headroom ``hi - current`` capped by the remaining public
+    pool (with the ``hi`` cap relaxed if it ever leaves no choice).
     """
-    res = state.player_resources.astype(jnp.int32)  # (P, R), opponents at lo
-    pool = belief.res_total - res.sum(axis=0)  # (R,) cards left to place
-    need = belief.hand_size - res.sum(axis=1)  # (P,) 0 for `player`
+    res = view.belief.res_lo.astype(jnp.int32)  # (P, R), opponents at lo
+    pool = view.belief.res_total - res.sum(axis=0)  # (R,) cards left to place
+    need = view.belief.hand_size - res.sum(axis=1)  # (P,) 0 where lo is exact
 
     def deal_player(
         p: int, carry: tuple[jax.Array, jax.Array, jax.Array]
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
         res, pool, key = carry
-        hi = belief.res_hi[p].astype(jnp.int32)
+        hi = view.belief.res_hi[p].astype(jnp.int32)
 
         def deal_one(
             i: jax.Array, inner: tuple[jax.Array, jax.Array, jax.Array]
@@ -106,22 +107,46 @@ def _deal_resources(
         )
 
     carry = (res, pool, key)
-    for p in range(state.n_players):
+    for p in range(view.n_players):
         carry = deal_player(p, carry)
     res, _, _ = carry
-    return state._replace(player_resources=to_u8(res))
+    return res
 
 
-def sample_world(
-    key: jax.Array, state: BoardState, belief: PlayerBelief, player: IntScalar
-) -> BoardState:
-    """Sample one concrete world from ``player``'s censored ``state`` + belief.
+def sample_world(key: jax.Array, view: BeliefView, player: IntScalar) -> BoardState:
+    """Sample one concrete world from ``player``'s :class:`BeliefView`.
 
-    Public fields are untouched; hand sizes, dev counts, and per-type totals
-    all match the public record, so the sample is indistinguishable from the
-    truth on everything ``player`` can see.
+    Public fields are copied through; hand sizes, dev counts, and per-type
+    totals all match the public record, so the sample is indistinguishable
+    from the truth on everything ``player`` can see.
     """
     k_key, k_dev, k_res = jax.random.split(key, 3)
-    state = state._replace(key=k_key)
-    state = _deal_dev_hands(k_dev, state, belief, player)
-    return _deal_resources(k_res, state, belief, player)
+    dev_hand, dev_deck = _deal_dev_hands(k_dev, view, player)
+    resources = _deal_resources(k_res, view)
+    pub = view.public
+    return BoardState(
+        # Public record, copied through.
+        vertex_owner=pub.vertex_owner,
+        vertex_type=pub.vertex_type,
+        edge_road=pub.edge_road,
+        robber=pub.robber,
+        victory_points=pub.victory_points,
+        knights_played=pub.knights_played,
+        phase=pub.phase,
+        current_player=pub.current_player,
+        setup_index=pub.setup_index,
+        dice_roll=pub.dice_roll,
+        has_rolled=pub.has_rolled,
+        dev_played=pub.dev_played,
+        free_roads=pub.free_roads,
+        pending_discard=pub.pending_discard,
+        longest_road_owner=pub.longest_road_owner,
+        largest_army_owner=pub.largest_army_owner,
+        longest_road_len=pub.longest_road_len,
+        # Hidden fields, sampled (or the observer's own knowledge).
+        player_resources=to_u8(resources),
+        dev_hand=dev_hand,
+        dev_deck=dev_deck,
+        dev_bought=view.own_bought,
+        key=k_key,
+    )

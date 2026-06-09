@@ -5,9 +5,9 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from catan_engine.belief import PlayerBelief
+from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import BoardState, IntScalar
+from catan_engine.board.state import IntScalar
 from catan_engine.env import N_FLAT, flat_to_action
 from catan_engine.mechanics.action import apply_action
 
@@ -22,7 +22,7 @@ _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 def make_greedy(value: ValueFunction) -> BeliefPolicy:
     """One-step lookahead: apply every legal action and argmax ``value``.
 
-    The censored state is first made concrete with one
+    The view is first made concrete with one
     :func:`~catan_agents.shared.sample.sample_world` draw, so stochastic
     successors — dice, steals, dev-card draws — are the policy's own samples
     over a world consistent with what the player knows.
@@ -31,13 +31,12 @@ def make_greedy(value: ValueFunction) -> BeliefPolicy:
     def policy(
         key: jax.Array,
         layout: BoardLayout,
-        state: BoardState,
-        belief: PlayerBelief,
+        view: BeliefView,
         player: IntScalar,
         mask: FlatMask,
     ) -> FlatAction:
         k_world, k_noise = jax.random.split(key)
-        state = sample_world(k_world, state, belief, player)
+        state = sample_world(k_world, view, player)
         successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
             layout, state, _ROW_TYPE, _ROW_PARAMS, mask
         )

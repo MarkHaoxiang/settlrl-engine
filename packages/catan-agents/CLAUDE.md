@@ -7,8 +7,10 @@ for the model-based agents).
 
 **No agent assumes full observability.** Model-based agents consume the
 engine's honest seam — `BatchedCatanEnv(track_beliefs=True).belief_view(seat)`,
-a *censored* `BoardState` (hidden fields removed by `catan_engine.belief.censor`)
-plus a `PlayerBelief` (proven `[lo, hi]` bounds from card counting) — and the
+a `catan_engine.belief.BeliefView`: the public board fields (`PublicState`),
+proven `[lo, hi]` bounds from card counting (`PlayerBelief`), the seat's own
+dev cards, and the unseen dev pool. The view deliberately is *not* a
+`BoardState` (hidden state is unrepresentable, not placeholdered), so the
 only road back to a playable position is `sample_world`. The old 2p/4p module
 split is gone: with two players the tracked belief is exact on resources
 (tested in the engine), so "2p is perfect-info" is now a property of the data,
@@ -19,25 +21,29 @@ varying sharpness.
 
 - `policy.py` — the seat protocols: `Policy` (single-game `(key, obs, mask) ->
   flat action`; callers `vmap` for batches) and `BeliefPolicy` (`(key, layout,
-  censored_state, belief, player, mask)`), the `FlatMask` / `FlatAction`
+  view, player, mask)`), the `FlatMask` / `FlatAction`
   jaxtyping aliases, and `AgentSpec` (policy + `observes` kind
   ("observation" | "belief") + supported seat counts) — the registry value
   type. Policies are masked-argmax style: with no legal move the index is
   arbitrary and the engine rejects it as `INVALID` (the lane stalls until
   auto-reset), matching `BatchedCatanEnv.random_actions`.
-- `sample.py` — `sample_world(key, censored_state, belief, player) ->
-  BoardState`: fills everything `censor` removed with a posterior sample —
-  opponents' dev hands dealt uniformly without replacement from the censored
-  deck (= the unseen pool) via a static 25-slot card view
+- `sample.py` — `sample_world(key, view, player) -> BoardState`: copies the
+  `PublicState` fields through and fills every hidden field with a posterior
+  sample — opponents' dev hands dealt uniformly without replacement from the
+  unseen pool (`view.unseen_dev`) via a static 25-slot card view
   (`_CARD_TYPE`/`_CARD_RANK`, slots noised once, ranked, owners assigned by
   `searchsorted` over the per-opponent counts), opponents' resources dealt one
-  card at a time within `[lo, hi]` to their public hand sizes against the
-  public per-type pool (`res_total` − placed; weights = headroom capped by
-  pool, `hi` relaxed if jointly infeasible — proportional-headroom is a
-  surrogate for the exact posterior, not the posterior), and a fresh PRNG key.
-  Guaranteed: hand sizes, dev counts, per-type totals, and the observer's own
-  rows all match the public record (`tests/test_sample.py`). The per-card
-  `fori_loop` is `_MAX_DEAL` = 95 iterations (the bank bound), trivial at the
+  card at a time within `[lo, hi]` (rows start at `lo`) to their public hand
+  sizes against the public per-type pool (`res_total` − placed; weights =
+  headroom capped by pool, `hi` relaxed if jointly infeasible —
+  proportional-headroom is a surrogate for the exact posterior, not the
+  posterior), `dev_bought := view.own_bought`, and a fresh PRNG key. The
+  closing `BoardState(...)` is built by **explicit keyword** on purpose: a new
+  `BoardState` field fails to compile here until classified public (add to
+  `PublicState`) or hidden (sample it). Guaranteed: public fields untouched;
+  hand sizes, dev counts, per-type totals, and the observer's own rows all
+  match the public record (`tests/test_sample.py`). The per-card `fori_loop`
+  is `_MAX_DEAL` = 95 iterations (the bank bound), trivial at the
   once-per-root call rate.
 - `value.py` — `ValueFunction` protocol: single-game `(layout, state, player)
   -> scalar`, higher better, arbitrary scale. `make_heuristic(**weights)` builds
@@ -84,7 +90,8 @@ varying sharpness.
   overshoot when several lanes finish together; capped at
   `_MAX_STEPS_PER_EPISODE` as a non-termination guard). Not a fused rollout; a
   `lax.scan` version is the obvious next step if evaluation throughput starts
-  to matter.
+  to matter. (Belief seats receive the batched `env.belief_view(i)` whole —
+  one `BeliefView` argument, vmapped.)
 
 ## search/
 

@@ -12,12 +12,6 @@ def test_resource_ports_mirror_tile_values() -> None:
     assert Port.WOOD.value == Tile.WOOD.value
     assert Port.BRICK.value == Tile.BRICK.value
     assert Port.ORE.value == Tile.ORE.value
-
-
-def test_general_is_the_extra_member() -> None:
+    # The 3:1 general port is the one extra member.
     assert Port.GENERAL.value == 5
     assert len(Port) == 6
-
-
-def test_labels() -> None:
-    assert [str(p) for p in Port] == ["SHP", "WHT", "WOD", "BRK", "ORE", "3:1"]

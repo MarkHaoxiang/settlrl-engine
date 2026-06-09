@@ -37,9 +37,7 @@ def bot_act(kind: str, key: jax.Array, benv: BatchedCatanEnv, seat: int) -> int:
         obs = {k: v[0] for k, v in benv.observe(seat).items()}
         return int(cast(Policy, _BOT_ACTS[kind])(key, obs, mask))
     layout = jax.tree.map(lambda x: x[0], benv.board[0])
-    state, belief = jax.tree.map(lambda x: x[0], benv.belief_view(seat))
+    view = jax.tree.map(lambda x: x[0], benv.belief_view(seat))
     return int(
-        cast(BeliefPolicy, _BOT_ACTS[kind])(
-            key, layout, state, belief, jnp.int32(seat), mask
-        )
+        cast(BeliefPolicy, _BOT_ACTS[kind])(key, layout, view, jnp.int32(seat), mask)
     )

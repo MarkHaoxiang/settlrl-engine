@@ -91,10 +91,10 @@ from catan_engine.board.state import (
 )
 from catan_engine.belief import (
     BeliefState,
+    BeliefView,
     PlayerBelief,
-    censor,
+    belief_view,
     make_belief,
-    player_belief,
     update_belief,
 )
 
@@ -106,6 +106,7 @@ __all__ = [
     "N_FLAT",
     "BatchedCatanEnv",
     "BeliefState",
+    "BeliefView",
     "Box",
     "Discrete",
     "Observation",
@@ -196,10 +197,7 @@ def _random_actions_b(
 # Belief tracking (optional; see catan_engine.belief).
 # ---------------------------------------------------------------------------
 _update_belief_v = jax.vmap(update_belief)
-_censor_b = jax.jit(jax.vmap(censor, in_axes=(0, 0, None)), static_argnums=2)
-_player_belief_b = jax.jit(
-    jax.vmap(player_belief, in_axes=(0, 0, None)), static_argnums=2
-)
+_belief_view_b = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, None)), static_argnums=2)
 
 
 @functools.partial(jax.jit, static_argnames=("batch_size", "n_players"))
@@ -490,19 +488,14 @@ class BatchedCatanEnv:
             raise RuntimeError("belief tracking is off; pass track_beliefs=True")
         return self._belief
 
-    def belief_view(self, agent: int | str) -> tuple[BoardState, PlayerBelief]:
-        """``agent``'s honest view across all lanes (requires ``track_beliefs``).
-
-        Returns the censored states (no field the observer couldn't know; see
-        :func:`catan_engine.belief.censor`) and the matching
-        :class:`PlayerBelief` slices, both batched.
+    def belief_view(self, agent: int | str) -> BeliefView:
+        """``agent``'s honest :class:`BeliefView` across all lanes (batched;
+        requires ``track_beliefs``): the public board fields plus everything
+        the seat knows about hidden hands -- nothing it couldn't know. See
+        :func:`catan_engine.belief.belief_view`.
         """
         me = self._agent_index(agent)
-        beliefs = self.beliefs
-        return (
-            cast(BoardState, _censor_b(self._state, beliefs, me)),
-            cast(PlayerBelief, _player_belief_b(self._state, beliefs, me)),
-        )
+        return cast(BeliefView, _belief_view_b(self._state, self.beliefs, me))
 
     # -- Spaces -----------------------------------------------------------
 

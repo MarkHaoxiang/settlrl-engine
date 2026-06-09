@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import mctx
 
-from catan_engine.belief import PlayerBelief
+from catan_engine.belief import BeliefView
 from catan_engine.board import Board
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, BoardState, IntScalar
@@ -62,7 +62,7 @@ def make_mcts(
     player-to-move switches and a win backs up as a +/-1 reward into an
     absorbing terminal — exact zero-sum framing for two players, the
     *paranoid* reduction (every opponent maximizes against the mover) beyond.
-    The censored root is made concrete with one
+    The root view is made concrete with one
     :func:`~catan_agents.shared.sample.sample_world` draw, so the search runs
     in a world consistent with what the seat knows and samples its own dice /
     steals / dev draws.
@@ -104,13 +104,12 @@ def make_mcts(
     def policy(
         key: jax.Array,
         layout: BoardLayout,
-        state: BoardState,
-        belief: PlayerBelief,
+        view: BeliefView,
         player: IntScalar,
         mask: FlatMask,
     ) -> FlatAction:
         k_world, k_search = jax.random.split(key)
-        state = sample_world(k_world, state, belief, player)
+        state = sample_world(k_world, view, player)
         # Heuristic root prior: the one-step value sweep over all legal moves.
         successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
             layout, state, _ROW_TYPE, _ROW_PARAMS, mask

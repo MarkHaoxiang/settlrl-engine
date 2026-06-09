@@ -5,12 +5,12 @@ player wouldn't:
 
 - :class:`Policy` consumes the acting player's *partial observation* (the
   env's dict form, meant for learned policies).
-- :class:`BeliefPolicy` consumes the engine's honest world model: a *censored*
-  ``BoardState`` (every hidden field removed — see
-  :func:`catan_engine.belief.censor`) plus the player's
-  :class:`~catan_engine.belief.PlayerBelief` (proven bounds on hidden hands).
-  Model-based agents rebuild a concrete world from the pair by sampling
-  (:func:`catan_agents.shared.sample.sample_world`) and search in the sample.
+- :class:`BeliefPolicy` consumes the engine's honest world model: a
+  :class:`~catan_engine.belief.BeliefView` (the public board fields plus
+  proven bounds on hidden hands — no ``BoardState``, so nothing hidden can
+  even be represented). Model-based agents rebuild a concrete world from it
+  by sampling (:func:`catan_agents.shared.sample.sample_world`) and search in
+  the sample.
 
 Both are valid at any player count; belief sharpness, not the API, is what
 varies with the seat count (with two players the belief pins the opponent's
@@ -25,9 +25,9 @@ from typing import Literal, Protocol, runtime_checkable
 import jax
 from jaxtyping import Array, Bool, Int
 
-from catan_engine.belief import PlayerBelief
+from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import BoardState, IntScalar
+from catan_engine.board.state import IntScalar
 from catan_engine.env import N_FLAT, Observation
 
 FlatMask = Bool[Array, f"flat={N_FLAT}"]
@@ -57,19 +57,17 @@ class Policy(Protocol):
 class BeliefPolicy(Protocol):
     """A single-game decision function over the player's honest world model.
 
-    ``layout`` is one game's board layout, ``state`` the *censored* board from
-    ``player``'s point of view, ``belief`` the matching
-    :class:`~catan_engine.belief.PlayerBelief`, ``mask`` the flat legality of
-    the player's moves. Same return and no-legal-move conventions as
-    :class:`Policy`.
+    ``layout`` is one game's board layout, ``view`` everything ``player``
+    knows about it (a :class:`~catan_engine.belief.BeliefView`), ``mask`` the
+    flat legality of the player's moves. Same return and no-legal-move
+    conventions as :class:`Policy`.
     """
 
     def __call__(
         self,
         key: jax.Array,
         layout: BoardLayout,
-        state: BoardState,
-        belief: PlayerBelief,
+        view: BeliefView,
         player: IntScalar,
         mask: FlatMask,
     ) -> FlatAction: ...

@@ -14,6 +14,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from catan_engine.belief import BeliefView
 from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
 
 from catan_agents import POLICIES, AgentSpec, evaluate
@@ -32,12 +33,12 @@ def _acting_obs(env: BatchedCatanEnv) -> Observation:
     )
 
 
-def _acting_view(env: BatchedCatanEnv) -> tuple:
-    """Per-lane ``(censored state, belief)`` of that lane's acting player."""
+def _acting_view(env: BatchedCatanEnv) -> BeliefView:
+    """Per-lane ``BeliefView`` of that lane's acting player."""
     per_seat = [env.belief_view(i) for i in range(env.n_players)]
     lanes = jnp.arange(env.batch_size)
     return cast(
-        tuple,
+        BeliefView,
         jax.tree.map(lambda *xs: jnp.stack(xs)[env.agent_selection, lanes], *per_seat),
     )
 
@@ -59,7 +60,7 @@ def _self_play(
     else:
         belief_act = jax.jit(jax.vmap(cast(BeliefPolicy, spec.policy)))
         act = lambda keys: belief_act(  # noqa: E731
-            keys, env.board[0], *_acting_view(env), env.agent_selection, env.flat_mask()
+            keys, env.board[0], _acting_view(env), env.agent_selection, env.flat_mask()
         )
     key = jax.random.key(seed)
     masks, actions = [], []

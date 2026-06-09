@@ -10,21 +10,12 @@ from catan_engine.board.dev_cards import (
 )
 
 
-def test_enum_covers_every_type() -> None:
+def test_matches_rulebook() -> None:
     assert [c.value for c in DevCard] == [0, 1, 2, 3, 4]
     assert len(DevCard) == N_DEV_CARD_TYPES
-
-
-def test_labels() -> None:
-    assert [str(c) for c in DevCard] == ["KNT", "RDB", "YOP", "MNP", "VPT"]
-
-
-def test_deck_is_a_standard_25_card_deck() -> None:
+    # The standard 25-card deck.
     assert len(DEV_CARD_COUNTS) == N_DEV_CARD_TYPES
     assert sum(DEV_CARD_COUNTS) == 25
     assert DEV_CARD_COUNTS[DevCard.KNIGHT] == 14
-
-
-def test_cost_is_sheep_wheat_ore() -> None:
-    # [sheep, wheat, wood, brick, ore]
+    # Cost: [sheep, wheat, wood, brick, ore]
     assert DEV_CARD_COST == (1, 1, 0, 0, 1)

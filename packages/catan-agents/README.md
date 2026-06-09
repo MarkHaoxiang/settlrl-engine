@@ -5,7 +5,7 @@ Catan-playing agents for [catan-engine](../catan-engine).
 Agents are pure JAX functions (`jit` / `vmap` compatible, so they can drive whole batches of games on device) that consume the engine's flat action space; decode a chosen index with `catan_engine.env.flat_to_action`. They come in two kinds, split by what a seat consumes — neither sees anything the player wouldn't:
 
 - **Observation agents** (`(key, observation, flat_mask) -> flat action`) read the acting player's partial view.
-- **Belief agents** (`(key, layout, censored_state, belief, player, flat_mask) -> flat action`) read the engine's honest world model: a board with every hidden field removed, plus provable bounds on what opponents hold (the engine's belief tracking — `BatchedCatanEnv(track_beliefs=True)`). They rebuild a concrete world by sampling (`sample_world`) and search in the sample.
+- **Belief agents** (`(key, layout, view, player, flat_mask) -> flat action`) read the engine's honest world model: a `BeliefView` holding the public board fields plus provable bounds on what opponents hold (the engine's belief tracking — `BatchedCatanEnv(track_beliefs=True)`). The view has no field for anything hidden, so an agent can't even represent what the seat couldn't see; it rebuilds a concrete world by sampling (`sample_world`) and searches in the sample.
 
 Both kinds work at any player count. `POLICIES` maps every shipped agent by name to an `AgentSpec` (its function, which kind it is, and the player counts it supports).
 
