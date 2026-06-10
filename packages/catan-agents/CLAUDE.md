@@ -1,163 +1,112 @@
 # catan-agents — internal notes
 
-Pure-JAX Catan agents over `catan-engine`'s public flat-action seam
-(`catan_engine.env.N_FLAT` / `flat_to_action` / `BatchedCatanEnv.flat_mask`,
-plus `step` / `available` / `flat_available` and `mechanics.action.apply_action`
-for the model-based agents).
+Pure-JAX Catan agents over `catan-engine`'s public flat-action seam.
 
 **No agent assumes full observability.** Model-based agents consume the
-engine's honest seam — `BatchedCatanEnv(track_beliefs=True).belief_view(seat)`,
-a `catan_engine.belief.BeliefView`: the public board fields (`PublicState`),
-proven `[lo, hi]` bounds from card counting (`PlayerBelief`), the seat's own
-dev cards, and the unseen dev pool. The view deliberately is *not* a
-`BoardState` (hidden state is unrepresentable, not placeholdered), so the
-only road back to a playable position is `sample_world`. The old 2p/4p module
-split is gone: with two players the tracked belief is exact on resources
-(tested in the engine), so "2p is perfect-info" is now a property of the data,
-not an API boundary; the same agents run at 2-4 players with beliefs of
-varying sharpness.
+engine's honest `BeliefView` (see the engine's `belief.py` notes); hidden
+state is unrepresentable there, so the only road back to a playable position
+is `sample_world`. There is no 2p/4p module split: with two players the
+tracked belief is exact on resources (tested in the engine), so "2p is
+perfect-info" is a property of the data, not an API boundary — the same
+agents run at 2–4 players with beliefs of varying sharpness.
 
 ## shared/
 
-- `policy.py` — the seat protocols: `Policy` (single-game `(key, obs, mask) ->
-  flat action`; callers `vmap` for batches) and `BeliefPolicy` (`(key, layout,
-  view, player, mask)`), the `FlatMask` / `FlatAction`
-  jaxtyping aliases, and `AgentSpec` (policy + `observes` kind
-  ("observation" | "belief") + supported seat counts) — the registry value
-  type. Policies are masked-argmax style: with no legal move the index is
-  arbitrary and the engine rejects it as `INVALID` (the lane stalls until
-  auto-reset), matching `BatchedCatanEnv.random_actions`.
-- `sample.py` — `sample_world(key, view, player) -> BoardState`: copies the
-  `PublicState` fields through and fills every hidden field with a posterior
-  sample — opponents' dev hands dealt uniformly without replacement from the
-  unseen pool (`view.unseen_dev`) via a static 25-slot card view
-  (`_CARD_TYPE`/`_CARD_RANK`, slots noised once, ranked, owners assigned by
-  `searchsorted` over the per-opponent counts), opponents' resources dealt one
-  card at a time within `[lo, hi]` (rows start at `lo`) to their public hand
-  sizes against the public per-type pool (`res_total` − placed; weights =
-  headroom capped by pool, `hi` relaxed if jointly infeasible —
-  proportional-headroom is a surrogate for the exact posterior, not the
-  posterior), `dev_bought := view.own_bought`, and a fresh PRNG key. The
-  closing `BoardState(...)` is built by **explicit keyword** on purpose: a new
-  `BoardState` field fails to compile here until classified public (add to
-  `PublicState`) or hidden (sample it). Guaranteed: public fields untouched;
-  hand sizes, dev counts, per-type totals, and the observer's own rows all
-  match the public record (`tests/test_sample.py`). The per-card `fori_loop`
-  is `_MAX_DEAL` = 95 iterations (the bank bound), trivial at the
-  once-per-root call rate.
-- `value.py` — `ValueFunction` protocol: single-game `(layout, state, player)
-  -> scalar`, higher better, arbitrary scale. `make_heuristic(**weights)` builds
-  a weighted strength function; `heuristic_value = make_heuristic()` is the
-  shipped default. Strength terms (defaults): 10·VP (buildings + awards + VP
-  cards — own exact, opponents' expected via the deck's 5/25 VP share over
-  their count) + 1.0·production pips of own buildings (city 2x, robber tile
-  zeroed) + 0.6·distinct resource types produced + 0.3·Σ√(resource counts)
-  (diversity; makes the cheapest discard the most-held resource) − 0.4·cards
-  over 7 (discard risk) + 1.5·dev count + 0.5·pips of the best settlement spot
-  buildable *right now* (empty + distance rule + touching an own road, gated on
-  stock — this is what makes a road worth its cost; without it lookahead never
-  expanded and lost to scripted greedy 34%) + 0.15·own roads + 2.0·completeness
-  of the closest next build (settlement/city/dev, each gated on usability) +
-  0.5·knights toward Largest Army (capped at 3). Value = own strength − best
-  opponent's. Tuning evidence (2p seat-swapped CLI matches, 200-700 games):
-  expansion+progress terms took lookahead-vs-greedy from 34% to 86.5%; the
-  diversity term is worth ~55% head-to-head over without; w_spot 1.0 vs 0.5 and
-  a port-count term (`w_port`, default 0) measured neutral. On a *sampled*
-  world the "hidden" fields it reads are belief-consistent samples, so it stays
-  honest. Also hosts `tile_pips` / `vertex_pips` (used by greedy too).
-- `baselines.py` — `random_policy`: uniform noise over `N_FLAT`, masked argmax
-  (the same trick as the engine's `_random_action_single`).
-- `greedy.py` — `greedy_policy`: a static `(N_FLAT,)` base score from an
-  action-type priority table (`_TIER`), plus an observation-dependent bonus per
-  row group (settlement/city/setup-settlement: adjacent-tile pips via `TILE_V`;
-  robber/knight: target-tile pips + 1 for a steal; discard: held count), plus
-  uniform `[0,1)` tie-break noise. Tier gaps (>= 100) exceed every bonus range
-  (pips <= 15, held <= 19), so bonuses only reorder within a tier; types
-  sharing a tier are phase-disjoint. The flat table is decoded once at import
-  (`flat_to_action(arange(N_FLAT))`). Deliberately simple: no resource
-  targeting, never trades (`MARITIME_TRADE` scores below `END_TURN`), ignores
-  whose production the robber blocks.
-- `evaluate.py` — Python-loop driver over `BatchedCatanEnv` (sparse reward,
-  auto-reset; `track_beliefs` switched on iff some seat observes "belief"):
-  every seat's vmapped agent picks a move in every lane each step and the
-  acting seat's pick is kept (`picks[agent_selection, lanes]`) — n_seats
-  policy evals per step, fine for <= 4 seats. `_seat` adapts both kinds (obs
-  seats get `env.observe(i)`, belief seats `env.board[0]` +
-  `env.belief_view(i)` + their seat index) and rejects an unsupported player
-  count. Wins accumulate from the sparse terminal rewards (exactly one +1 per
-  completed game, so `episodes = wins.sum()`). Budget is exactly one of
-  `n_steps` (sync-free) or `n_episodes` (syncs on the win count each step; may
-  overshoot when several lanes finish together; capped at
-  `_MAX_STEPS_PER_EPISODE` as a non-termination guard). Not a fused rollout; a
-  `lax.scan` version is the obvious next step if evaluation throughput starts
-  to matter. (Belief seats receive the batched `env.belief_view(i)` whole —
-  one `BeliefView` argument, vmapped.)
+- `policy.py` — the seat protocols. Policies are masked-argmax style: with no
+  legal move the returned index is arbitrary and the engine rejects it as
+  `INVALID` (the lane stalls until auto-reset), matching
+  `BatchedCatanEnv.random_actions`.
+- `sample.py` — `sample_world` fills every hidden field with a posterior
+  sample. Guaranteed (tested in `tests/test_sample.py`): public fields
+  untouched; hand sizes, dev counts, per-type totals, and the observer's own
+  rows all match the public record. The resource deal's
+  proportional-headroom weighting is a *surrogate* for the exact posterior,
+  not the posterior (`hi` is relaxed if jointly infeasible). The closing
+  `BoardState(...)` is built by explicit keyword on purpose: a new
+  `BoardState` field fails to compile here until classified public or hidden.
+- `value.py` — heuristic strength function; value = own strength − best
+  opponent's. On a *sampled* world the "hidden" fields it reads are
+  belief-consistent samples, so it stays honest. Tuning evidence (2p
+  seat-swapped CLI matches, 200–700 games): the expansion + progress terms
+  took lookahead-vs-greedy from 34% to 86.5% (without the
+  best-buildable-spot term, lookahead never expanded); the hand-diversity
+  term is worth ~55% head-to-head over without; `w_spot` 1.0 vs 0.5 and a
+  port-count term measured neutral.
+- `greedy.py` — scripted policy: a static per-row tier score plus small
+  observation bonuses. Invariant: tier gaps (≥ 100) exceed every bonus range
+  (pips ≤ 15, held ≤ 19), so bonuses only reorder within a tier; types
+  sharing a tier are phase-disjoint. Deliberately simple: no resource
+  targeting, never trades, ignores whose production the robber blocks.
+- `evaluate.py` — Python-loop driver: every seat's vmapped agent picks in
+  every lane each step and the acting seat's pick is kept — n_seats policy
+  evals per step, fine for ≤ 4 seats. Budget is exactly one of `n_steps`
+  (sync-free) or `n_episodes` (syncs on the win count each step; may
+  overshoot when lanes finish together; `_MAX_STEPS_PER_EPISODE` guards
+  non-termination). Not a fused rollout; a `lax.scan` version is the obvious
+  next step if evaluation throughput starts to matter.
 
 ## search/
 
-Both agents determinize once per move: `sample_world` at the root, then search
-in the sample (PIMC, not ISMCTS — the simulated opponent shares the sampled
-world). Residual approximations: a sampled in-tree draw's identity is visible
-one ply ahead (committed per node, not a chance node); the search is a
-*single* determinization (ensemble over K root samples — vmap + average
-`action_weights` — is the known next upgrade); the in-tree opponent sees the
-sampled world (strategy fusion), though count-only value terms blunt what it
-can exploit.
+Both agents determinize at the root: `sample_world`, then search in the
+sample (PIMC, not ISMCTS — the simulated opponent shares the sampled world;
+lookahead uses one draw, mcts an ensemble of `num_worlds`). Residual
+approximations: a sampled in-tree draw's identity is visible one ply ahead
+(committed per node, not a chance node), and the in-tree opponent sees the
+sampled world (strategy fusion) — count-only value terms blunt what it can
+exploit.
 
-- `greedy.py` — `make_greedy(value) -> BeliefPolicy`: one-step lookahead. All
-  560 successors in one `vmap(apply_action)` over the static row decode, gated
-  by the caller's mask (illegal rows no-op but are masked to -inf anyway);
-  `vmap(value)` over successors + 1e-4 tie-break noise, masked argmax.
-  `lookahead_policy = make_greedy(heuristic_value)`.
-- `mcts.py` — `make_mcts(value, num_simulations=32, max_num_considered_actions
-  =16, value_scale=20, prior_scale=1.0) -> BeliefPolicy`:
-  `mctx.gumbel_muzero_policy` with the engine as `recurrent_fn` and embedding =
-  batched `(layout, state)`. The **root prior is the one-step value sweep**
-  (the same 560-successor `vmap(apply_action)` as lookahead, logits =
-  `value/prior_scale`): with a uniform prior the 16 Gumbel candidates were a
-  random subset of 560 and mcts lost to lookahead 6%; the informed prior took
-  it to 37% vs lookahead and 86% vs greedy. In-tree child priors stay
-  uniform-over-legal (a per-expansion sweep would cost 560×). Frame
-  convention: priors/values are the node's player-to-move's (root: the seat
-  asked to act); `discount` is -1 when the mover switches, +1 when the same
-  player continues (multi-move turns), 0 into terminals (absorbing — avail is
-  gated with `~terminal` so won states no-op). Reward ±1 in the actor's frame
-  on a winning transition; leaf values are `tanh(value/value_scale)` so the
-  heuristic's scale is commensurate with the ±1 terminal reward. Exact
-  zero-sum framing at 2 players; at 3-4 the sign-flip discount is the
-  *paranoid* reduction (every opponent maximizes against the mover) — a known
-  approximation, scalar backups can't express max^n. **Known limitation:**
-  search currently *subtracts* value relative to its own root prior (37% vs
-  lookahead, flat across 64 sims / 8 candidates and value_scale 60) — each
-  in-tree child commits a single sampled dice/steal/draw outcome, so deeper
-  search plans against fixed chance samples (strategy fusion over chance
-  nodes); fixing it needs chance-node / afterstate handling, not more
-  simulations. Single-game policy: batch-of-1 inside, composes under outer
-  `vmap`/`jit` (verified). The `# type: ignore[call-arg]` on the mctx
-  dataclass constructors is for chex dataclasses being opaque to mypy.
+- `greedy.py` — one-step lookahead: all 560 successors in one
+  `vmap(apply_action)`, valued and masked-argmaxed.
+- `mcts.py` — `mctx.gumbel_muzero_policy` with the engine as `recurrent_fn`.
+  Structured as a single-tree core under a wrapper that owns all batching
+  (`vmap` over trees, then over games; the mctx batch dim stays 1 inside),
+  so after `jit` the search runs (games × trees)-wide. Two ensemble-width
+  knobs, trees = `num_worlds * num_futures`: `num_worlds` distinct
+  `sample_world` draws (belief width) × `num_futures` chance re-keyings per
+  draw (chance width — same hidden state, `state._replace(key=...)`, so only
+  in-tree dice/steals/draws differ); `action_weights` averaged over all
+  trees. Width is near-free vs `num_simulations` (a sequential scan): on an
+  RTX 5090 at B=32, 16 trees cost +66% wall-clock while 8× sims cost ~8×.
+  Evidence (2p, 200-game seat-swapped): worlds=4 beats worlds=1 head-to-head
+  54% but is unchanged vs lookahead — expected, since at 2p `sample_world`
+  only varies dev-card identities (belief width is degenerate; any 2p
+  ensemble effect is chance width); belief width's payoff should be 3–4p
+  (unmeasured, no multi-seat strength protocol yet). The **root prior is the one-step value
+  sweep**: with a uniform prior the 16 Gumbel candidates were a random subset
+  of 560 and mcts lost to lookahead 6%; the informed prior took it to 37% vs
+  lookahead and 86% vs greedy. In-tree child priors stay uniform-over-legal
+  (a per-expansion sweep would cost 560×). Frame convention: priors/values
+  belong to the node's player-to-move; `discount` is −1 when the mover
+  switches, +1 when the same player continues, 0 into terminals (absorbing);
+  leaf values are `tanh(value/value_scale)` so the heuristic's scale is
+  commensurate with the ±1 terminal reward. Exact zero-sum at 2 players; at
+  3–4 the sign-flip discount is the *paranoid* reduction (scalar backups
+  can't express max^n). **Known limitation:** search currently *subtracts*
+  value relative to its own root prior (flat across sims/candidates/scale) —
+  each in-tree child commits a single sampled dice/steal/draw outcome, so
+  deeper search plans against fixed chance samples; fixing it needs
+  chance-node / afterstate handling, not more simulations. Root-level chance
+  width doesn't rescue it either (w=1/f=16/s=32 measured 40% vs lookahead,
+  n=20): averaging trees removes variance, but each tree's *in-tree*
+  selection stays fused to its own samples. Next probe: a 2-ply expectimax
+  root sweep (top-K candidates × the 11 weighted rolls).
 
 ## cli.py
 
-The `catan-agents` console script (`[project.scripts]`), argparse subcommands —
-only `compare` so far; tournaments etc. slot in as new subparsers. `compare`
-is a seat-swapped head-to-head: two `n_episodes` evaluate runs (`seed`,
-`seed + 1`) with the agents' seats exchanged, combined into `CompareResult`
-(totals plus a per-first-seat split). Pure Python over the registry — not in
-the jaxtyping hook list.
+`compare` is a seat-swapped head-to-head: two `n_episodes` evaluate runs
+(`seed`, `seed + 1`) with the agents' seats exchanged. Tournaments etc. slot
+in as new subparsers.
 
-`__init__.py` exports the `POLICIES` registry (name -> `AgentSpec`); it is the
-single list of shipped agents, consumed by both the protocol tests and
-catan-render's bot seam (`catan_render/bots.py`, which dispatches on
-`AgentSpec.observes` and filters seat counts).
+## Registry and tests
+
+`__init__.py` exports the `POLICIES` registry — the single list of shipped
+agents, consumed by both the protocol tests and catan-render's bot seam
+(which dispatches on `AgentSpec.observes` and filters seat counts).
 
 Tests are protocol-level only (`tests/test_policies.py`), parametrized over
-every agent in `POLICIES` and run at `max(spec.n_players)` (= 4 for all
-shipped agents) through whichever protocol the spec declares — legality (a
-pick must be legal whenever the lane has a legal move, checked through 150
-self-play steps), seeding reproducibility (same seed -> identical self-play
-action trajectory), and short self-play rollouts that must complete games.
-`tests/test_sample.py` covers `sample_world`'s public-record invariants
-(infrastructure, not a policy, so it gets unit tests). No per-agent
-internal-logic tests; a new agent just registers in `POLICIES`.
-`tests/conftest.py` installs the jaxtyping/beartype import hook for all
-`catan_agents` modules, same pattern as catan-engine.
+every agent in `POLICIES`: legality through self-play, seed reproducibility,
+and short rollouts that must complete games. No per-agent internal-logic
+tests — a new agent just registers in `POLICIES`. `sample_world` is
+infrastructure, not a policy, so it gets unit tests (`tests/test_sample.py`).
+`tests/conftest.py` installs the jaxtyping/beartype hook for all
+`catan_agents` modules.
