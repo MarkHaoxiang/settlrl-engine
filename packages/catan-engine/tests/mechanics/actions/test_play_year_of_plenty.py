@@ -2,18 +2,20 @@
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.development import play_year_of_plenty_step
 from catan_engine.board import Board, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import play_year_of_plenty_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 
 def test_success(yop_board: Board) -> None:
     # Take wood (2) and brick (3).
-    state, result = play_year_of_plenty_step(yop_board, (jnp.array([2]), jnp.array([3])))
+    state, result = play_year_of_plenty_step(
+        yop_board, (jnp.array([2]), jnp.array([3]))
+    )
     assert_expected_inline(
         fmt(
             result,
@@ -33,7 +35,9 @@ yop_hand=0""",
 
 def test_success_same_resource(yop_board: Board) -> None:
     # a == b: take two sheep (0).
-    state, result = play_year_of_plenty_step(yop_board, (jnp.array([0]), jnp.array([0])))
+    state, result = play_year_of_plenty_step(
+        yop_board, (jnp.array([0]), jnp.array([0]))
+    )
     assert int(result[0]) == ActionResult.SUCCESS.value
     assert int(state.player_resources[0, 0, 0]) == 2
 
@@ -54,13 +58,17 @@ def test_invalid_dev_already_played(yop_board: Board) -> None:
     layout, st = yop_board
     st = st._replace(dev_played=st.dev_played.at[0].set(1))
     before = np.asarray(st.player_resources)
-    state, result = play_year_of_plenty_step((layout, st), (jnp.array([2]), jnp.array([3])))
+    state, result = play_year_of_plenty_step(
+        (layout, st), (jnp.array([2]), jnp.array([3]))
+    )
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
 
 
 def test_invalid_out_of_range(yop_board: Board) -> None:
     before = np.asarray(yop_board[1].player_resources)
-    state, result = play_year_of_plenty_step(yop_board, (jnp.array([7]), jnp.array([3])))
+    state, result = play_year_of_plenty_step(
+        yop_board, (jnp.array([7]), jnp.array([3]))
+    )
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)

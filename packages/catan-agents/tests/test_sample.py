@@ -11,11 +11,9 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import pytest
-
+from catan_agents import sample_world
 from catan_engine.belief import BeliefView, PublicState
 from catan_engine.env import BatchedCatanEnv
-
-from catan_agents import sample_world
 
 
 def _played_view(n_players: int, n_steps: int, seed: int = 0) -> BeliefView:
@@ -71,9 +69,7 @@ def test_sample_varies_with_the_key() -> None:
     )
     me = jnp.int32(0)
     hands = {
-        tuple(
-            int(c) for c in sample_world(jax.random.key(s), view, me).dev_hand[1]
-        )
+        tuple(int(c) for c in sample_world(jax.random.key(s), view, me).dev_hand[1])
         for s in range(30)
     }
     assert len(hands) > 1  # the posterior is actually being sampled

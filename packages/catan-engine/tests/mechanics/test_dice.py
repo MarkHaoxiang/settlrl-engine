@@ -11,13 +11,12 @@ from typing import TypeVar, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import dice
 from catan_engine.board import make_board
-from catan_engine.board.layout import TILE_V, N_TILES, BoardLayout
+from catan_engine.board.layout import N_TILES, TILE_V, BoardLayout
 from catan_engine.board.resources import BANK_INITIAL, N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import CITY, SETTLEMENT, BoardState
 from catan_engine.board.tile import Tile
+from catan_engine.mechanics import dice
 
 _T = TypeVar("_T")
 _TILE_V = np.asarray(TILE_V)

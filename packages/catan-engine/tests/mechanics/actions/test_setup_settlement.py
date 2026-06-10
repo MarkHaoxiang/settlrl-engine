@@ -1,17 +1,17 @@
 """Tests for the vectorized SetupSettlement action."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.setup import setup_settlement_step
 from catan_engine.board import Board, place_settlement, set_phase
 from catan_engine.board.layout import EDGE_V
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.setup import setup_settlement_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 # A vertex sharing an edge with vertex 0 (for the distance-rule test).

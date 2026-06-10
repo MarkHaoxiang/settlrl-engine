@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import random
 
+import catan_reference as ref
 import jax.numpy as jnp
 import numpy as np
-
-import catan_reference as ref
 from catan_engine.board import Board, make_board
 from catan_engine.env import step
 from catan_engine.mechanics.action import ActionParams, ActionResult
+
 from tests import conversion as conv
 
 _INVALID = int(ActionResult.INVALID)

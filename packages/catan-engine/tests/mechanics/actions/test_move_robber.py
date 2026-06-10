@@ -1,16 +1,10 @@
 """Tests for the vectorized MoveRobber action."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.common import ResultCode, TwoIndexParams
-from catan_engine.mechanics.development import play_knight_step
-from catan_engine.mechanics.robber import move_robber_step
 from catan_engine.board import (
     Board,
     give,
@@ -24,6 +18,12 @@ from catan_engine.board import (
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import TILE_V
 from catan_engine.board.state import BoardState, GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.common import ResultCode, TwoIndexParams
+from catan_engine.mechanics.development import play_knight_step
+from catan_engine.mechanics.robber import move_robber_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 _TILE_V = np.asarray(TILE_V)

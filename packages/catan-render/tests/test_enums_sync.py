@@ -6,7 +6,6 @@ enums are reordered the renderer would mislabel hands. Pin them here.
 
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.tile import Tile
-
 from catan_render.actions import _RESOURCE_NAMES
 from catan_render.models import DevCardCounts, ResourceCounts, Terrain
 

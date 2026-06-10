@@ -10,9 +10,6 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.placement import build_road_available
 from catan_engine.board import (
     Board,
     give,
@@ -23,6 +20,8 @@ from catan_engine.board import (
     to_main,
 )
 from catan_engine.board.layout import EDGE_V, N_EDGES
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.placement import build_road_available
 
 _EDGE_V = np.asarray(EDGE_V)
 
@@ -75,7 +74,7 @@ def edge_path_from(start: int, n_edges: int) -> list[int]:
             return list(edges)
         for w, e in adj[v]:
             if w not in seen:
-                got = dfs(w, seen | {w}, edges + [e])
+                got = dfs(w, seen | {w}, [*edges, e])
                 if got is not None:
                     return got
         return None

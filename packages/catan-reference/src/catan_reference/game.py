@@ -42,6 +42,7 @@ from catan_reference.types import (
     Resource,
 )
 
+
 def setup_order(n_players: int) -> list[int]:
     """Snake / boustrophedon setup order over the 2 * n_players starting
     settlements: first round in player order, second round reversed."""
@@ -49,11 +50,11 @@ def setup_order(n_players: int) -> list[int]:
 
 
 def _zero_resources() -> dict[Resource, int]:
-    return {r: 0 for r in RESOURCES}
+    return dict.fromkeys(RESOURCES, 0)
 
 
 def _zero_dev() -> dict[DevCard, int]:
-    return {c: 0 for c in DevCard}
+    return dict.fromkeys(DevCard, 0)
 
 
 # ===========================================================================
@@ -216,7 +217,7 @@ class Game:
     # -- construction ----------------------------------------------------
 
     @staticmethod
-    def new(layout: Layout, robber: int, n_players: int = N_PLAYERS) -> "Game":
+    def new(layout: Layout, robber: int, n_players: int = N_PLAYERS) -> Game:
         """A fresh game in the setup phase (robber starts on the desert tile)."""
         if not 2 <= n_players <= N_PLAYERS:
             raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
@@ -744,9 +745,7 @@ class Game:
         for p in range(self.n_players):
             if self.pending_discard[p] > 0:
                 return [
-                    Discard(p, r)
-                    for r in RESOURCES
-                    if self.players[p].resources[r] > 0
+                    Discard(p, r) for r in RESOURCES if self.players[p].resources[r] > 0
                 ]
         return []
 

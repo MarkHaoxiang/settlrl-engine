@@ -28,9 +28,7 @@ _POP_K = 32
 
 # Proven peak occupancy plus one scratch slot (_DUMP, never popped); see
 # docs/longest-road-stack-bound.html for the proof.
-STACK_CAP = (
-    2 * MAX_ROADS + min(2 * MAX_ROADS, _POP_K) + (MAX_ROADS - 3) * _POP_K + 1
-)
+STACK_CAP = 2 * MAX_ROADS + min(2 * MAX_ROADS, _POP_K) + (MAX_ROADS - 3) * _POP_K + 1
 _DUMP = STACK_CAP - 1
 
 # Sentinel-free CSR adjacency derived from the COO edge_index (EDGE_V), built

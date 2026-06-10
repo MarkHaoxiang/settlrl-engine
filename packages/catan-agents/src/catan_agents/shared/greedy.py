@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-
 from catan_engine.board.layout import N_TILES, N_VERTICES
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.env import (
-    ActionType,
     N_ACTION_TYPES,
     N_FLAT,
+    ActionType,
     Observation,
     flat_to_action,
 )

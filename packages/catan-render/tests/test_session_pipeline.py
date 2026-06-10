@@ -8,15 +8,13 @@ renderer's decoded coordinate is *where the engine actually places*, tying the
 decode layer to real engine behaviour rather than to a parallel reconstruction.
 """
 
+import pytest
 from catan_engine.board.state import GamePhase
 from catan_engine.env import N_FLAT
-
 from catan_render.actions import decode_actions
 from catan_render.convert import board_to_model
 from catan_render.models import BoardModel, CubeModel
 from catan_render.session import GameSession, IllegalActionError
-
-import pytest
 
 
 def _cube(c: CubeModel) -> tuple[int, int, int]:
@@ -50,7 +48,7 @@ def test_legal_actions_decode_and_roundtrip() -> None:
 
 def test_illegal_action_rejected() -> None:
     sess = GameSession(seed=0)
-    legal = set(int(f) for f in sess.legal_flat())
+    legal = {int(f) for f in sess.legal_flat()}
     illegal = next(f for f in range(N_FLAT) if f not in legal)
     with pytest.raises(IllegalActionError):
         sess.apply(illegal)

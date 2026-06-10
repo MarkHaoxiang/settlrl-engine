@@ -9,13 +9,14 @@ itself, and that a full game can be driven to a terminal state with a winner.
 import numpy as np
 import pytest
 from catan_engine.record import GameRecord, replay
-
 from catan_render.bots import supported_counts
 from catan_render.session import HUMAN, GameSession
 
 # Bot kinds usable at each seat count the renderer offers.
 _FOUR_PLAYER_KINDS = sorted(k for k, c in supported_counts().items() if 4 in c)
-_TWO_ONLY_KINDS = sorted(k for k, c in supported_counts().items() if 2 in c and 4 not in c)
+_TWO_ONLY_KINDS = sorted(
+    k for k, c in supported_counts().items() if 2 in c and 4 not in c
+)
 
 
 def _drive_to_completion(sess: GameSession, seed: int = 0) -> None:

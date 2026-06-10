@@ -11,7 +11,6 @@ import json
 import jax
 import numpy as np
 import pytest
-
 from catan_engine.env import BatchedCatanEnv
 from catan_engine.record import (
     GameRecord,
@@ -66,15 +65,14 @@ def test_replay_reproduces_the_game(record2: GameRecord) -> None:
     final, again = boards[-1], list(replay(record2))[-1]
     assert all(
         bool((a == b).all())
-        for a, b in zip(jax.tree.leaves(final), jax.tree.leaves(again))
+        for a, b in zip(jax.tree.leaves(final), jax.tree.leaves(again), strict=True)
     )
 
 
 def test_replay_rejects_wrong_player(record4: GameRecord) -> None:
     bad = dataclasses.replace(
         record4,
-        moves=(dataclasses.replace(record4.moves[0], player=3),)
-        + record4.moves[1:],
+        moves=(dataclasses.replace(record4.moves[0], player=3), *record4.moves[1:]),
     )
     with pytest.raises(ReplayError, match="player"):
         next(replay(bad))
@@ -84,7 +82,7 @@ def test_replay_rejects_illegal_move(record4: GameRecord) -> None:
     # A second action on the same vertex as move 0 cannot be legal at move 1.
     bad = dataclasses.replace(
         record4,
-        moves=(record4.moves[0], record4.moves[0]) + record4.moves[2:],
+        moves=(record4.moves[0], record4.moves[0], *record4.moves[2:]),
     )
     steps = replay(bad)
     next(steps)
@@ -93,13 +91,11 @@ def test_replay_rejects_illegal_move(record4: GameRecord) -> None:
 
 
 def test_replay_rejects_wrong_dice(record4: GameRecord) -> None:
-    idx, roll = next(
-        (i, m) for i, m in enumerate(record4.moves) if m.dice is not None
-    )
+    idx, roll = next((i, m) for i, m in enumerate(record4.moves) if m.dice is not None)
     assert roll.dice is not None
     wrong = dataclasses.replace(roll, dice=roll.dice % 12 + 2)
     bad = dataclasses.replace(
-        record4, moves=record4.moves[:idx] + (wrong,) + record4.moves[idx + 1 :]
+        record4, moves=(*record4.moves[:idx], wrong, *record4.moves[idx + 1 :])
     )
     with pytest.raises(ReplayError, match="rolled"):
         for _ in replay(bad):
@@ -141,5 +137,7 @@ def test_initial_board_is_the_unplayed_opening(record2: GameRecord) -> None:
     replayed_layout, _ = next(replay(record2))
     assert all(
         bool((a == b).all())
-        for a, b in zip(jax.tree.leaves(layout), jax.tree.leaves(replayed_layout))
+        for a, b in zip(
+            jax.tree.leaves(layout), jax.tree.leaves(replayed_layout), strict=True
+        )
     )

@@ -15,10 +15,10 @@ import jax.numpy as jnp
 import numpy as np
 from catan_engine.env import N_FLAT, ActionType, flat_to_action
 
-from .convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _RESOURCE_NAMES, _cube
+from .convert import _RESOURCE_NAMES, EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _cube
 from .models import ActionModel, EdgeModel, HexModel
 
-__all__ = ["decode_actions", "_decode", "_RESOURCE_NAMES"]
+__all__ = ["_RESOURCE_NAMES", "_decode", "decode_actions"]
 
 # Host-side copy of the engine's flat action table: row -> (type, idx, target).
 _row_type, _row_params = flat_to_action(jnp.arange(N_FLAT))
@@ -57,7 +57,9 @@ def _decode(flat: int) -> ActionModel:
 
     if at in _VERTEX_TYPES:
         label = "City" if at is ActionType.BUILD_CITY else "Settlement"
-        return ActionModel(flat=flat, type=type_name, label=label, vertex=_cube(VERTEX_COORDS[idx]))
+        return ActionModel(
+            flat=flat, type=type_name, label=label, vertex=_cube(VERTEX_COORDS[idx])
+        )
 
     if at in _ROAD_TYPES:
         v1, v2 = EDGE_VERTICES[idx]
@@ -78,11 +80,15 @@ def _decode(flat: int) -> ActionModel:
 
     if at is ActionType.DISCARD:
         res = _RESOURCE_NAMES[idx]
-        return ActionModel(flat=flat, type=type_name, label=f"Discard {res}", resource=res)
+        return ActionModel(
+            flat=flat, type=type_name, label=f"Discard {res}", resource=res
+        )
 
     if at is ActionType.PLAY_MONOPOLY:
         res = _RESOURCE_NAMES[idx]
-        return ActionModel(flat=flat, type=type_name, label=f"Monopoly: {res}", resource=res)
+        return ActionModel(
+            flat=flat, type=type_name, label=f"Monopoly: {res}", resource=res
+        )
 
     if at is ActionType.PLAY_YEAR_OF_PLENTY:
         a, b = _RESOURCE_NAMES[idx], _RESOURCE_NAMES[target]

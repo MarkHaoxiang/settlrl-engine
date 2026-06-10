@@ -1,16 +1,16 @@
 """Tests for the vectorized SetupRoad action."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.setup import setup_road_step
 from catan_engine.board import Board, place_road, set_phase
 from catan_engine.board.layout import EDGE_V
 from catan_engine.board.state import GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.setup import setup_road_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 # First edge incident to vertex 0.

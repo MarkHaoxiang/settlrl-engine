@@ -150,9 +150,7 @@ def _build_road_apply(
         free_roads=new_free,
         player_resources=new_res,
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _build_road_avail_b = jax.jit(jax.vmap(_build_road_avail))
@@ -206,16 +204,12 @@ def _build_settlement_apply(
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     cand = state._replace(
-        player_resources=pay(
-            state.player_resources, player, SETTLEMENT_COST_ARR
-        ),
+        player_resources=pay(state.player_resources, player, SETTLEMENT_COST_ARR),
         vertex_owner=state.vertex_owner.at[v].set((player + 1).astype(jnp.uint8)),
         vertex_type=state.vertex_type.at[v].set(SETTLEMENT),
         victory_points=state.victory_points.at[player].add(1),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _build_settlement_avail_b = jax.jit(jax.vmap(_build_settlement_avail))
@@ -256,9 +250,7 @@ def _build_city_avail(
     v = jnp.clip(vertex, 0, N_VERTICES - 1)
     player = state.current_player.astype(jnp.int32)
     main = main_after_roll(state)
-    under_max = (
-        count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
-    )
+    under_max = count_cities(state.vertex_owner, state.vertex_type, player) < MAX_CITIES
     owns_settlement = (state.vertex_owner[v] == (player + 1).astype(jnp.uint8)) & (
         state.vertex_type[v] == SETTLEMENT
     )
@@ -276,9 +268,7 @@ def _build_city_apply(
         vertex_type=state.vertex_type.at[v].set(CITY),
         victory_points=state.victory_points.at[player].add(1),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _build_city_avail_b = jax.jit(jax.vmap(_build_city_avail))

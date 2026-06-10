@@ -7,7 +7,6 @@ from typing import Literal, NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-
 from catan_engine.env import BatchedCatanEnv, flat_to_action
 
 from catan_agents.shared.policy import AgentSpec, BeliefPolicy, Policy
@@ -97,7 +96,7 @@ def evaluate(
         picks = jnp.stack(
             [
                 seat(jax.random.split(k, batch_size), env, i)
-                for i, (seat, k) in enumerate(zip(seats, seat_keys))
+                for i, (seat, k) in enumerate(zip(seats, seat_keys, strict=True))
             ]
         )
         flat = picks[env.agent_selection, lanes]

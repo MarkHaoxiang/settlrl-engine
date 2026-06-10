@@ -27,9 +27,9 @@ from catan_engine.board.layout import (
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState
 from catan_engine.mechanics.action import (
+    N_ACTION_TYPES,
     ActionParams,
     ActionType,
-    N_ACTION_TYPES,
 )
 from catan_engine.mechanics.common import (
     ActionTypeArray,
@@ -67,10 +67,10 @@ __all__ = [
     "FLAT_ATYPE",
     "FLAT_IDX",
     "FLAT_TARGET",
-    "FlatMaskArray",
-    "FlatMaskVec",
     "INDEX_MASKS",
     "N_FLAT",
+    "FlatMaskArray",
+    "FlatMaskVec",
     "TypeMaskArray",
     "flat_available_b",
     "flat_available_for",
@@ -208,7 +208,7 @@ def flat_legality(
 # ===========================================================================
 def _flat_positions(t: ActionType) -> np.ndarray:
     """Flat-table row indices belonging to action type ``t`` (static)."""
-    return np.where(_ATYPE == int(t))[0]
+    return np.where(int(t) == _ATYPE)[0]
 
 
 # (core, flat rows, primary index per row) for the single-index actions.

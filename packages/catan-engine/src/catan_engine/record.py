@@ -37,10 +37,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from catan_engine.board import Board
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN
 from catan_engine.board.tile import Tile
-from catan_engine.env import ActionType, BatchedCatanEnv, N_FLAT, flat_to_action
-from catan_engine.board import Board
+from catan_engine.env import N_FLAT, ActionType, BatchedCatanEnv, flat_to_action
 
 __all__ = [
     "GameRecord",

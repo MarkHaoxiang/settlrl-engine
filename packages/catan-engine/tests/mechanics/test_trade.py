@@ -6,11 +6,10 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import trade
 from catan_engine.board.layout import N_VERTICES, PORT_V, make_layout
 from catan_engine.board.port import Port
 from catan_engine.board.resources import N_RESOURCES
+from catan_engine.mechanics import trade
 
 _LAYOUT = make_layout(1, key=jax.random.key(0))
 _ALLOC = jnp.asarray(np.asarray(_LAYOUT.port_allocation[0]))

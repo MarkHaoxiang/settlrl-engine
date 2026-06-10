@@ -17,6 +17,12 @@ Comments should be concise. Doc comments (docstrings) describe only the contract
 
 ## Checks
 
+Pre-commit hooks (ruff check/format, mypy over every package, the engine test
+suite) run on each commit — `uv run pre-commit install` after a fresh clone.
+CI (`.github/workflows/ci.yml`) runs the full gate on push/PR: lint, format
+check, mypy, and all four packages' test suites (including catan-agents, whose
+suite is too slow for a commit hook).
+
 Before finishing any session, ensure the mypy checker passes:
 
 ```bash

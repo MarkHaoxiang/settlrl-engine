@@ -34,9 +34,7 @@ def make_layout(
     tile_resource = tile_resource or {}
     tile_number = tile_number or {}
     return Layout(
-        tile_resource=tuple(
-            tile_resource.get(t, None) for t in range(board.N_TILES)
-        ),
+        tile_resource=tuple(tile_resource.get(t, None) for t in range(board.N_TILES)),
         tile_number=tuple(tile_number.get(t, 0) for t in range(board.N_TILES)),
         ports=ports,
     )
@@ -77,10 +75,10 @@ def place_road_path(game: Game, vertices: list[int], player: int) -> list[int]:
 
 
 __all__ = [
-    "make_layout",
+    "PortType",
     "make_game",
-    "set_resource",
+    "make_layout",
     "place",
     "place_road_path",
-    "PortType",
+    "set_resource",
 ]

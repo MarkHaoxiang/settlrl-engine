@@ -45,7 +45,9 @@ def fig1() -> str:
         f'<rect x="{bx - 7}" y="104" width="{BW + 14}" height="76" rx="8" '
         'fill="none" stroke="var(--muted)" stroke-dasharray="5 4"/>'
     )
-    s.append(f'<text x="{bx + BW / 2}" y="94" class="cap">pop m = min(K, sp) = 2</text>')
+    s.append(
+        f'<text x="{bx + BW / 2}" y="94" class="cap">pop m = min(K, sp) = 2</text>'
+    )
     # after column
     ax = 500
     s.append(box(ax, 178, "A&#8322;", 2))
@@ -68,9 +70,15 @@ def fig1() -> str:
         f'<path d="M{x0} 161 C 300 161, 380 159, {x1} 159" fill="none" '
         'stroke="var(--muted)" stroke-width="1.6" marker-end="url(#arr)"/>'
     )
-    s.append('<text x="330" y="84" class="cap">C&#8323; branches (two children, depth 4)</text>')
-    s.append('<text x="330" y="178" class="cap">B&#8322; chains (one child, depth 3)</text>')
-    s.append('<text x="330" y="218" class="cap small">A&#8322; stays buried until everything above it is popped</text>')
+    s.append(
+        '<text x="330" y="84" class="cap">C&#8323; branches (two children, depth 4)</text>'
+    )
+    s.append(
+        '<text x="330" y="178" class="cap">B&#8322; chains (one child, depth 3)</text>'
+    )
+    s.append(
+        '<text x="330" y="218" class="cap small">A&#8322; stays buried until everything above it is popped</text>'
+    )
     s.append("</svg>")
     return "".join(s)
 
@@ -80,9 +88,19 @@ def fig2() -> str:
     """Floor / straddle / phase schematic. n=10, K=4, L(d)=1, L(d+1)=0."""
     # state after block t: (floor, region)
     states = [
-        (10, 0), (6, 8), (6, 7), (6, 5), (6, 3),
-        (5, 8), (5, 6), (5, 4), (5, 2),
-        (3, 8), (3, 6), (3, 3), (2, 8),
+        (10, 0),
+        (6, 8),
+        (6, 7),
+        (6, 5),
+        (6, 3),
+        (5, 8),
+        (5, 6),
+        (5, 4),
+        (5, 2),
+        (3, 8),
+        (3, 6),
+        (3, 3),
+        (2, 8),
     ]
     T = len(states) - 1  # 12
     X0, X1 = 64, 626
@@ -118,25 +136,43 @@ def fig2() -> str:
             f'<line x1="{X0}" y1="{y(v)}" x2="{X1}" y2="{y(v)}" '
             'stroke="var(--border)" stroke-width="1"/>'
         )
-        s.append(f'<text x="{X0 - 8}" y="{y(v) + 4}" class="ax" style="text-anchor:end">{v}</text>')
+        s.append(
+            f'<text x="{X0 - 8}" y="{y(v) + 4}" class="ax" style="text-anchor:end">{v}</text>'
+        )
     # areas
-    s.append(f'<path d="{step_path(floors, zeros)}" fill="{depth_color(2)}" opacity="0.85"/>')
-    s.append(f'<path d="{step_path(tops, floors)}" fill="{depth_color(7)}" opacity="0.55"/>')
+    s.append(
+        f'<path d="{step_path(floors, zeros)}" fill="{depth_color(2)}" opacity="0.85"/>'
+    )
+    s.append(
+        f'<path d="{step_path(tops, floors)}" fill="{depth_color(7)}" opacity="0.55"/>'
+    )
     # bound line at 14 = n + K*L(d)
     s.append(
         f'<line x1="{X0}" y1="{y(14)}" x2="{X1}" y2="{y(14)}" '
         'stroke="var(--red)" stroke-width="1.6" stroke-dasharray="7 5"/>'
     )
-    s.append(f'<text x="{X1}" y="{y(14) + 15}" class="ax" style="text-anchor:end" fill="var(--red)">n + K&#183;L(d) = 14</text>')
+    s.append(
+        f'<text x="{X1}" y="{y(14) + 15}" class="ax" style="text-anchor:end" fill="var(--red)">n + K&#183;L(d) = 14</text>'
+    )
     # axis
-    s.append(f'<line x1="{X0}" y1="{BASE}" x2="{X1}" y2="{BASE}" stroke="var(--muted)" stroke-width="1.2"/>')
-    s.append(f'<text x="{(X0 + X1) / 2}" y="{BASE + 46}" class="ax">blocks &#8594;</text>')
+    s.append(
+        f'<line x1="{X0}" y1="{BASE}" x2="{X1}" y2="{BASE}" stroke="var(--muted)" stroke-width="1.2"/>'
+    )
+    s.append(
+        f'<text x="{(X0 + X1) / 2}" y="{BASE + 46}" class="ax">blocks &#8594;</text>'
+    )
     # straddle markers at t = 0,4,8,11 (the blocks producing states 1,5,9,12)
     for t in (0, 4, 8, 11):
         s.append(f'<text x="{x(t + 0.5)}" y="{BASE + 16}" class="ax">&#9650;</text>')
-    s.append(f'<text x="{x(0.5)}" y="{BASE + 32}" class="ax">straddles pop into the floor</text>')
+    s.append(
+        f'<text x="{x(0.5)}" y="{BASE + 32}" class="ax">straddles pop into the floor</text>'
+    )
     # phase labels
-    for label, t0, t1 in (("phase 1", 0.5, 4.5), ("phase 2", 4.5, 8.5), ("phase 3", 8.5, 11.5)):
+    for label, t0, t1 in (
+        ("phase 1", 0.5, 4.5),
+        ("phase 2", 4.5, 8.5),
+        ("phase 3", 8.5, 11.5),
+    ):
         s.append(f'<text x="{(x(t0) + x(t1)) / 2}" y="34" class="ax">{label}</text>')
     for t in (4.5, 8.5, 11.5):
         s.append(
@@ -144,8 +180,12 @@ def fig2() -> str:
             'stroke="var(--border)" stroke-width="1" stroke-dasharray="3 4"/>'
         )
     # area labels
-    s.append(f'<text x="{x(2.2)}" y="{y(1.6)}" class="lab">floor (surviving originals)</text>')
-    s.append(f'<text x="{x(2.2)}" y="{y(9.4)}" class="lab">region (all depth &#8805; d+1)</text>')
+    s.append(
+        f'<text x="{x(2.2)}" y="{y(1.6)}" class="lab">floor (surviving originals)</text>'
+    )
+    s.append(
+        f'<text x="{x(2.2)}" y="{y(9.4)}" class="lab">region (all depth &#8805; d+1)</text>'
+    )
     s.append("</svg>")
     return "".join(s)
 
@@ -170,7 +210,9 @@ def fig3() -> str:
             f'<line x1="{X0 - 6}" y1="{y(v):.1f}" x2="636" y2="{y(v):.1f}" '
             'stroke="var(--border)" stroke-width="1"/>'
         )
-        s.append(f'<text x="{X0 - 12}" y="{y(v) + 4:.1f}" class="ax" style="text-anchor:end">{v}</text>')
+        s.append(
+            f'<text x="{X0 - 12}" y="{y(v) + 4:.1f}" class="ax" style="text-anchor:end">{v}</text>'
+        )
     # 444 line
     s.append(
         f'<line x1="{X0 - 6}" y1="{y(444):.1f}" x2="636" y2="{y(444):.1f}" '
@@ -192,8 +234,12 @@ def fig3() -> str:
             acc += cnt
         s.append(f'<text x="{cx + CW / 2}" y="{BASE + 16}" class="ax">{i + 1}</text>')
         if i == len(cols) - 1:
-            s.append(f'<text x="{cx + CW / 2}" y="{y(acc) - 8:.1f}" class="ax" fill="var(--red)">peak</text>')
-    s.append(f'<text x="{X0 + 10 + 6.5 * (CW + GAP)}" y="{BASE + 34}" class="ax">block &#8594;</text>')
+            s.append(
+                f'<text x="{cx + CW / 2}" y="{y(acc) - 8:.1f}" class="ax" fill="var(--red)">peak</text>'
+            )
+    s.append(
+        f'<text x="{X0 + 10 + 6.5 * (CW + GAP)}" y="{BASE + 34}" class="ax">block &#8594;</text>'
+    )
     # depth legend: gradient ramp
     s.append(
         '<defs><linearGradient id="ramp" x1="0" y1="0" x2="1" y2="0">'
@@ -204,7 +250,9 @@ def fig3() -> str:
         + "</linearGradient></defs>"
     )
     s.append('<rect x="84" y="20" width="120" height="10" rx="3" fill="url(#ramp)"/>')
-    s.append('<text x="84" y="44" class="ax" text-anchor="start">cohort depth 2 &#8594; 14</text>')
+    s.append(
+        '<text x="84" y="44" class="ax" text-anchor="start">cohort depth 2 &#8594; 14</text>'
+    )
     s.append("</svg>")
     return "".join(s)
 

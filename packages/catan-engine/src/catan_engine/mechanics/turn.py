@@ -30,9 +30,7 @@ from catan_engine.mechanics.common import (
 )
 
 
-def _end_turn_avail(
-    layout: BoardLayout, state: BoardState, params: None
-) -> BoolScalar:
+def _end_turn_avail(layout: BoardLayout, state: BoardState, params: None) -> BoolScalar:
     return main_after_roll(state)
 
 
@@ -49,9 +47,7 @@ def _end_turn_apply(
         current_player=nxt.astype(state.current_player.dtype),
         phase=jnp.uint8(GamePhase.ROLL),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _end_turn_avail_b = jax.jit(jax.vmap(_end_turn_avail, in_axes=(0, 0, None)))

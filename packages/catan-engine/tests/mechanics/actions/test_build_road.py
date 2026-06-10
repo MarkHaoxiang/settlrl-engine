@@ -1,14 +1,9 @@
 """Tests for the vectorized BuildRoad action."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.development import play_road_building_step
-from catan_engine.mechanics.placement import build_road_step
 from catan_engine.board import (
     Board,
     give,
@@ -19,6 +14,11 @@ from catan_engine.board import (
     to_main,
 )
 from catan_engine.board.dev_cards import DevCard
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import play_road_building_step
+from catan_engine.mechanics.placement import build_road_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import edge_path_from, fmt
 
 

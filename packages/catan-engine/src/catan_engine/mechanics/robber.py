@@ -125,17 +125,15 @@ def _move_robber_apply(
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
     # Knight-before-roll resumes ROLL; the post-7 robber move resumes MAIN.
-    new_phase = jnp.where(
-        state.has_rolled != 0, GamePhase.MAIN, GamePhase.ROLL
-    ).astype(jnp.uint8)
+    new_phase = jnp.where(state.has_rolled != 0, GamePhase.MAIN, GamePhase.ROLL).astype(
+        jnp.uint8
+    )
     cand = state._replace(
         robber=t.astype(state.robber.dtype),
         phase=new_phase,
     )
     cand = apply_steal(cand, player, victim)
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _move_robber_avail_b = jax.jit(jax.vmap(_move_robber_avail))
@@ -205,9 +203,7 @@ def _discard_apply(
         pending_discard=to_u8(new_pending),
         phase=new_phase,
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _discard_avail_b = jax.jit(jax.vmap(_discard_avail))

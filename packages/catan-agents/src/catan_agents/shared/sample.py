@@ -15,7 +15,6 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
-
 from catan_engine.belief import BeliefView
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES
 from catan_engine.board.resources import N_RESOURCES
@@ -44,7 +43,7 @@ def _deal_dev_hands(
     )  # (P,)
     # Noise the pool's card slots; the top slots are taken, opponent by
     # opponent in seat order (exchangeable, so the order doesn't matter).
-    in_pool = _CARD_RANK < pool[_CARD_TYPE]
+    in_pool = pool[_CARD_TYPE] > _CARD_RANK
     noise = jnp.where(in_pool, jax.random.uniform(key, (_DECK_SIZE,)), -1.0)
     rank = jnp.argsort(jnp.argsort(-noise))  # rank 0 = highest noise
     owner = jnp.searchsorted(jnp.cumsum(need), rank, side="right")  # (25,)

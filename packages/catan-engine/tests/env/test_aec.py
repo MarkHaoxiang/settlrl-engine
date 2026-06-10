@@ -5,12 +5,11 @@ Includes the PettingZoo-provided ``api_test`` compliance check.
 
 import jax.numpy as jnp
 import numpy as np
-from pettingzoo.test import api_test
-
+from catan_engine.board.state import GamePhase
 from catan_engine.env.aec import CatanAECEnv, env
 from catan_engine.mechanics.action import ActionType
 from catan_engine.mechanics.flat import FLAT_ATYPE, FLAT_IDX, flat_available_b
-from catan_engine.board.state import GamePhase
+from pettingzoo.test import api_test
 
 # Host-side copies of the flat table columns, for set/where assertions.
 _ATYPE = np.asarray(FLAT_ATYPE)
@@ -27,7 +26,7 @@ class TestCatanAEC:
         e = CatanAECEnv(seed=1)
         assert e.agents == [f"player_{i}" for i in range(4)]
         assert e.agent_selection == "player_0"  # setup starts with player 0
-        obs, reward, term, trunc, info = e.last()
+        obs, reward, term, trunc, _info = e.last()
         assert set(obs) == {"observation", "action_mask"}
         assert obs["action_mask"].dtype == np.int8
         assert not term and not trunc
@@ -38,7 +37,7 @@ class TestCatanAEC:
         obs, *_ = e.last()
         mask = obs["action_mask"]
         # Only opening settlement placements are legal at the very start.
-        legal_types = {int(a) for a, m in zip(_ATYPE, mask) if m}
+        legal_types = {int(a) for a, m in zip(_ATYPE, mask, strict=True) if m}
         assert legal_types == {int(ActionType.SETUP_SETTLEMENT)}
 
     def test_observation_in_space(self) -> None:
@@ -61,7 +60,7 @@ class TestCatanAEC:
 
 # Flat index of "discard one card of resource r", from the static table.
 _DISCARD_ROWS = {
-    int(_IDX[f]): int(f) for f in np.where(_ATYPE == int(ActionType.DISCARD))[0]
+    int(_IDX[f]): int(f) for f in np.where(int(ActionType.DISCARD) == _ATYPE)[0]
 }
 
 

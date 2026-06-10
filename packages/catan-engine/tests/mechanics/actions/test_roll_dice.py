@@ -2,12 +2,12 @@
 
 import jax
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.dice import roll_step
 from catan_engine.board import Board, give, make_board, to_main
 from catan_engine.board.state import GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.dice import roll_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 

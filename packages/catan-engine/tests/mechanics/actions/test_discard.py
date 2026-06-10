@@ -1,15 +1,15 @@
 """Tests for the vectorized Discard action (one card per action)."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.robber import discard_step
 from catan_engine.board import Board, give, make_board
 from catan_engine.board.state import GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.robber import discard_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 SHEEP, WHEAT, WOOD = 0, 1, 2
@@ -42,9 +42,7 @@ def test_full_choice_over_a_sequence(discard_board: Callable[..., Board]) -> Non
         state, result = discard_step(board, jnp.array([resource]))
         assert int(result[0]) == ActionResult.SUCCESS.value
         board = (board[0], state)
-    assert np.array_equal(
-        np.asarray(board[1].player_resources[0, 0]), [3, 1, 0, 0, 0]
-    )
+    assert np.array_equal(np.asarray(board[1].player_resources[0, 0]), [3, 1, 0, 0, 0])
     assert int(board[1].phase[0]) == GamePhase.MOVE_ROBBER
 
 

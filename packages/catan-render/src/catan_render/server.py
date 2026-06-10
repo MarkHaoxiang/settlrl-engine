@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
+from catan_engine.record import GameRecord, ReplayError
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,14 +14,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from catan_engine.record import GameRecord, ReplayError
-
 from .actions import decode_actions
 from .bots import supported_counts
 from .convert import board_to_model
 from .models import BoardModel, BotMoveModel, GameModel, ReplayStateModel
 from .replay import ReplaySession
 from .session import GameSession, IllegalActionError
+
 
 def _warm_jit_cache() -> None:
     """Play throwaway moves so XLA compiles before the first real click.
@@ -61,7 +61,9 @@ def _game_model(bot_move: BotMoveModel | None = None) -> GameModel:
     """The full Play-view snapshot: board + turn status + the human's legal moves."""
     status = _SESSION.status()
     actions = (
-        decode_actions([int(f) for f in _SESSION.legal_flat()]) if status.your_turn else []
+        decode_actions([int(f) for f in _SESSION.legal_flat()])
+        if status.your_turn
+        else []
     )
     return GameModel(
         board=board_to_model(_SESSION.board),
@@ -207,7 +209,9 @@ def post_chat(req: _ChatRequest) -> GameModel:
     """Append a chat message to the game log."""
     text = req.text.strip()
     if not text or len(text) > 500:
-        raise HTTPException(status_code=422, detail="chat text must be 1-500 characters")
+        raise HTTPException(
+            status_code=422, detail="chat text must be 1-500 characters"
+        )
     with _LOCK:
         if req.player is not None and not 0 <= req.player < _SESSION.n_players:
             raise HTTPException(status_code=422, detail="no such seat")

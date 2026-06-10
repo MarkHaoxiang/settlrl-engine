@@ -1,13 +1,13 @@
 """Tests for the vectorized EndTurn action."""
 
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.turn import end_turn_step
 from catan_engine.board import Board, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.state import GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.turn import end_turn_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 

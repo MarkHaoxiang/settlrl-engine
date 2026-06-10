@@ -9,14 +9,12 @@ changing meaning, or a new action type the renderer can't decode.
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 from catan_engine.board.layout import (
     edge_cubes,
     tile_cube,
     vertex_cube,
 )
 from catan_engine.env import N_FLAT, ActionType, flat_to_action
-
 from catan_render.actions import _RESOURCE_NAMES, _decode, decode_actions
 
 _row_type, _row_params = flat_to_action(jnp.arange(N_FLAT))

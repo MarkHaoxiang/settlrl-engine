@@ -9,18 +9,17 @@ and the general (3:1) port's ``resource is None``.
 
 from catan_engine.board import (
     Board,
+    give,
+    give_dev_card,
     make_board,
     place_city,
     place_road,
     place_settlement,
-    give,
-    give_dev_card,
     set_robber,
 )
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import edge_index, tile_index, vertex_cube, vertex_index
 from catan_engine.board.port import Port
-
 from catan_render.convert import _DEV_CARD_NAMES, _RESOURCE_NAMES, board_to_model
 
 # Known cube coordinates to build on (all valid vertices / edge / tile).
@@ -77,7 +76,7 @@ def test_player_resource_and_dev_breakdown() -> None:
     p0 = model.players[0]
 
     # Per-resource breakdown in enum order: sheep=1, wheat=2, wood=3, brick=4, ore=5.
-    expected_res = dict(zip(_RESOURCE_NAMES, [1, 2, 3, 4, 5]))
+    expected_res = dict(zip(_RESOURCE_NAMES, [1, 2, 3, 4, 5], strict=True))
     res = p0.resources.model_dump()
     assert {k: res[k] for k in _RESOURCE_NAMES} == expected_res
     assert p0.resource_cards == sum(expected_res.values()) == 15

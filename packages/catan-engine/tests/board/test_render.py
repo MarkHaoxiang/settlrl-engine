@@ -1,11 +1,11 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from expecttest import TestCase
-
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import BoardLayout, make_layout
 from catan_engine.board.state import BoardState, GamePhase, make_board_state
+from expecttest import TestCase
+
 from tests.render import BoardRenderer
 
 

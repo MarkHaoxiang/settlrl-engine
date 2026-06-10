@@ -9,10 +9,9 @@ built frontend (``frontend/dist``) is absent.
 import threading
 
 import pytest
-from fastapi.testclient import TestClient
-
 from catan_render import server
 from catan_render.server import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -138,7 +137,11 @@ def test_reset_rejects_seat_kind_unsupported_at_count() -> None:
         pytest.skip("no two-player-only bot kinds")
     resp = client.post(
         "/api/game/reset",
-        json={"seed": 0, "n_players": 4, "seats": ["human", two_only[0], "random", "random"]},
+        json={
+            "seed": 0,
+            "n_players": 4,
+            "seats": ["human", two_only[0], "random", "random"],
+        },
     )
     assert resp.status_code == 422
 
@@ -230,7 +233,10 @@ def test_record_endpoint_exports_the_game() -> None:
 
 def test_chat_rejects_blank_text_and_bad_seat() -> None:
     assert client.post("/api/game/chat", json={"text": "   "}).status_code == 422
-    assert client.post("/api/game/chat", json={"text": "hi", "player": 9}).status_code == 422
+    assert (
+        client.post("/api/game/chat", json={"text": "hi", "player": 9}).status_code
+        == 422
+    )
 
 
 def test_replay_endpoints_load_and_scrub() -> None:
@@ -271,7 +277,10 @@ def test_replay_rejects_bad_records() -> None:
     assert client.post("/api/replay", json={"version": 99}).status_code == 422
     # A structurally valid record whose moves don't replay (illegal move 0).
     bad = {
-        "version": 1, "seed": 0, "n_players": 4, "number_placement": "random",
+        "version": 1,
+        "seed": 0,
+        "n_players": 4,
+        "number_placement": "random",
         "winner": None,
         "moves": [{"player": 1, "flat": 0}],
     }

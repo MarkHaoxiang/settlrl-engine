@@ -23,12 +23,11 @@ This module exposes:
 
 from __future__ import annotations
 
+import catan_reference as ref
 import jax.numpy as jnp
 import numpy as np
-
 from catan_engine.board import Board
 from catan_engine.board import layout as eng_layout
-from catan_engine.mechanics.action import ActionType
 from catan_engine.board.dev_cards import N_DEV_CARD_TYPES
 from catan_engine.board.layout import (
     N_EDGES,
@@ -40,8 +39,7 @@ from catan_engine.board.layout import (
 )
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import NO_INDEX, BoardState, GamePhase
-
-import catan_reference as ref
+from catan_engine.mechanics.action import ActionType
 from catan_reference import board as ref_board
 
 # --- index bridges (engine index -> reference index, via cube coords) -------

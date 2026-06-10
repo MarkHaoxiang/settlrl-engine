@@ -1,11 +1,11 @@
 """Tests for the vectorized PlayRoadBuilding action."""
 
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.development import play_road_building_step
 from catan_engine.board import Board, make_board, to_main
 from catan_engine.board.dev_cards import DevCard
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import play_road_building_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 

@@ -47,7 +47,7 @@ def replicate(board: Board, batch_size: int) -> Board:
     """Tile a single-game (batch=1) board into shape ``(batch_size, ...)``."""
 
     def tile(x: jax.Array) -> jax.Array:
-        return jnp.broadcast_to(x, (batch_size,) + x.shape[1:])
+        return jnp.broadcast_to(x, (batch_size, *x.shape[1:]))
 
     return (
         jax.tree_util.tree_map(tile, board[0]),

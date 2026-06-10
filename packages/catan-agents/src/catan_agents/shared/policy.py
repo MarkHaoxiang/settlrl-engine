@@ -14,12 +14,11 @@ import dataclasses
 from typing import Literal, Protocol, runtime_checkable
 
 import jax
-from jaxtyping import Array, Bool, Int
-
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import IntScalar
 from catan_engine.env import N_FLAT, Observation
+from jaxtyping import Array, Bool, Int
 
 FlatMask = Bool[Array, f"flat={N_FLAT}"]
 """Legality of every concrete flat action for the acting player (one game)."""

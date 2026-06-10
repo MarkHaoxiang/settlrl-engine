@@ -10,15 +10,16 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import awards, longest_road
-from catan_engine.mechanics.action import ActionParams, ActionType, apply_action
 from catan_engine.board import make_board
 from catan_engine.board.layout import N_EDGES
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import NO_INDEX, BoardState, make_board_state
+from catan_engine.mechanics import awards, longest_road
+from catan_engine.mechanics.action import ActionParams, ActionType, apply_action
+
 from tests import conversion as reference
-from tests.mechanics._occupancy import random_occupancy, single as _single
+from tests.mechanics._occupancy import random_occupancy
+from tests.mechanics._occupancy import single as _single
 
 # More roads than the other suites: stress the longest-road award selection.
 _EDGE_P = [0.4, 0.2, 0.16, 0.14, 0.1]
@@ -195,18 +196,18 @@ def _edges_state(owners: dict[int, int], **fields: jax.Array) -> BoardState:
 
 class TestLongestRoadGates:
     def test_road_build_gate_needs_five_roads(self) -> None:
-        four = _edges_state({e: 1 for e in _ROAD_P1[:4]})
-        five = _edges_state({e: 1 for e in _ROAD_P1})
+        four = _edges_state(dict.fromkeys(_ROAD_P1[:4], 1))
+        five = _edges_state(dict.fromkeys(_ROAD_P1, 1))
         assert not bool(awards.road_build_gate(four, jnp.int32(0)))
         assert bool(awards.road_build_gate(five, jnp.int32(0)))
         # Other players' roads don't count toward the builder's five.
         mixed = _edges_state(
-            {**{e: 2 for e in _ROAD_P2}, **{e: 1 for e in _ROAD_P1[:4]}}
+            {**dict.fromkeys(_ROAD_P2, 2), **dict.fromkeys(_ROAD_P1[:4], 1)}
         )
         assert not bool(awards.road_build_gate(mixed, jnp.int32(0)))
 
     def test_settlement_break_gate_needs_two_same_opponent_edges(self) -> None:
-        e0, e1, e2 = _DEG3_EDGES
+        e0, e1, _e2 = _DEG3_EDGES
         v = jnp.int32(_DEG3_V)
         me = jnp.int32(0)  # owner code 1
         # Two edges of the same opponent: a trail could pass through -> True.
@@ -228,11 +229,11 @@ class TestLongestRoadGates:
         # 2 + 3 -> the award is recomputed and set aside.
         layout = _single(make_board(1, seed=0)[0])
         state = _edges_state(
-            {e: 2 for e in _ROAD_P1},
+            dict.fromkeys(_ROAD_P1, 2),
             longest_road_owner=jnp.asarray([1], jnp.uint8),
             longest_road_len=jnp.asarray([5], jnp.uint8),
         )
-        out, result = apply_action(
+        out, _result = apply_action(
             layout,
             state,
             jnp.int32(ActionType.BUILD_SETTLEMENT),
@@ -251,11 +252,11 @@ class TestLongestRoadGates:
             e for e in range(N_EDGES) if e not in _ROAD_P1 and e not in _ROAD_P2
         )
         state = _edges_state(
-            {**{e: 2 for e in _ROAD_P1}, **{e: 1 for e in _ROAD_P2[:3]}},
+            {**dict.fromkeys(_ROAD_P1, 2), **dict.fromkeys(_ROAD_P2[:3], 1)},
             longest_road_owner=jnp.asarray([3], jnp.uint8),  # stale on purpose
             longest_road_len=jnp.asarray([9], jnp.uint8),
         )
-        out, result = apply_action(
+        out, _result = apply_action(
             layout,
             state,
             jnp.int32(ActionType.BUILD_ROAD),

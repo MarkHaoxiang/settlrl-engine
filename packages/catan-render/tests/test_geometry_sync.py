@@ -8,13 +8,12 @@ that the derived tables are internally consistent (no stray placeholders).
 """
 
 from catan_engine.board.layout import N_EDGES, N_PORTS, N_TILES, N_VERTICES
-
 from catan_render.convert import (
+    _TILE_CUBES,
     EDGE_VERTICES,
     PORT_VERTEX_COORDS,
     TILE_COORDS,
     VERTEX_COORDS,
-    _TILE_CUBES,
 )
 
 
@@ -28,7 +27,7 @@ def test_counts_match_engine() -> None:
 
 def test_tables_are_well_formed() -> None:
     # Tile axial coords are the (q, r) projection of the tile cube centres.
-    for (q, r), cube in zip(TILE_COORDS, _TILE_CUBES):
+    for (q, r), cube in zip(TILE_COORDS, _TILE_CUBES, strict=True):
         assert (q, r) == cube[:2]
     # Edges reference valid vertex indices (and aren't self-loops).
     for v1, v2 in EDGE_VERTICES:

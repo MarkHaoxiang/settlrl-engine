@@ -9,7 +9,6 @@ for anything hidden.
 import jax
 import jax.numpy as jnp
 import pytest
-
 from catan_engine.belief import PublicState
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS
 from catan_engine.board.state import BoardState
@@ -27,9 +26,7 @@ def _rollout(env: BatchedCatanEnv, n_steps: int, seed: int = 42) -> None:
 
 @pytest.mark.parametrize("n_players", [2, 3, 4])
 def test_bounds_bracket_the_truth(n_players: int) -> None:
-    env = BatchedCatanEnv(
-        batch_size=8, seed=0, n_players=n_players, track_beliefs=True
-    )
+    env = BatchedCatanEnv(batch_size=8, seed=0, n_players=n_players, track_beliefs=True)
     key = jax.random.key(42)
     for _ in range(300):
         key, k = jax.random.split(key)
@@ -47,9 +44,7 @@ def test_bounds_bracket_the_truth(n_players: int) -> None:
 
 @pytest.mark.parametrize("n_players", [2, 3, 4])
 def test_dev_pool_conservation(n_players: int) -> None:
-    env = BatchedCatanEnv(
-        batch_size=8, seed=1, n_players=n_players, track_beliefs=True
-    )
+    env = BatchedCatanEnv(batch_size=8, seed=1, n_players=n_players, track_beliefs=True)
     _rollout(env, 300)
     state = env.board[1]
     held = state.dev_hand.astype(jnp.int32).sum(axis=1)
@@ -75,9 +70,7 @@ def test_third_party_steals_create_uncertainty() -> None:
     # some observer didn't take part in, and their bounds must open up.
     env = BatchedCatanEnv(batch_size=8, seed=3, n_players=4, track_beliefs=True)
     _rollout(env, 400)
-    slack = (
-        env.beliefs.res_hi.astype(jnp.int32) - env.beliefs.res_lo.astype(jnp.int32)
-    )
+    slack = env.beliefs.res_hi.astype(jnp.int32) - env.beliefs.res_lo.astype(jnp.int32)
     assert int(slack.sum()) > 0
 
 
@@ -85,7 +78,7 @@ _HIDDEN_FIELDS = {"player_resources", "dev_hand", "dev_deck", "dev_bought", "key
 
 
 def test_every_board_field_is_classified() -> None:
-    # PublicState ∪ hidden must cover BoardState exactly: a new BoardState
+    # PublicState plus hidden must cover BoardState exactly: a new BoardState
     # field can't slip into (or out of) the view layer unclassified.
     assert set(PublicState._fields) | _HIDDEN_FIELDS == set(BoardState._fields)
     assert set(PublicState._fields) & _HIDDEN_FIELDS == set()
@@ -111,8 +104,7 @@ def test_belief_view_carries_nothing_hidden() -> None:
         own_turn = state.current_player.astype(jnp.int32) == me
         assert bool(
             jnp.all(
-                view.own_bought
-                == jnp.where(own_turn[:, None], state.dev_bought, 0)
+                view.own_bought == jnp.where(own_turn[:, None], state.dev_bought, 0)
             )
         )
         # The unseen dev pool by conservation.
@@ -125,13 +117,17 @@ def test_belief_view_carries_nothing_hidden() -> None:
         # The public counts are the truth's.
         pb = view.belief
         assert bool(
-            jnp.all(pb.hand_size == state.player_resources.astype(jnp.int32).sum(axis=2))
+            jnp.all(
+                pb.hand_size == state.player_resources.astype(jnp.int32).sum(axis=2)
+            )
         )
         assert bool(
             jnp.all(pb.dev_count == state.dev_hand.astype(jnp.int32).sum(axis=2))
         )
         assert bool(
-            jnp.all(pb.res_total == state.player_resources.astype(jnp.int32).sum(axis=1))
+            jnp.all(
+                pb.res_total == state.player_resources.astype(jnp.int32).sum(axis=1)
+            )
         )
 
 
@@ -148,4 +144,4 @@ def test_belief_resets_with_auto_reset() -> None:
 def test_tracking_off_raises() -> None:
     env = BatchedCatanEnv(batch_size=1, seed=0, n_players=2)
     with pytest.raises(RuntimeError, match="track_beliefs"):
-        env.beliefs
+        _ = env.beliefs

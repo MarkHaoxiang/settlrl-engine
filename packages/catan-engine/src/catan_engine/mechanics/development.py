@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 
 from catan_engine.board import Board
-from catan_engine.board.dev_cards import DevCard, DevDeckVec, N_DEV_CARD_TYPES
+from catan_engine.board.dev_cards import N_DEV_CARD_TYPES, DevCard, DevDeckVec
 from catan_engine.board.layout import N_TILES, BoardLayout
 from catan_engine.board.resources import N_RESOURCES, bank_stock
 from catan_engine.board.state import (
@@ -63,9 +63,7 @@ def playable_dev(state: BoardState, player: IntScalar, card: int) -> BoolScalar:
     return held - bought > 0
 
 
-def draw_dev_card(
-    key: KeyScalar, dev_deck: DevDeckVec
-) -> tuple[KeyScalar, IntScalar]:
+def draw_dev_card(key: KeyScalar, dev_deck: DevDeckVec) -> tuple[KeyScalar, IntScalar]:
     """Draw one card type from ``dev_deck`` weighted by remaining counts.
 
     Returns ``(advanced key, card index)``. The probabilities fall back to
@@ -112,9 +110,7 @@ def _buy_dev_apply(
         dev_bought=to_u8(new_bought),
         key=key,
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _buy_dev_avail_b = jax.jit(jax.vmap(_buy_dev_avail, in_axes=(0, 0, None)))
@@ -174,9 +170,7 @@ def _monopoly_apply(
         dev_hand=to_u8(new_hand),
         player_resources=to_u8(res),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _monopoly_avail_b = jax.jit(jax.vmap(_monopoly_avail))
@@ -243,9 +237,7 @@ def _yop_apply(
         dev_hand=to_u8(new_hand),
         player_resources=to_u8(res),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _yop_avail_b = jax.jit(jax.vmap(_yop_avail))
@@ -296,9 +288,7 @@ def _road_building_apply(
         dev_hand=to_u8(new_hand),
         free_roads=to_u8(new_free),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _road_building_avail_b = jax.jit(jax.vmap(_road_building_avail, in_axes=(0, 0, None)))
@@ -340,14 +330,7 @@ def _knight_avail(
     tile_in_range = (tile >= 0) & (tile < N_TILES)
     tile_moves = tile != state.robber
     valid_victim = robber.valid_robber_victim(state, t, player, victim)
-    return (
-        phase_ok
-        & not_played
-        & has_card
-        & tile_in_range
-        & tile_moves
-        & valid_victim
-    )
+    return phase_ok & not_played & has_card & tile_in_range & tile_moves & valid_victim
 
 
 def _knight_apply(
@@ -368,9 +351,7 @@ def _knight_apply(
         robber=t.astype(state.robber.dtype),
     )
     cand = robber.apply_steal(cand, player, victim)
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _knight_avail_b = jax.jit(jax.vmap(_knight_avail))

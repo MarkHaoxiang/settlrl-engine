@@ -15,37 +15,19 @@ from __future__ import annotations
 import dataclasses
 import functools
 from collections.abc import Callable
-from typing import Literal, NamedTuple, TypedDict, TypeVar, cast
+from typing import ClassVar, Literal, NamedTuple, TypedDict, TypeVar, cast
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Int, UInt8
 
-from catan_engine.mechanics.action import (
-    ActionParams,
-    ActionResult,
-    ActionType,
-    N_ACTION_TYPES,
-    action_available,
-    apply_action,
-)
-from catan_engine.mechanics.flat import (
-    FlatMaskArray,
-    INDEX_MASKS,
-    N_FLAT,
-    TypeMaskArray,
-    flat_available_b,
-    flat_available_for,
-    flat_legality,
-    flat_to_action,
-    type_mask_from_flat,
-)
-from catan_engine.mechanics.common import (
-    ActionTypeArray,
-    Mask,
-    ResultCode,
-    agent_selection_single,
-    player_total_vp,
+from catan_engine.belief import (
+    BeliefState,
+    BeliefView,
+    PlayerBelief,
+    belief_view,
+    make_belief,
+    update_belief,
 )
 from catan_engine.board import Board
 from catan_engine.board.dev_cards import N_DEV_CARD_TYPES
@@ -71,21 +53,39 @@ from catan_engine.board.state import (
     KeyScalar,
     make_board_state,
 )
-from catan_engine.belief import (
-    BeliefState,
-    BeliefView,
-    PlayerBelief,
-    belief_view,
-    make_belief,
-    update_belief,
+from catan_engine.mechanics.action import (
+    N_ACTION_TYPES,
+    ActionParams,
+    ActionResult,
+    ActionType,
+    action_available,
+    apply_action,
+)
+from catan_engine.mechanics.common import (
+    ActionTypeArray,
+    Mask,
+    ResultCode,
+    agent_selection_single,
+    player_total_vp,
+)
+from catan_engine.mechanics.flat import (
+    INDEX_MASKS,
+    N_FLAT,
+    FlatMaskArray,
+    TypeMaskArray,
+    flat_available_b,
+    flat_available_for,
+    flat_legality,
+    flat_to_action,
+    type_mask_from_flat,
 )
 
 __all__ = [
+    "N_ACTION_TYPES",
+    "N_FLAT",
     "ActionParams",
     "ActionResult",
     "ActionType",
-    "N_ACTION_TYPES",
-    "N_FLAT",
     "BatchedCatanEnv",
     "BeliefState",
     "BeliefView",
@@ -94,10 +94,10 @@ __all__ = [
     "Infos",
     "Observation",
     "PlayerBelief",
-    "flat_to_action",
-    "step",
     "available",
     "flat_available",
+    "flat_to_action",
+    "step",
 ]
 
 # ---------------------------------------------------------------------------
@@ -189,14 +189,14 @@ class Infos(TypedDict):
 
     action_mask: TypeMaskArray
     agent_selection: AgentSelectionArray
-    current_player: Int[Array, "batch"]
+    current_player: Int[Array, batch]
     result: ResultCode
 
 
 # ---------------------------------------------------------------------------
 # Batched derived quantities used by the environment.
 # ---------------------------------------------------------------------------
-def _total_vp_single(state: BoardState) -> Int[Array, "players"]:
+def _total_vp_single(state: BoardState) -> Int[Array, players]:
     """Total VP (buildings + awards + VP cards) for every player in one game."""
     players = jnp.arange(state.n_players, dtype=jnp.int32)
     return jax.vmap(lambda p: player_total_vp(state, p))(players)
@@ -257,7 +257,7 @@ _belief_view_b: Callable[[BoardState, BeliefState, int], BeliefView] = jax.jit(
 
 def _belief_reset_lanes(
     terminations: DoneArray, auto_reset: bool, batch_size: int
-) -> Bool[Array, "batch"]:
+) -> Bool[Array, batch]:
     """Lanes whose belief restarts this step: the auto-reset-replaced ones.
 
     Without auto-reset a done lane freezes (every further action is INVALID, a
@@ -275,7 +275,7 @@ def _belief_step_core(
     after: BoardState,
     action_type: ActionTypeArray,
     params: ActionParams,
-    reset_lane: Bool[Array, "batch"],
+    reset_lane: Bool[Array, batch],
     batch_size: int,
     n_players: int,
 ) -> BeliefState:
@@ -340,7 +340,7 @@ class BatchedCatanEnv:
     batched adaptations of the AEC attributes.
     """
 
-    metadata = {"name": "catan_batched_aec_v0"}
+    metadata: ClassVar[dict[str, str]] = {"name": "catan_batched_aec_v0"}
 
     def __init__(
         self,
@@ -448,9 +448,9 @@ class BatchedCatanEnv:
         self,
     ) -> tuple[
         Observation,
-        Float[Array, "batch"],
-        Bool[Array, "batch"],
-        Bool[Array, "batch"],
+        Float[Array, batch],
+        Bool[Array, batch],
+        Bool[Array, batch],
         Infos,
     ]:
         """``(obs, reward, termination, truncation, info)`` for the acting agents.
@@ -725,7 +725,7 @@ def _select_key(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
 _Tree = TypeVar("_Tree")
 
 
-def _tree_where_lane(mask: Bool[Array, "batch"], a: _Tree, b: _Tree) -> _Tree:
+def _tree_where_lane(mask: Bool[Array, batch], a: _Tree, b: _Tree) -> _Tree:
     """Per-leaf ``_where_lane`` over two matching pytrees of batched arrays
     (PRNG-key leaves route through ``_select_key``)."""
 

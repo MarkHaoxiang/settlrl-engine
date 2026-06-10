@@ -33,7 +33,6 @@ import pstats
 from time import perf_counter
 
 import jax
-
 from catan_engine.env.batched import N_FLAT, BatchedCatanEnv
 
 

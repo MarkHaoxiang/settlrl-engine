@@ -6,11 +6,11 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import robber
 from catan_engine.board.layout import N_TILES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import BoardState, make_board_state
+from catan_engine.mechanics import robber
+
 from tests import conversion as reference
 from tests.mechanics._occupancy import single as _single
 
@@ -19,9 +19,7 @@ _VERTEX_P = [0.6, 0.12, 0.11, 0.1, 0.07]
 
 def _state(seed: int) -> BoardState:
     rng = np.random.default_rng(seed)
-    owner = rng.choice(
-        [0, 1, 2, 3, 4], size=N_VERTICES, p=_VERTEX_P
-    ).astype(np.uint8)
+    owner = rng.choice([0, 1, 2, 3, 4], size=N_VERTICES, p=_VERTEX_P).astype(np.uint8)
     pr = rng.integers(0, 3, size=(N_PLAYERS, N_RESOURCES)).astype(np.uint8)
     return make_board_state(1, key=jax.random.key(seed))._replace(
         vertex_owner=jnp.asarray(owner)[None],

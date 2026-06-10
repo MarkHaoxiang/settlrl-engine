@@ -8,11 +8,11 @@ from typing import TypeVar, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import setup
 from catan_engine.board import make_board
 from catan_engine.board.layout import N_VERTICES
 from catan_engine.board.resources import N_PLAYERS
+from catan_engine.mechanics import setup
+
 from tests import conversion as reference
 
 _T = TypeVar("_T")

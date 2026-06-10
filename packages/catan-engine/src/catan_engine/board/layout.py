@@ -230,8 +230,7 @@ def make_layout(
     """
     if number_placement not in ("random", "spiral"):
         raise ValueError(
-            "number_placement must be 'random' or 'spiral', "
-            f"got {number_placement!r}"
+            f"number_placement must be 'random' or 'spiral', got {number_placement!r}"
         )
     B = batch_size
     key = key if key is not None else jax.random.key(0)

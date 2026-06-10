@@ -10,12 +10,23 @@ copy-paste invalidation cases live here.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
+from catan_engine.board import (
+    Board,
+    give,
+    give_dev_card,
+    make_board,
+    place_settlement,
+    set_phase,
+    to_main,
+)
+from catan_engine.board.dev_cards import DevCard
+from catan_engine.board.state import BoardState, GamePhase
 from catan_engine.mechanics.action import ActionResult
 from catan_engine.mechanics.common import ResultCode
 from catan_engine.mechanics.development import (
@@ -30,17 +41,7 @@ from catan_engine.mechanics.placement import (
     build_settlement_step,
 )
 from catan_engine.mechanics.trade import maritime_step
-from catan_engine.board import (
-    Board,
-    give,
-    give_dev_card,
-    make_board,
-    place_settlement,
-    set_phase,
-    to_main,
-)
-from catan_engine.board.dev_cards import DevCard
-from catan_engine.board.state import BoardState, GamePhase
+
 from tests.mechanics.actions.fixtures import road_fixture, settlement_fixture
 
 # A batched action step: (board, params) -> (new state, ActionResult codes).
@@ -105,7 +106,12 @@ _WRONG_PHASE_CASES = [
     ("maritime_trade", maritime_step, _maritime, "player_resources"),
     ("play_road_building", play_road_building_step, _road_building, "dev_hand"),
     ("play_monopoly", play_monopoly_step, _monopoly, "player_resources"),
-    ("play_year_of_plenty", play_year_of_plenty_step, _year_of_plenty, "player_resources"),
+    (
+        "play_year_of_plenty",
+        play_year_of_plenty_step,
+        _year_of_plenty,
+        "player_resources",
+    ),
 ]
 
 

@@ -9,11 +9,11 @@ they live here once, parameterized by the per-test probability weights.
 
 from __future__ import annotations
 
-from typing import Sequence, TypeVar, cast
+from collections.abc import Sequence
+from typing import TypeVar, cast
 
 import jax
 import numpy as np
-
 from catan_engine.board.layout import N_EDGES, N_VERTICES
 from catan_engine.board.state import MAX_ROADS
 

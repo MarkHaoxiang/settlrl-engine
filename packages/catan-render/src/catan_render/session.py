@@ -14,9 +14,9 @@ from typing import Literal
 
 import jax
 import numpy as np
-from catan_engine.env.aec import CatanAECEnv
 from catan_engine.board import Board
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, GamePhase
+from catan_engine.env.aec import CatanAECEnv
 from catan_engine.record import GameRecord, Move
 
 from .actions import decode_actions

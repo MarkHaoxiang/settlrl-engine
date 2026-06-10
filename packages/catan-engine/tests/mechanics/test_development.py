@@ -7,10 +7,9 @@ from typing import TypeVar, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import development
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.state import make_board_state
+from catan_engine.mechanics import development
 
 _T = TypeVar("_T")
 

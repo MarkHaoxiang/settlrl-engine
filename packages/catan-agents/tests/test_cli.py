@@ -1,7 +1,6 @@
 """Tests for the ``catan-agents`` CLI and the episode budget behind it."""
 
 import pytest
-
 from catan_agents import POLICIES, evaluate
 from catan_agents.cli import compare, main
 

@@ -2,6 +2,12 @@
 
 from catan_engine.board.resources import N_PLAYERS
 
+from catan_agents.search import (
+    lookahead_policy,
+    make_greedy,
+    make_mcts,
+    mcts_policy,
+)
 from catan_agents.shared import (
     AgentSpec,
     BeliefPolicy,
@@ -18,12 +24,6 @@ from catan_agents.shared import (
     random_policy,
     sample_world,
 )
-from catan_agents.search import (
-    lookahead_policy,
-    make_greedy,
-    make_mcts,
-    mcts_policy,
-)
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 
@@ -36,12 +36,12 @@ POLICIES: dict[str, AgentSpec] = {
 """Every shipped agent by name."""
 
 __all__ = [
+    "POLICIES",
     "AgentSpec",
     "BeliefPolicy",
     "EvalResult",
     "FlatAction",
     "FlatMask",
-    "POLICIES",
     "Policy",
     "Value",
     "ValueFunction",

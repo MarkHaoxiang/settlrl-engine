@@ -1,13 +1,9 @@
 """Tests for the vectorized PlayKnight action."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.development import play_knight_step
 from catan_engine.board import (
     Board,
     make_board,
@@ -17,6 +13,10 @@ from catan_engine.board import (
 )
 from catan_engine.board.layout import TILE_V
 from catan_engine.board.state import GamePhase
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.development import play_knight_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 _TILE_V = np.asarray(TILE_V)

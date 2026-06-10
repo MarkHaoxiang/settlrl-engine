@@ -2,14 +2,14 @@
 
 import jax.numpy as jnp
 import numpy as np
-from expecttest import assert_expected_inline
-
-from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.trade import maritime_step
 from catan_engine.board import Board, give, make_board, place_settlement, to_main
 from catan_engine.board.layout import PORT_V
 from catan_engine.board.port import Port
 from catan_engine.board.resources import BANK_INITIAL
+from catan_engine.mechanics.action import ActionResult
+from catan_engine.mechanics.trade import maritime_step
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 _PORT_V = np.asarray(PORT_V)

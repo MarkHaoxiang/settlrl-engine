@@ -12,15 +12,15 @@ extra (``pettingzoo``, ``gymnasium``).
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import gymnasium.spaces as spaces
 import jax.numpy as jnp
 import numpy as np
 from pettingzoo.utils.env import AECEnv
 
-from catan_engine.env.batched import BatchedCatanEnv, N_FLAT, flat_to_action
 from catan_engine.board.resources import N_PLAYERS
+from catan_engine.env.batched import N_FLAT, BatchedCatanEnv, flat_to_action
 
 __all__ = ["CatanAECEnv", "env"]
 
@@ -43,7 +43,10 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
             ``BatchedCatanEnv``).
     """
 
-    metadata = {"render_modes": ["human", "ansi"], "name": "catan_aec_v0"}
+    metadata: ClassVar[dict[str, Any]] = {
+        "render_modes": ["human", "ansi"],
+        "name": "catan_aec_v0",
+    }
 
     def __init__(
         self,
@@ -75,9 +78,9 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
             a: spaces.Discrete(N_FLAT) for a in self.possible_agents
         }
         obs_space = self._build_observation_space()
-        self.observation_spaces: dict[str, spaces.Space[Any]] = {
-            a: obs_space for a in self.possible_agents
-        }
+        self.observation_spaces: dict[str, spaces.Space[Any]] = dict.fromkeys(
+            self.possible_agents, obs_space
+        )
 
         self.reset(seed)
 
@@ -114,10 +117,10 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
             self._seed = seed
         self._env.reset(self._seed)
         self.agents = list(self.possible_agents)
-        self.rewards = {a: 0.0 for a in self.agents}
-        self._cumulative_rewards = {a: 0.0 for a in self.agents}
-        self.terminations = {a: False for a in self.agents}
-        self.truncations = {a: False for a in self.agents}
+        self.rewards = dict.fromkeys(self.agents, 0.0)
+        self._cumulative_rewards = dict.fromkeys(self.agents, 0.0)
+        self.terminations = dict.fromkeys(self.agents, False)
+        self.truncations = dict.fromkeys(self.agents, False)
         self.infos: dict[str, dict[str, Any]] = {a: {} for a in self.agents}
         self.agent_selection = self._acting_agent()
 
@@ -137,7 +140,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         done = bool(np.asarray(self._env.terminations[0, 0]))
         self.rewards = {a: float(reward[i]) for i, a in enumerate(self.possible_agents)}
         if done:
-            self.terminations = {a: True for a in self.agents}
+            self.terminations = dict.fromkeys(self.agents, True)
         self.agent_selection = self._acting_agent()
         self._accumulate_rewards()
 

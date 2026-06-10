@@ -31,21 +31,28 @@ class ReplaySession:
         self.record = record
         self._boards: list[BoardModel] = [board_to_model(initial_board(record))]
         self._log: list[LogEntryModel] = []
-        for i, (move, board) in enumerate(zip(record.moves, replay(record))):
+        for i, (move, board) in enumerate(
+            zip(record.moves, replay(record), strict=True)
+        ):
             self._boards.append(board_to_model(board))
             action = decode_actions([move.flat])[0]
             text = f"rolled {move.dice}" if move.dice is not None else action.label
             self._log.append(
                 LogEntryModel(
-                    id=i, kind="move", player=move.player,
-                    action_type=action.type, text=text,
+                    id=i,
+                    kind="move",
+                    player=move.player,
+                    action_type=action.type,
+                    text=text,
                 )
             )
         if record.winner is not None:
             self._log.append(
                 LogEntryModel(
-                    id=len(record.moves), kind="win",
-                    player=record.winner, text="wins",
+                    id=len(record.moves),
+                    kind="win",
+                    player=record.winner,
+                    text="wins",
                 )
             )
 

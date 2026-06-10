@@ -66,9 +66,11 @@ def distribute_resources(
     res_idx = jnp.broadcast_to(
         layout.tile_resource[:, None].astype(jnp.int32), (N_TILES, 6)
     )
-    gains = jnp.zeros((state.n_players, N_RESOURCES), jnp.int32).at[
-        pl.reshape(-1), res_idx.reshape(-1)
-    ].add(amt.reshape(-1))
+    gains = (
+        jnp.zeros((state.n_players, N_RESOURCES), jnp.int32)
+        .at[pl.reshape(-1), res_idx.reshape(-1)]
+        .add(amt.reshape(-1))
+    )
 
     bank = BANK_INITIAL - res.sum(axis=0)  # (R,)
     total = gains.sum(axis=0)  # (R,)
@@ -115,9 +117,7 @@ def _roll_apply(
         pending_discard=pending,
         player_resources=new_res,
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _roll_avail_b = jax.jit(jax.vmap(_roll_avail, in_axes=(0, 0, None)))

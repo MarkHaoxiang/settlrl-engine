@@ -21,7 +21,7 @@ repos:
         files: ^packages/catan-engine/(tools/gen_stack_bound_doc\.py|docs/longest-road-stack-bound\.html)$
       - id: mypy
         name: mypy
-        entry: uv run mypy packages/catan-engine/src packages/catan-engine/tests packages/catan-render/src
+        entry: uv run mypy packages/catan-engine/src packages/catan-engine/tests packages/catan-agents/src packages/catan-agents/tests packages/catan-render/src packages/catan-reference/src
         language: system
         pass_filenames: false
         always_run: true

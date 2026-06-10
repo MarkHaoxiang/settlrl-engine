@@ -13,8 +13,6 @@ from typing import Protocol, runtime_checkable
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
-
 from catan_engine.board.dev_cards import DEV_CARD_COST, DEV_CARD_COUNTS, DevCard
 from catan_engine.board.layout import (
     EDGE_V,
@@ -31,6 +29,7 @@ from catan_engine.board.state import (
     BoardState,
     IntScalar,
 )
+from jaxtyping import Array, Float
 
 Value = Float[Array, ""]
 """A scalar state score for one player: higher is better, arbitrary scale."""
@@ -134,9 +133,7 @@ def make_heuristic(
         occ = state.vertex_owner > 0
         u, v = EDGE_V[:, 0], EDGE_V[:, 1]
         nb_occ = jnp.zeros((N_VERTICES,), bool).at[u].max(occ[v]).at[v].max(occ[u])
-        touched = (
-            jnp.zeros((N_VERTICES,), bool).at[u].max(own_road).at[v].max(own_road)
-        )
+        touched = jnp.zeros((N_VERTICES,), bool).at[u].max(own_road).at[v].max(own_road)
         is_settlement = (state.vertex_owner == p + 1) & (
             state.vertex_type == SETTLEMENT
         )
@@ -183,9 +180,7 @@ def make_heuristic(
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
         players = jnp.arange(state.n_players)
-        strengths = jax.vmap(lambda q: strength(layout, state, q, q == player))(
-            players
-        )
+        strengths = jax.vmap(lambda q: strength(layout, state, q, q == player))(players)
         mine = strengths[player]
         best_other = jnp.max(jnp.where(players == player, -jnp.inf, strengths))
         return mine - best_other

@@ -7,11 +7,11 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from catan_engine.mechanics import placement
 from catan_engine.board.layout import N_EDGES, N_VERTICES
 from catan_engine.board.resources import N_PLAYERS
 from catan_engine.board.state import BoardState, make_board_state
+from catan_engine.mechanics import placement
+
 from tests import conversion as reference
 from tests.mechanics._occupancy import random_occupancy
 
@@ -24,9 +24,7 @@ _VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
 
 
 def _state(seed: int) -> tuple[BoardState, np.ndarray, np.ndarray]:
-    edge_road, vertex_owner = random_occupancy(
-        seed, edge_p=_EDGE_P, vertex_p=_VERTEX_P
-    )
+    edge_road, vertex_owner = random_occupancy(seed, edge_p=_EDGE_P, vertex_p=_VERTEX_P)
     state = make_board_state(1, key=jax.random.key(0))._replace(
         edge_road=jnp.asarray(edge_road)[None],
         vertex_owner=jnp.asarray(vertex_owner)[None],

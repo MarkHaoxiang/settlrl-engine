@@ -1,11 +1,11 @@
 """Tests for the vectorized BuyDevelopmentCard action."""
 
 import numpy as np
-from expecttest import assert_expected_inline
-
+from catan_engine.board import Board
 from catan_engine.mechanics.action import ActionResult
 from catan_engine.mechanics.development import buy_development_card_step
-from catan_engine.board import Board
+from expecttest import assert_expected_inline
+
 from tests.mechanics.actions.fixtures import fmt
 
 

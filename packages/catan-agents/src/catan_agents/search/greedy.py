@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import IntScalar

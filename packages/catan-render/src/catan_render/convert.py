@@ -9,6 +9,7 @@ geometry; the asserts below pin them to the engine's published counts.
 from typing import Literal
 
 from catan_engine.board import Board
+from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import (
     N_EDGES,
     N_PORTS,
@@ -20,7 +21,6 @@ from catan_engine.board.layout import (
     vertex_cube,
     vertex_index,
 )
-from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.port import Port
 from catan_engine.board.tile import Tile
 

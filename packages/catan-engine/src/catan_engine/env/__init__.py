@@ -6,4 +6,4 @@ before the split into submodules; the single-game PettingZoo-AEC wrapper lives i
 ``catan_engine.env.aec``.
 """
 
-from catan_engine.env.batched import *  # noqa: F401,F403
+from catan_engine.env.batched import *  # noqa: F403

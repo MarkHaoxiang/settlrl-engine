@@ -29,7 +29,6 @@ from typing import Any
 import jax
 import numpy as np
 import pytest
-
 from catan_engine.env.aec import CatanAECEnv
 from catan_engine.env.batched import BatchedCatanEnv
 

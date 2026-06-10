@@ -67,12 +67,12 @@ from catan_engine.mechanics.trade import _maritime_apply, _maritime_avail
 from catan_engine.mechanics.turn import _end_turn_apply, _end_turn_avail
 
 __all__ = [
+    "N_ACTION_TYPES",
     "ActionParams",
     "ActionResult",
     "ActionType",
     "ActionTypeArray",
     "Mask",
-    "N_ACTION_TYPES",
     "ResultCode",
     "action_available",
     "apply_action",

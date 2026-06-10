@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-
 from catan_engine.env import N_FLAT, Observation
 
 from catan_agents.shared.policy import FlatAction, FlatMask

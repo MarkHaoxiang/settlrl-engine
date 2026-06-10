@@ -9,11 +9,10 @@ Boards are batch=1 (single game, fixed seed) so success cases read out of lane 0
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import pytest
-
 from catan_engine.board import (
     Board,
     give,
@@ -27,6 +26,7 @@ from catan_engine.board import (
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import TILE_V, BoardLayout
 from catan_engine.board.state import BoardState, GamePhase
+
 from tests.mechanics.actions.fixtures import road_fixture, settlement_fixture
 from tests.render import BoardRenderer
 

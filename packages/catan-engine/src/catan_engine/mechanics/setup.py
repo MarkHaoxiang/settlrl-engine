@@ -49,7 +49,7 @@ def grant_setup_resources(
     res = state.player_resources.astype(jnp.int32)
     bank = BANK_INITIAL - res.sum(axis=0)  # (R,)
     # Tiles touching ``vertex`` (a vertex appears in at most 3 tiles' corners).
-    incident = (TILE_V == vertex).any(axis=1)  # (N_TILES,)
+    incident = (vertex == TILE_V).any(axis=1)  # (N_TILES,)
     resource = layout.tile_resource.astype(jnp.int32)  # (N_TILES,)
     produce = (incident & (layout.tile_resource != Tile.DESERT)).astype(jnp.int32)
     # Scatter demand per resource, then grant what the bank can cover (granting
@@ -92,9 +92,7 @@ def _setup_settlement_apply(
         placed,
     )
     cand = placed._replace(phase=jnp.uint8(GamePhase.SETUP_ROAD))
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _setup_settlement_avail_b = jax.jit(jax.vmap(_setup_settlement_avail))
@@ -154,18 +152,14 @@ def _setup_road_apply(
         _setup_player(new_index, n),
         0,
     )
-    next_phase = jnp.where(
-        setup_continues, GamePhase.SETUP_SETTLEMENT, GamePhase.ROLL
-    )
+    next_phase = jnp.where(setup_continues, GamePhase.SETUP_SETTLEMENT, GamePhase.ROLL)
     cand = state._replace(
         edge_road=state.edge_road.at[e].set((player + 1).astype(jnp.uint8)),
         setup_index=new_index.astype(state.setup_index.dtype),
         phase=next_phase.astype(state.phase.dtype),
         current_player=next_player.astype(state.current_player.dtype),
     )
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _setup_road_avail_b = jax.jit(jax.vmap(_setup_road_avail))

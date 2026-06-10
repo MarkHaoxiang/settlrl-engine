@@ -3,30 +3,32 @@
 oracle (the ``catan-reference`` package, via ``tests.conversion``) across
 randomized boards."""
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from expecttest import TestCase
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from catan_engine.mechanics import common, dice, longest_road, trade
-from tests import conversion as reference
-from tests.mechanics._occupancy import random_occupancy, single as _single
-from tests.render import BoardRenderer
 from catan_engine.board.layout import (
-    BoardLayout,
     EDGE_V,
     N_EDGES,
     N_TILES,
     N_VERTICES,
+    BoardLayout,
     make_layout,
 )
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import MAX_ROADS, BoardState, make_board_state
+from catan_engine.mechanics import common, dice, longest_road, trade
+from expecttest import TestCase
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+from tests import conversion as reference
+from tests.mechanics._occupancy import random_occupancy
+from tests.mechanics._occupancy import single as _single
+from tests.render import BoardRenderer
 
 # Bias towards empty so road networks stay realistically small.
 _VERTEX_P = [0.7, 0.1, 0.08, 0.07, 0.05]
@@ -144,7 +146,7 @@ class TestLongestRoad(TestCase):
 # realizable analogue.
 _LOOP = [0, 1, 3, 4, 5, 7]  # tile 0's hexagon: 0-3-4-1-2-5-0
 _TAIL = [9]  # edge 5-6: a tail off loop vertex 5
-_THETA = _LOOP + [6, 9, 10, 12, 13]  # tiles 0+1: junctions 2 and 5, three paths
+_THETA = [*_LOOP, 6, 9, 10, 12, 13]  # tiles 0+1: junctions 2 and 5, three paths
 _Y = [0, 8, 1, 9, 2, 22]  # three 2-edge arms meeting at vertex 0
 _BRIDGE = [9, 10]  # path 5-6-9 joining the two loops below
 _LOOP2 = [13, 14, 15, 16, 18, 19]  # tile 2's hexagon: 8-9-10-13-12-11-8
@@ -185,7 +187,9 @@ class TestLongestRoadTopologies(TestCase):
     def test_y_junction(self) -> None:
         # Three 2-edge arms from vertex 0 (degree 3): the longest trail passes
         # *through* the junction, tip to tip, stranding the third arm.
-        self.assertExpectedInline(self._check(_Y, expected=4), r"""
+        self.assertExpectedInline(
+            self._check(_Y, expected=4),
+            r"""
 
 
           ORE             3:1
@@ -225,12 +229,15 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-""")
+""",
+        )
 
     def test_loop(self) -> None:
         # Pure cycle: every vertex even-degree and passable, so nothing is a
         # forced start -- only the closed-trail fallback seeds it.
-        self.assertExpectedInline(self._check(_LOOP, expected=6), r"""
+        self.assertExpectedInline(
+            self._check(_LOOP, expected=6),
+            r"""
 
 
           ORE             3:1
@@ -270,12 +277,15 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-""")
+""",
+        )
 
     def test_lollipop(self) -> None:
         # Loop + tail: starts at the tail's dead end, rides around the loop,
         # and ends back at the degree-3 junction. Uses every edge.
-        self.assertExpectedInline(self._check(_LOOP + _TAIL, expected=7), r"""
+        self.assertExpectedInline(
+            self._check(_LOOP + _TAIL, expected=7),
+            r"""
 
 
           ORE             3:1
@@ -315,14 +325,17 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-""")
+""",
+        )
 
     def test_theta(self) -> None:
         # Two junctions joined by three paths (lengths 1, 5, 5): the longest
         # trail weaves through all three, junction to junction, using every
         # edge. Both endpoints are degree-3 -- no degree-1 vertex exists, so
         # junction seeding is load-bearing here.
-        self.assertExpectedInline(self._check(_THETA, expected=11), r"""
+        self.assertExpectedInline(
+            self._check(_THETA, expected=11),
+            r"""
 
 
           ORE             3:1
@@ -362,13 +375,15 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-""")
+""",
+        )
 
     def test_dumbbell(self) -> None:
         # Two loops joined by a path: around one loop, across the bridge,
         # around the other. Uses every edge; both junctions are degree-3.
         self.assertExpectedInline(
-            self._check(_LOOP + _BRIDGE + _LOOP2, expected=14), r"""
+            self._check(_LOOP + _BRIDGE + _LOOP2, expected=14),
+            r"""
 
 
           ORE             3:1
@@ -408,14 +423,15 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-"""
+""",
         )
 
     def test_loop_with_opponent_settlement(self) -> None:
         # One opponent building on a cycle makes that vertex a (blocked) start:
         # the full loop still counts, starting and ending there.
         self.assertExpectedInline(
-            self._check(_LOOP, expected=6, buildings={0: 2}), r"""
+            self._check(_LOOP, expected=6, buildings={0: 2}),
+            r"""
 
 
           ORE             3:1
@@ -455,13 +471,14 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-"""
+""",
         )
 
     def test_loop_split_by_two_settlements(self) -> None:
         # Two opponent buildings sever the cycle into arcs of 4 and 2.
         self.assertExpectedInline(
-            self._check(_LOOP, expected=4, buildings={0: 2, 2: 3}), r"""
+            self._check(_LOOP, expected=4, buildings={0: 2, 2: 3}),
+            r"""
 
 
           ORE             3:1
@@ -501,7 +518,7 @@ class TestLongestRoadTopologies(TestCase):
           SHP             WHT
 
 
-"""
+""",
         )
 
 

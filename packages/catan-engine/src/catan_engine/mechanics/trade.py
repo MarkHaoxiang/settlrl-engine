@@ -45,8 +45,8 @@ def port_ratio(
     # Scatter each port's (per-game) type onto its two vertices; the boolean
     # ``_IS_PORT_VERTEX`` mask, not a fill sentinel, marks non-port vertices.
     ptypes = port_allocation[_PORT_SLOT]  # (2 * N_PORTS,)
-    vert_port = jnp.zeros((N_VERTICES,), port_allocation.dtype).at[_PORT_VERTS].set(
-        ptypes
+    vert_port = (
+        jnp.zeros((N_VERTICES,), port_allocation.dtype).at[_PORT_VERTS].set(ptypes)
     )
     my_port = (vertex_owner == player + 1) & _IS_PORT_VERTEX
     general = jnp.any(my_port & (vert_port == Port.GENERAL))
@@ -91,9 +91,7 @@ def _maritime_apply(
     res = res.at[player, g].add(-ratio)
     res = res.at[player, r].add(1)
     cand = state._replace(player_resources=to_u8(res))
-    return tree_select(available, cand, state), jnp.where(
-        available, SUCCESS, INVALID
-    )
+    return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
 
 _maritime_avail_b = jax.jit(jax.vmap(_maritime_avail))
