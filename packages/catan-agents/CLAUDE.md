@@ -57,39 +57,37 @@ exploit.
 
 - `greedy.py` — one-step lookahead: all 560 successors in one
   `vmap(apply_action)`, valued and masked-argmaxed.
-- `mcts.py` — `mctx.gumbel_muzero_policy` with the engine as `recurrent_fn`.
-  Structured as a single-tree core under a wrapper that owns all batching
-  (`vmap` over trees, then over games; the mctx batch dim stays 1 inside),
-  so after `jit` the search runs (games × trees)-wide. Two ensemble-width
-  knobs, trees = `num_worlds * num_futures`: `num_worlds` distinct
-  `sample_world` draws (belief width) × `num_futures` chance re-keyings per
-  draw (chance width — same hidden state, `state._replace(key=...)`, so only
-  in-tree dice/steals/draws differ); `action_weights` averaged over all
-  trees. Width is near-free vs `num_simulations` (a sequential scan): on an
-  RTX 5090 at B=32, 16 trees cost +66% wall-clock while 8× sims cost ~8×.
-  Evidence (2p, 200-game seat-swapped): worlds=4 beats worlds=1 head-to-head
-  54% but is unchanged vs lookahead — expected, since at 2p `sample_world`
-  only varies dev-card identities (belief width is degenerate; any 2p
-  ensemble effect is chance width); belief width's payoff should be 3–4p
-  (unmeasured, no multi-seat strength protocol yet). The **root prior is the one-step value
-  sweep**: with a uniform prior the 16 Gumbel candidates were a random subset
-  of 560 and mcts lost to lookahead 6%; the informed prior took it to 37% vs
-  lookahead and 86% vs greedy. In-tree child priors stay uniform-over-legal
-  (a per-expansion sweep would cost 560×). Frame convention: priors/values
-  belong to the node's player-to-move; `discount` is −1 when the mover
-  switches, +1 when the same player continues, 0 into terminals (absorbing);
-  leaf values are `tanh(value/value_scale)` so the heuristic's scale is
-  commensurate with the ±1 terminal reward. Exact zero-sum at 2 players; at
-  3–4 the sign-flip discount is the *paranoid* reduction (scalar backups
-  can't express max^n). **Known limitation:** search currently *subtracts*
-  value relative to its own root prior (flat across sims/candidates/scale) —
-  each in-tree child commits a single sampled dice/steal/draw outcome, so
-  deeper search plans against fixed chance samples; fixing it needs
-  chance-node / afterstate handling, not more simulations. Root-level chance
-  width doesn't rescue it either (w=1/f=16/s=32 measured 40% vs lookahead,
-  n=20): averaging trees removes variance, but each tree's *in-tree*
-  selection stays fused to its own samples. Next probe: a 2-ply expectimax
-  root sweep (top-K candidates × the 11 weighted rolls).
+- `mcts.py` — `mctx.gumbel_muzero_policy` with the engine as `recurrent_fn`;
+  after `jit` the search runs (games × trees)-wide, trees = `num_worlds`
+  (belief width) × `num_futures` (chance width: re-keyed replicas of one
+  draw). Width is near-free vs `num_simulations` (a sequential scan): 16
+  trees cost +66% wall-clock, 8× sims cost ~8× (RTX 5090, B=32). The
+  discount flips the value frame on mover switch — exact zero-sum at 2p,
+  the *paranoid* reduction at 3–4 (scalar backups can't express max^n).
+  Deviations from mctx defaults, each fixing a measured ply-2 bias: the
+  root prior is the one-step value sweep (uniform priors made Gumbel's 16
+  candidates a random subset of 560 — 6% vs lookahead); interior priors are
+  greedy's tempered tier table (uniform + mctx's deterministic interior
+  argmax made every first expansion the lowest-index legal action);
+  `ROLL_DICE` children back up the 11-roll expectation, not their one
+  sampled outcome; `rescale_values=False` (the min-max rescale amplified
+  any Q ranking to ~8 nats no matter how noisy — why `value_scale` once
+  measured flat). History of the month-long "search subtracts value" bug
+  (34–43% vs lookahead, flat across sims / candidates / scale / root
+  ensembling): at 32 sims the trees are ~2 plies; decision-level
+  decomposition (2.5k positions, picks vs the prior argmax priced by the
+  sweep) showed depth-1 selection near-transparent (2% flips) while full
+  depth flipped ~9% of decisions, 92% losing 1-ply value, concentrated
+  END_TURN → BUY_DEV/TRADE — turn-keeping actions back up a max over noisy
+  follow-ups (optimizer's curse), END_TURN a sign flip plus one sampled
+  opponent roll. The fixes above took flips 12% → 7% and mcts vs lookahead
+  37% → **57%** (114–86, n=200). Ensemble evidence (2p): worlds=4 beats
+  worlds=1 head-to-head 54% but didn't move the lookahead number — at 2p
+  `sample_world` only varies dev-card identities, so belief width is
+  degenerate there; its payoff should be 3–4p (no multi-seat protocol yet).
+  Tuning gotchas: diagnose decision-level rather than by ~20-game matches
+  (SE ±11%), and at absolute Q scale a large σ flip usually means an
+  in-tree terminal that the 1-ply regret referee misprices as a loss.
 
 ## cli.py
 
