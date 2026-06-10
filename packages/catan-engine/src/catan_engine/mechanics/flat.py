@@ -1,23 +1,11 @@
 """The flat action space: one enumerated index per concrete move.
 
-A single static enumeration of every concrete action (each vertex/edge/tile/
-resource choice plus the parameterless moves; Discard is one entry per
-resource -- one card per action), decoded back to the engine's
-``(ActionType, ActionParams)``. This is the public seam consumed by
-``catan_engine.env`` (``random_actions``, the AEC wrapper's flat ``Discrete``
-action space) and by catan-agents' policies:
-
-1. The *table* (``N_FLAT`` rows) and its decode ``flat_to_action``, plus the
-   reverse lookup ``flat_legality`` (read one ``(action_type, idx, target)``
-   action's bit out of a cached flat-legality sweep).
-2. The switch-free *flat legality sweep* ``flat_available_for`` /
-   ``flat_available_b`` and the ``type_mask_from_flat`` reduction.
-3. The per-index legality enumerations ``INDEX_MASKS`` (an
-   index-parameterized action's whole primary domain).
-
-All of it calls the per-action legality cores directly over static slices of
-the table -- never through the ``lax.switch`` dispatch in ``action.py``, which
-under ``vmap`` would evaluate every branch per entry.
+The static table (``N_FLAT`` rows; Discard is one row per resource), its
+decode ``flat_to_action``, the reverse-lookup ``flat_legality``, the
+switch-free legality sweeps, and the per-index enumerations ``INDEX_MASKS``.
+Everything calls the per-action legality cores directly over static slices of
+the table -- never through ``action.py``'s ``lax.switch``, which under
+``vmap`` would evaluate every branch per entry.
 """
 
 from __future__ import annotations

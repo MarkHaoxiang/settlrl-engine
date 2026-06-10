@@ -1,18 +1,10 @@
 """Unified action dispatch: one ``(action_type, params)`` interface.
 
-The per-action transition cores live in their topical rule modules (``dice``,
-``placement``, ``setup``, ``trade``, ``development``, ``robber``, ``turn``); the
-shared vocabulary they all use lives in ``common``. This module dispatches over
-them with ``jax.lax.switch`` (``apply_action`` / ``action_available``) so the
-whole thing stays traceable and vmappable; the heterogeneous per-action params
-are packed into one ``ActionParams`` struct and each branch unpacks what it
-needs. The *flat* enumeration of the same action space (the table, the
-switch-free legality sweep, the per-index enumerations) lives in ``flat.py``.
-
-All single-game cores are ``jax.vmap``-ed (see ``catan_engine.env``) to run a
-whole batch at once. ``ActionResult`` / ``Mask`` / ``ResultCode`` /
-``player_total_vp`` are re-exported from ``common`` for callers that import them
-from here.
+``apply_action`` / ``action_available`` dispatch over the per-action cores
+with ``jax.lax.switch`` so the whole thing stays traceable and vmappable; the
+heterogeneous per-action params are packed into one ``ActionParams`` and each
+branch unpacks what it needs. The flat enumeration of the same action space
+lives in ``flat.py``.
 """
 
 from __future__ import annotations

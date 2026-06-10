@@ -1,35 +1,17 @@
 """Card counting: what each player can legitimately know about hidden hands.
 
-An optional companion to ``BoardState`` (see ``BatchedCatanEnv(track_beliefs=
-True)``): a ``BeliefState`` carries, for every observer, proven per-type bounds
-on every player's resource hand, plus the public count of played development
-cards. Everything in it is derivable from public information, so handing it to
-an agent never leaks.
+An optional companion to ``BoardState`` (``BatchedCatanEnv(track_beliefs=
+True)``): per observer, proven per-type bounds on every player's hand plus
+the public played-dev-card tally -- everything derivable from public
+information, so handing it to an agent never leaks. Hidden in this engine's
+Catan: the *type* of a card moved by a robber steal (thief and victim see it)
+and the *identity* of held development cards; everything else is public.
 
-What is hidden in this engine's Catan: the *type* of a card moved by a robber
-steal (third parties see only that a card moved; thief and victim see it) and
-the *identity* of held development cards (buys draw face down; plays are
-public). Everything else -- production, build/trade costs, discards (cards
-returned to the face-up bank), Monopoly surrenders, hand and dev-card counts,
-the bank itself -- is public. Per-type *totals* across all hands stay public
-because every bank flow is public and steals only move cards between players.
-
-The update is diff-based: ``update_belief`` watches a ``(before, after)``
-transition plus the action that caused it, applies the exact public delta for
-flows the observer sees, and decays/widens the bounds for hidden steals. A
-final constraint-propagation pass (hand sizes, public per-type totals) tightens
-both bounds; with two players it pins the opponent's hand exactly, recovering
-"2p Catan is perfect-information up to dev-card identities" as a derived
-property rather than an assumption.
-
-``belief_view`` projects one observer's knowledge into the agent-facing
-``BeliefView``: the ``PublicState`` part of the board (the fields every seat
-sees), the observer's ``PlayerBelief`` bounds and public counts, their own
-development cards, and the unseen dev pool. The view is deliberately *not* a
-``BoardState`` -- hidden fields have no placeholders to mistake for data, so
-nothing downstream can step or evaluate it by accident. The only road back to
-a playable position is a posterior sample (see catan-agents'
-``sample_world``).
+``update_belief`` advances one game's belief across a ``(before, after)``
+transition; ``belief_view`` projects one observer's knowledge into the
+agent-facing ``BeliefView``, which is deliberately *not* a ``BoardState`` and
+not steppable -- the road back to a playable position is catan-agents'
+``sample_world``.
 """
 
 from __future__ import annotations

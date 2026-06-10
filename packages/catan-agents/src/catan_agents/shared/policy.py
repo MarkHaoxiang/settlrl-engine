@@ -1,20 +1,11 @@
 """The seat interfaces: pure decision functions over one game's view.
 
 Two protocols, split by what a seat consumes — neither sees anything the
-player wouldn't:
-
-- :class:`Policy` consumes the acting player's *partial observation* (the
-  env's dict form, meant for learned policies).
-- :class:`BeliefPolicy` consumes the engine's honest world model: a
-  :class:`~catan_engine.belief.BeliefView` (the public board fields plus
-  proven bounds on hidden hands — no ``BoardState``, so nothing hidden can
-  even be represented). Model-based agents rebuild a concrete world from it
-  by sampling (:func:`catan_agents.shared.sample.sample_world`) and search in
-  the sample.
-
-Both are valid at any player count; belief sharpness, not the API, is what
-varies with the seat count (with two players the belief pins the opponent's
-resources exactly).
+player wouldn't: :class:`Policy` reads the acting player's partial
+observation; :class:`BeliefPolicy` reads the engine's honest
+:class:`~catan_engine.belief.BeliefView` (model-based agents rebuild a
+concrete world with ``sample_world`` and search there). Both are valid at any
+player count; belief sharpness, not the API, varies with the seat count.
 """
 
 from __future__ import annotations

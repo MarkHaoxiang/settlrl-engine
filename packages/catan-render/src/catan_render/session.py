@@ -1,20 +1,10 @@
 """A single live Catan game, driven through the engine's AEC wrapper.
 
-The renderer plays one game at a time. ``GameSession`` wraps
-``catan_engine.env.aec.CatanAECEnv`` (a single-game PettingZoo-AEC env): each
-seat is configured per game as a human (hotseat when there are several) or a
-``catan-agents`` bot -- an all-bot game simply plays itself while the client
-watches. Bot seats are advanced one move at a time via
-:meth:`GameSession.bot_step`, so the frontend can pace and animate them
-(``_run_bots`` plays them out in one go for callers that don't care).
-
-The session exposes just what the server needs: the underlying engine board
-(for ``convert.board_to_model``), the legal flat-action indices for the acting
-player, a small status snapshot (phase / dice / whose turn / winner), and the
-game's chat / log -- every move is logged as it is played, chat messages are
-appended via :meth:`GameSession.add_chat`, and reset starts a fresh log. The
-full move trace is also kept, so :meth:`GameSession.record` can export the
-game as a replayable ``catan_engine.record.GameRecord`` at any point.
+``GameSession`` wraps ``CatanAECEnv``: each seat is a human (hotseat) or a
+``catan-agents`` bot; bots advance one move at a time (:meth:`bot_step`) so
+the frontend can pace and animate them. The session exposes the board, the
+acting seat's legal flat actions, a status snapshot, the chat / move log, and
+a replayable ``GameRecord`` export.
 """
 
 from __future__ import annotations
@@ -205,7 +195,11 @@ class GameSession:
     ) -> None:
         self._log.append(
             LogEntryModel(
-                id=self._log_id, kind=kind, player=player, action_type=action_type, text=text
+                id=self._log_id,
+                kind=kind,
+                player=player,
+                action_type=action_type,
+                text=text,
             )
         )
         self._log_id += 1
@@ -235,7 +229,9 @@ class GameSession:
         if not self.terminal():
             return None
         vps = np.asarray(self.env._env._vps[0])
-        return int(np.argmax(vps)) if bool((vps >= VICTORY_POINTS_TO_WIN).any()) else None
+        return (
+            int(np.argmax(vps)) if bool((vps >= VICTORY_POINTS_TO_WIN).any()) else None
+        )
 
     def status(self) -> GameStatusModel:
         """A snapshot of turn flow for the wire model."""

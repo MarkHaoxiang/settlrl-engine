@@ -1,28 +1,13 @@
 """Single-game PettingZoo-AEC wrapper around the batched engine.
 
-``CatanAECEnv`` inherits the PettingZoo `AEC API
-<https://pettingzoo.farama.org/api/aec/>`_ and drives one game by wrapping a
-``BatchedCatanEnv(batch_size=1, auto_reset=False)`` (so episodes have real
-terminal states rather than silently restarting). It is the canonical
-turn-at-a-time interface; for vectorised rollouts use ``BatchedCatanEnv``
-directly.
-
-Action representation: the AEC action space is a single flat ``Discrete`` that
-enumerates every concrete move (each vertex/edge/tile/resource choice, plus the
-parameterless actions). A flat index decodes to the engine's
-``(ActionType, ActionParams)``. Discarding is one card per action (one flat
-action per resource type): the discard prompt repeats — masked to the resources
-the discarder still holds — until the owed count reaches zero, so the full
-discard choice is expressible without enumerating whole-hand splits. Legality is
-exposed PettingZoo-style as ``observation["action_mask"]`` (a binary vector over
-the flat action set) so ``env.action_space(agent).sample(mask)`` only picks
-legal moves.
-
-The observation is partial (own hand / dev cards in full, public counts for
-opponents) -- see ``BatchedCatanEnv.observe`` -- wrapped as
-``{"observation": {...}, "action_mask": ...}``.
-
-Requires the optional ``rl`` extra (``pettingzoo``, ``gymnasium``).
+``CatanAECEnv`` drives one game via ``BatchedCatanEnv(batch_size=1,
+auto_reset=False)`` (real terminal states); for vectorised rollouts use
+``BatchedCatanEnv`` directly. The action space is one flat ``Discrete`` over
+every concrete move; legality is exposed PettingZoo-style as
+``observation["action_mask"]``, so ``action_space(agent).sample(mask)`` only
+picks legal moves. Observations wrap the batched env's partial view as
+``{"observation": {...}, "action_mask": ...}``. Requires the optional ``rl``
+extra (``pettingzoo``, ``gymnasium``).
 """
 
 from __future__ import annotations

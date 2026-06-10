@@ -2,22 +2,11 @@
 
 ``sample_world`` is the only road from a
 :class:`~catan_engine.belief.BeliefView` back to a playable ``BoardState``:
-the public fields are copied through and every hidden field is filled with a
-sample consistent with the belief — opponents' dev hands dealt from the
-unseen pool, their resource hands dealt within the proven ``[lo, hi]`` bounds
-to their public sizes against the public per-type pool, and a fresh PRNG key
-(the search samples its own dice / steals / draws instead of foreseeing the
-environment's). Model-based agents search in the sample; nothing hidden can
-reach them because nothing hidden was there to begin with.
-
-The explicit ``BoardState(...)`` construction at the bottom is deliberate: a
-new ``BoardState`` field fails to compile here until it is classified as
-public (add it to ``PublicState``) or hidden (sample it) — hidden state can't
-leak into the view layer by omission.
-
-The resource deal draws cards one at a time proportionally to the remaining
-per-type headroom — a reasonable surrogate for the exact posterior, not the
-posterior itself (it ignores *how* the bounds arose).
+public fields are copied through, every hidden field is filled with a sample
+consistent with the belief, and the PRNG key is fresh (the search samples its
+own dice / steals / draws instead of foreseeing the environment's). The
+proportional-headroom resource deal is a surrogate for the exact posterior,
+not the posterior itself.
 """
 
 from __future__ import annotations

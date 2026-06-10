@@ -1,17 +1,9 @@
 """Shared action vocabulary for the rule modules (single-game, traceable).
 
-The per-action cores live in their topical modules (``dice``, ``placement``,
-``setup``, ``trade``, ``development``, ``robber``, ``turn``); this module holds
-what they *all* need so those modules stay leaves that import only ``board.*``
-and ``common`` -- no import cycle through ``action`` (which depends on every
-core for its dispatch / flattening layer).
-
-Contents: the action-layer jaxtyping aliases and core-signature types, the
-``ActionResult`` codes (and the ``SUCCESS`` / ``INVALID`` / ``GAME_COMPLETE``
-scalars), the MAIN-phase predicates, and the resource/building *economy* helpers
-(cost vectors, affordability,
-payment, building counts, total victory points) plus ``agent_selection_single``
-(the acting player for one game).
+Holds what every per-action core needs -- result codes, phase predicates,
+economy helpers, the action-layer jaxtyping aliases -- so the topical rule
+modules stay leaves importing only ``board.*`` and ``common``, with no cycle
+through ``action``.
 """
 
 from __future__ import annotations
@@ -69,8 +61,8 @@ NoneAvail = Callable[[BoardLayout, BoardState, None], jax.Array]
 class ActionResult(IntEnum):
     """Outcome of attempting to apply an action."""
 
-    SUCCESS = 0        # Legal and applied; play continues.
-    INVALID = 1        # Not legal in the current state; board left unchanged.
+    SUCCESS = 0  # Legal and applied; play continues.
+    INVALID = 1  # Not legal in the current state; board left unchanged.
     GAME_COMPLETE = 2  # Applied and ended the game (a player reached 10 VP).
 
     def __str__(self) -> str:

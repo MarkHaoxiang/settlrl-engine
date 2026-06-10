@@ -1,13 +1,9 @@
 """Serialisable records of complete games: generate, save as JSON, and replay.
 
-A game is fully determined by its configuration (``seed``, ``n_players``,
-``number_placement`` -- all engine randomness derives from the seed) plus the
-sequence of flat actions played, so a :class:`GameRecord` stores exactly that.
-The JSON form additionally annotates every move with the action type and its
-decoded, human-readable parameters; the annotations are derived from the flat
-index on save and ignored on load (``flat`` is authoritative).
-
-Schema (version 1)::
+A game is fully determined by ``(seed, n_players, number_placement)`` plus
+the flat action trace (all engine randomness derives from the seed); the JSON
+move annotations are readable derivations, ignored on load -- ``flat`` is
+authoritative. Schema (version 1)::
 
     {
       "version": 1,
@@ -25,10 +21,9 @@ Schema (version 1)::
       ]
     }
 
-Board positions are the engine's canonical vertex/edge/tile indices (map them
-to coordinates with the host-side lookups in ``board.layout``); resources are
-named. ``dice`` records the outcome of each ``roll_dice`` move so the file
-reads as a full transcript and :func:`replay` can verify determinism.
+Positions are the engine's vertex/edge/tile indices (cube lookups live in
+``board.layout``); ``dice`` records each roll so :func:`replay` can verify
+determinism.
 """
 
 from __future__ import annotations

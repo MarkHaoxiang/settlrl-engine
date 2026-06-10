@@ -1,37 +1,13 @@
-"""RL environment entry point -- a *batched* PettingZoo-AEC-style Catan env.
+"""A *batched* PettingZoo-AEC-style Catan env.
 
-Two layers live here:
-
-1. The thin functional interface ``step`` / ``available`` -- ``jit(vmap(...))``
-   over the ``lax.switch`` dispatchers in ``action`` -- which apply one
-   ``(ActionType, ActionParams)`` action per game across a whole batch and
-   return the new ``BoardState`` plus ``(batch,)`` ``ActionResult`` codes.
-
-2. ``BatchedCatanEnv`` -- a stateful environment that wraps that core in the
-   PettingZoo `AEC API <https://pettingzoo.farama.org/api/aec/>`_, adapted to
-   run ``batch_size`` games in parallel. Catan is turn-based, so the AEC model
-   (one agent acts at a time) fits directly: the batch axis is independent
-   games and the active agent in lane ``b`` is that game's ``current_player``.
-
-Batched adaptations of the AEC surface (documented per attribute below):
-
-- ``agent_selection`` is a ``(B,)`` int array (the acting player per lane), not
-  a single agent id -- different lanes may be on different players' turns. In
-  the DISCARD phase it points at the next player who still owes cards.
-- ``rewards`` / ``terminations`` / ``truncations`` are ``(B, n_players)`` arrays
-  rather than ``{agent: value}`` dicts.
-- ``infos`` is a single dict of batched arrays (the acting agent varies per
-  lane), carrying the action mask under ``"action_mask"`` per AEC convention.
-- ``observe(agent)`` returns that player's *partial* view across all lanes
-  (own hand / dev cards in full; only public counts for opponents).
-- Terminated lanes **auto-reset**: a finished game is immediately replaced with
-  a fresh random board so the batch stays fully active for rollouts. The
-  returned observation is the reset game's; ``rewards`` / ``terminations``
-  reflect the terminal transition that just occurred.
-
-Spaces are described with the lightweight ``Discrete`` / ``Box`` descriptors
-below (the package deliberately avoids a hard ``gymnasium`` dependency); a
-caller can wrap them in real ``gymnasium`` spaces if needed.
+Two layers: the functional ``step`` / ``available`` over the action dispatch,
+and ``BatchedCatanEnv``, which adapts the `AEC model
+<https://pettingzoo.farama.org/api/aec/>`_ to ``batch_size`` parallel games --
+the batch axis is independent games, the acting agent in lane ``b`` is that
+game's ``current_player`` (the next owing discarder during DISCARD), and the
+per-agent AEC dicts become batched arrays (see the attribute docstrings).
+Terminated lanes auto-reset by default. Spaces are the lightweight
+``Discrete`` / ``Box`` descriptors below -- no gymnasium dependency.
 """
 
 from __future__ import annotations
@@ -430,14 +406,11 @@ class BatchedCatanEnv:
     def step(self, action_type: ActionTypeArray, params: ActionParams) -> None:
         """Apply one action per lane to its acting player (AEC ``step``).
 
-        ``action_type`` is a ``(B,)`` int array of :class:`ActionType` codes and
-        ``params`` an :class:`ActionParams` with batched leaves. Terminated lanes
-        auto-reset; the resulting reward / termination reflect the transition
-        that just happened, while the next observation is the reset game's.
-
-        DISCARD is one card per step: ``idx`` is the resource the acting
-        discarder gives up one card of; the action repeats until every owed
-        count reaches zero, then the phase advances to MOVE_ROBBER.
+        Terminated lanes auto-reset; the resulting reward / termination reflect
+        the transition that just happened, while the next observation is the
+        reset game's. DISCARD is one card per step: ``idx`` is the resource the
+        acting discarder gives up one card of; the action repeats until every
+        owed count reaches zero, then the phase advances to MOVE_ROBBER.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
         before = self._state
@@ -652,13 +625,10 @@ class BatchedCatanEnv:
     def rollout(self, key: KeyScalar, n_steps: int) -> RewardArray:
         """Advance every lane ``n_steps`` steps under uniformly-random legal play.
 
-        One fused jit dispatch (a ``lax.scan``) instead of ``n_steps`` round
-        trips through :meth:`random_actions` + :meth:`step` -- the trajectory is
-        identical to that loop for the same ``key``. Afterwards the env reflects
-        the final step (``rewards`` / ``terminations`` / ``infos`` / beliefs).
-        Returns the ``(B, n_players)`` reward summed over the window (under
-        ``"sparse"`` reward: each player's win count). Compiles once per
-        distinct ``n_steps``.
+        The trajectory is identical to a :meth:`random_actions` + :meth:`step`
+        loop for the same ``key``; afterwards the env reflects the final step.
+        Returns the reward summed over the window (under ``"sparse"`` reward:
+        each player's win count). Compiles once per distinct ``n_steps``.
         """
         (
             self._layout,

@@ -1,17 +1,9 @@
 """Convert a ``catan_engine`` board into the renderer's wire model.
 
-The engine stores a board as a ``(BoardLayout, BoardState)`` pair of batched JAX
-arrays; the renderer needs a small, JSON-friendly :class:`BoardModel`. This
-module bridges the two so the FastAPI server can serve a board produced by the
-engine.
-
-Geometry note: the engine assigns tile / vertex / edge indices implicitly by the
-order it generates them in ``catan_engine.board.layout._generate_mappings``. The
-engine exposes authoritative host-side index <-> cube lookups
-(``vertex_cube`` / ``edge_cubes`` / ``tile_cube`` and the ``PORT_V`` map), so we
-build the renderer's coordinate tables directly from those rather than
-re-deriving the geometry. The asserts below pin our tables to the engine's
-published counts.
+Bridges the engine's batched ``(BoardLayout, BoardState)`` arrays to the
+JSON-friendly :class:`BoardModel`. The coordinate tables are built from the
+engine's authoritative host-side cube lookups rather than re-deriving the
+geometry; the asserts below pin them to the engine's published counts.
 """
 
 from typing import Literal
@@ -57,7 +49,9 @@ Cube = tuple[int, int, int]
 # indexes positionally (here and in ``catan_render.actions``); this is also the
 # order ``models.ResourceCounts`` / ``PortModel`` declare their fields in.
 _RESOURCE_NAMES: tuple[PortResource, ...] = tuple(
-    t.name.lower() for t in Tile if t is not Tile.DESERT  # type: ignore[misc]
+    t.name.lower()  # type: ignore[misc]
+    for t in Tile
+    if t is not Tile.DESERT
 )
 
 # Dev-card hand ordering, by the ``DevCard`` enum (matches ``DevCardCounts``
@@ -72,7 +66,8 @@ VERTEX_COORDS: tuple[Cube, ...] = tuple(vertex_cube(i) for i in range(N_VERTICES
 # Edge index -> the two endpoint vertex indices (resolved back through the same
 # cube coords the renderer uses for vertices).
 EDGE_VERTICES: tuple[tuple[int, int], ...] = tuple(
-    tuple(vertex_index(c) for c in edge_cubes(e)) for e in range(N_EDGES)  # type: ignore[misc]
+    tuple(vertex_index(c) for c in edge_cubes(e))  # type: ignore[misc]
+    for e in range(N_EDGES)
 )
 
 # Tile index -> centre cube coord; ``TILE_COORDS`` is its axial (q, r) projection
@@ -104,18 +99,8 @@ def _cube(coord: Cube) -> CubeModel:
 
 
 def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
-    """Render one game from a (possibly batched) engine board.
-
-    Converts both the static layout (tiles) and the mutable state (settlements,
-    cities, roads, robber) for game ``batch_index`` (default 0).
-
-    Args:
-        board: The engine ``(BoardLayout, BoardState)`` pair.
-        batch_index: Which game in the batch to convert.
-
-    Returns:
-        A :class:`BoardModel` ready to serialise to JSON.
-    """
+    """Render game ``batch_index`` of a (possibly batched) engine board:
+    the static layout plus the mutable occupancy/robber state."""
     layout, state = board
 
     # -- Tiles (static layout) ---------------------------------------------
@@ -158,7 +143,9 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
         if owner == 0:
             continue
         roads.append(
-            RoadModel(a=_cube(VERTEX_COORDS[v1]), b=_cube(VERTEX_COORDS[v2]), player=owner - 1)
+            RoadModel(
+                a=_cube(VERTEX_COORDS[v1]), b=_cube(VERTEX_COORDS[v2]), player=owner - 1
+            )
         )
 
     robber_q, robber_r = TILE_COORDS[int(state.robber[batch_index])]
