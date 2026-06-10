@@ -14,7 +14,7 @@ Both kinds work at any player count. `POLICIES` maps every shipped agent by name
 - `random` — uniform over the legal actions.
 - `greedy` — scripted priorities (city > settlement > dev card > road), pip-weighted placement and robber moves.
 - `lookahead` — one-step lookahead: applies every legal action to a sampled world and picks the successor the value function scores best.
-- `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator, the value function at the leaves, and the one-step value sweep as its root prior.
+- `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator, the value function at the leaves, and the one-step value sweep as its root prior; searches an ensemble of sampled worlds and averages their action weights.
 
 The search agents act on a sampled world consistent with everything the seat knows: stochastic outcomes are their own samples (not the environment's), opponents' hidden cards are dealt from the player's honest belief — they never act on information the seat could not know. With two players the belief pins the opponent's resources exactly, so only dev-card identities are ever sampled.
 

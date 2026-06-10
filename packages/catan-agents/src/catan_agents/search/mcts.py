@@ -43,6 +43,8 @@ def _winner(state: BoardState) -> jax.Array:
 def make_mcts(
     value: ValueFunction,
     *,
+    num_worlds: int = 4,
+    num_futures: int = 1,
     num_simulations: int = 32,
     max_num_considered_actions: int = 16,
     value_scale: float = 20.0,
@@ -50,22 +52,24 @@ def make_mcts(
 ) -> BeliefPolicy:
     """Gumbel-MuZero search using the engine itself as the dynamics model.
 
-    The root prior is a heuristic *policy*: every legal action's one-step
-    successor is scored with ``value`` and the scores (divided by
-    ``prior_scale``) become the root logits, so the Gumbel candidate set
-    starts from the value function's ranking rather than a uniform sample of
-    the 560-action space — the search refines lookahead instead of replacing
-    it. Each simulation expands one node: the chosen flat action is applied
-    with :func:`apply_action`, the child's legal moves become its (uniform)
+    The root view is determinized ``num_worlds`` times with
+    :func:`~catan_agents.shared.sample.sample_world` (belief width), and each
+    draw is searched under ``num_futures`` different chance keys (chance
+    width: same hidden state, different in-tree dice / steals / draws). The
+    improved-policy ``action_weights`` of all ``num_worlds * num_futures``
+    trees are averaged before the final masked argmax, marginalizing both
+    kinds of uncertainty over the ensemble. Within one tree the root prior is a
+    heuristic *policy*: every legal action's one-step successor is scored
+    with ``value`` and the scores (divided by ``prior_scale``) become the
+    root logits, so the Gumbel candidate set starts from the value
+    function's ranking rather than a uniform sample of the 560-action space.
+    Each simulation expands one node: the chosen flat action is applied with
+    :func:`apply_action`, the child's legal moves become its (uniform)
     prior, and ``tanh(value / value_scale)`` evaluated for the child's
     player-to-move is its leaf value. Transitions discount by -1 when the
     player-to-move switches and a win backs up as a +/-1 reward into an
     absorbing terminal — exact zero-sum framing for two players, the
     *paranoid* reduction (every opponent maximizes against the mover) beyond.
-    The root view is made concrete with one
-    :func:`~catan_agents.shared.sample.sample_world` draw, so the search runs
-    in a world consistent with what the seat knows and samples its own dice /
-    steals / dev draws.
     """
 
     def leaf_value(layout: BoardLayout, state: BoardState, p: jax.Array) -> jax.Array:
@@ -101,22 +105,19 @@ def make_mcts(
         )
         return out, (layout, next_state)
 
-    def policy(
+    def search_world(
         key: jax.Array,
         layout: BoardLayout,
-        view: BeliefView,
+        state: BoardState,
         player: IntScalar,
         mask: FlatMask,
-    ) -> FlatAction:
-        k_world, k_search = jax.random.split(key)
-        state = sample_world(k_world, view, player)
+    ) -> jax.Array:
+        """Improved-policy weights from one search of a single concrete world."""
         # Heuristic root prior: the one-step value sweep over all legal moves.
         successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
             layout, state, _ROW_TYPE, _ROW_PARAMS, mask
         )
-        root_vals = jax.vmap(value, in_axes=(None, 0, None))(
-            layout, successors, player
-        )
+        root_vals = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
         batched: Any = jax.tree.map(lambda x: x[None], (layout, state))
         root = mctx.RootFnOutput(  # type: ignore[call-arg]  # chex dataclass
             prior_logits=jnp.where(mask, root_vals / prior_scale, _ILLEGAL)[None],
@@ -125,14 +126,34 @@ def make_mcts(
         )
         out = mctx.gumbel_muzero_policy(
             params=None,
-            rng_key=k_search,
+            rng_key=key,
             root=root,
             recurrent_fn=recurrent_fn,
             num_simulations=num_simulations,
             invalid_actions=(~mask)[None],
             max_num_considered_actions=max_num_considered_actions,
         )
-        return cast(jax.Array, out.action[0])
+        return cast(jax.Array, out.action_weights[0])
+
+    def policy(
+        key: jax.Array,
+        layout: BoardLayout,
+        view: BeliefView,
+        player: IntScalar,
+        mask: FlatMask,
+    ) -> FlatAction:
+        k_world, k_future, k_search = jax.random.split(key, 3)
+        states = jax.vmap(sample_world, in_axes=(0, None, None))(
+            jax.random.split(k_world, num_worlds), view, player
+        )
+        n_trees = num_worlds * num_futures
+        states = jax.tree.map(lambda x: jnp.repeat(x, num_futures, axis=0), states)
+        # Re-keying each replica is what makes its in-tree chance draws differ.
+        states = states._replace(key=jax.random.split(k_future, n_trees))
+        weights = jax.vmap(search_world, in_axes=(0, None, 0, None, None))(
+            jax.random.split(k_search, n_trees), layout, states, player, mask
+        )
+        return jnp.argmax(jnp.where(mask, weights.mean(axis=0), -jnp.inf))
 
     return policy
 
