@@ -40,3 +40,8 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["pettingzoo.*", "gymnasium.*"]
 ignore_missing_imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# jaxtyping shape strings in annotations ("*batch ...") trip the forward-ref rules.
+"packages/catan-engine/src/catan_engine/env/batched.py" = ["F722", "F821"]
+"packages/catan-engine/src/catan_engine/mechanics/flat.py" = ["F722", "F821"]

@@ -13,11 +13,18 @@ from catan_engine.mechanics.action import (
     ActionParams,
     ActionResult,
     ActionType,
-    _flat_available_b,
 )
+from catan_engine.mechanics.flat import flat_available_b
 from catan_engine.mechanics.placement import build_road_step
 from catan_engine.board import make_board, replicate, set_phase
-from catan_engine.env import N_ACTION_TYPES, BatchedCatanEnv, Box, Discrete
+from catan_engine.env import (
+    N_ACTION_TYPES,
+    BatchedCatanEnv,
+    Box,
+    Discrete,
+    Infos,
+    Observation,
+)
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import GamePhase
 from tests.mechanics.actions.fixtures import road_fixture
@@ -137,7 +144,9 @@ class TestBatchedCatanEnv:
         e = BatchedCatanEnv(batch_size=1, seed=6)
         # Give every player a distinct hand.
         res = e._state.player_resources.at[0].set(
-            jnp.array([[1, 0, 0, 0, 0], [0, 2, 0, 0, 0], [0, 0, 3, 0, 0], [0, 0, 0, 4, 0]])
+            jnp.array(
+                [[1, 0, 0, 0, 0], [0, 2, 0, 0, 0], [0, 0, 3, 0, 0], [0, 0, 0, 4, 0]]
+            )
         )
         e._state = e._state._replace(player_resources=res)
         obs0 = e.observe(0)
@@ -210,6 +219,13 @@ class TestBatchedCatanEnv:
         assert isinstance(ospace["vertex_owner"], Box)
         assert ospace["vertex_owner"].shape == (54,)
 
+    def test_space_and_info_keys_match_typed_dicts(self) -> None:
+        # mypy ties observe() to the Observation TypedDict; this pins the
+        # space descriptor (and Infos) to the same key sets so they can't drift.
+        e = BatchedCatanEnv(batch_size=1, seed=11)
+        assert set(e.observation_space()) == set(Observation.__annotations__)
+        assert set(e.infos) == set(Infos.__annotations__)
+
 
 class TestDiscardOneCard:
     """DISCARD is one card of one resource per step: the discarder chooses freely
@@ -227,7 +243,7 @@ class TestDiscardOneCard:
         )
         # The step gate reads the cached flat legality, so refresh it after the
         # direct state surgery above.
-        e._avail = _flat_available_b(e._layout, e._state)
+        e._avail = flat_available_b(e._layout, e._state)
         return e
 
     @staticmethod

@@ -7,7 +7,7 @@ hidden per-step device->host sync shows up as time in ``jax...array._value``,
 something a coarse wall-clock timer would silently fold into ``step``).
 
 A step has two parts: ``random_actions(key)`` (sample a legal action per lane --
-this enumerates the whole flat action table, ``_N_FLAT`` ~= 556 moves, against
+this enumerates the whole flat action table, ``N_FLAT`` ~= 556 moves, against
 every lane) and ``step(action_type, params)`` (apply it). cProfile attributes
 time to whichever is actually expensive.
 
@@ -34,7 +34,7 @@ from time import perf_counter
 
 import jax
 
-from catan_engine.env.batched import _N_FLAT, BatchedCatanEnv
+from catan_engine.env.batched import N_FLAT, BatchedCatanEnv
 
 
 def _rollout(env: BatchedCatanEnv, key: jax.Array, steps: int) -> jax.Array:
@@ -66,7 +66,7 @@ def run_cprofile(batch_size: int, steps: int, seed: int, top: int) -> None:
     pr.disable()
 
     print(
-        f"\nbatch_size={batch_size}  steps={steps}  _N_FLAT={_N_FLAT}\n"
+        f"\nbatch_size={batch_size}  steps={steps}  N_FLAT={N_FLAT}\n"
         f"wall {wall:.3f}s  ->  {wall / steps * 1e3:.1f} ms/step, "
         f"{batch_size * steps / wall:,.0f} env-steps/s\n"
     )

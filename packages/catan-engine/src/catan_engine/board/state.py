@@ -63,6 +63,8 @@ EdgeRoadVec = UInt8[Array, f"edges={N_EDGES}"]
 VertexOwnerVec = UInt8[Array, f"vertices={N_VERTICES}"]
 VertexTypeVec = UInt8[Array, f"vertices={N_VERTICES}"]
 PlayerMaskVec = Bool[Array, "players"]
+PlayerU8Vec = UInt8[Array, "players"]  # one game's row of a (batch, players) array
+U8Scalar = UInt8[Array, ""]  # a single uint8 state field (one game's GameScalarArray)
 IntScalar = Int[Array, ""]  # a single int index / count (player, vertex, roll, ...)
 BoolScalar = Bool[Array, ""]  # a single legality / flag
 KeyScalar = Key[Array, ""]  # a single PRNG key

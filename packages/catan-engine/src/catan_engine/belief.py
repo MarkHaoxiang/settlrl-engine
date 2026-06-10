@@ -44,13 +44,20 @@ from catan_engine.board.dev_cards import (
     DEV_CARD_COUNTS,
     N_DEV_CARD_TYPES,
     DevCard,
+    DevCardDeckArray,
     DevDeckVec,
 )
-from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.board.resources import (
+    N_PLAYERS,
+    N_RESOURCES,
+    PlayerResourcesVec,
+)
 from catan_engine.board.state import (
     BoardState,
     EdgeRoadVec,
     IntScalar,
+    PlayerU8Vec,
+    U8Scalar,
     VertexOwnerVec,
     VertexTypeVec,
     to_u8,
@@ -67,18 +74,12 @@ __all__ = [
     "update_belief",
 ]
 
-# Batched aliases (BeliefState fields), following the BoardState convention of a
-# leading variable `batch` axis; the functions below are single-game (the env
-# vmaps them), so they annotate with the batch-free *Vec aliases.
+# Belief-specific aliases; everything board-shaped reuses the canonical aliases
+# from board.state / board.resources / board.dev_cards. The functions below are
+# single-game (the env vmaps them), so they annotate with the batch-free forms.
 ResBoundsArray = UInt8[Array, f"batch observers players resources={N_RESOURCES}"]
-DevPlayedArray = UInt8[Array, f"batch dev_card_types={N_DEV_CARD_TYPES}"]
-ResBoundsVec = UInt8[Array, f"observers players resources={N_RESOURCES}"]
-DevPlayedVec = UInt8[Array, f"dev_card_types={N_DEV_CARD_TYPES}"]
-PlayerResBoundsVec = UInt8[Array, f"players resources={N_RESOURCES}"]
 PlayerCountVec = Int[Array, "players"]
 ResTotalVec = Int[Array, f"resources={N_RESOURCES}"]
-PlayerU8Vec = UInt8[Array, "players"]
-U8Scalar = UInt8[Array, ""]
 
 _DEV_COUNTS = jnp.asarray(DEV_CARD_COUNTS, dtype=jnp.int32)
 
@@ -97,7 +98,7 @@ class BeliefState(NamedTuple):
 
     res_lo: ResBoundsArray
     res_hi: ResBoundsArray
-    dev_played: DevPlayedArray
+    dev_played: DevCardDeckArray
 
 
 class PlayerBelief(NamedTuple):
@@ -109,8 +110,8 @@ class PlayerBelief(NamedTuple):
     Single game; batch by vmapping.
     """
 
-    res_lo: PlayerResBoundsVec
-    res_hi: PlayerResBoundsVec
+    res_lo: PlayerResourcesVec
+    res_hi: PlayerResourcesVec
     hand_size: PlayerCountVec
     dev_count: PlayerCountVec
     res_total: ResTotalVec
@@ -276,25 +277,7 @@ def belief_view(
     own_dev = state.dev_hand[observer]
     own_turn = observer == state.current_player.astype(jnp.int32)
     return BeliefView(
-        public=PublicState(
-            vertex_owner=state.vertex_owner,
-            vertex_type=state.vertex_type,
-            edge_road=state.edge_road,
-            robber=state.robber,
-            victory_points=state.victory_points,
-            knights_played=state.knights_played,
-            phase=state.phase,
-            current_player=state.current_player,
-            setup_index=state.setup_index,
-            dice_roll=state.dice_roll,
-            has_rolled=state.has_rolled,
-            dev_played=state.dev_played,
-            free_roads=state.free_roads,
-            pending_discard=state.pending_discard,
-            longest_road_owner=state.longest_road_owner,
-            largest_army_owner=state.largest_army_owner,
-            longest_road_len=state.longest_road_len,
-        ),
+        public=PublicState(**{f: getattr(state, f) for f in PublicState._fields}),
         belief=PlayerBelief(
             res_lo=belief.res_lo[observer],
             res_hi=belief.res_hi[observer],

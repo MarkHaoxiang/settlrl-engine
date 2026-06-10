@@ -17,7 +17,8 @@ PlayerDevCardHandArray = UInt8[
     Array, f"batch players dev_card_types={N_DEV_CARD_TYPES}"
 ]
 PlayerPlayedKnightsArray = UInt8[Array, "batch players"]
-# Single-game (un-batched) view of the deck, used by the rule modules.
+# Single-game (un-batched) per-type counts (deck, hand row, played tally, pool);
+# DevCardDeckArray is its batched form.
 DevDeckVec = UInt8[Array, f"dev_card_types={N_DEV_CARD_TYPES}"]
 
 

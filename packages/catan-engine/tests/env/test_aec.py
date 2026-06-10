@@ -8,8 +8,13 @@ import numpy as np
 from pettingzoo.test import api_test
 
 from catan_engine.env.aec import CatanAECEnv, env
-from catan_engine.mechanics.action import _ATYPE, _IDX, ActionType, _flat_available_b
+from catan_engine.mechanics.action import ActionType
+from catan_engine.mechanics.flat import FLAT_ATYPE, FLAT_IDX, flat_available_b
 from catan_engine.board.state import GamePhase
+
+# Host-side copies of the flat table columns, for set/where assertions.
+_ATYPE = np.asarray(FLAT_ATYPE)
+_IDX = np.asarray(FLAT_IDX)
 
 
 class TestCatanAEC:
@@ -56,8 +61,7 @@ class TestCatanAEC:
 
 # Flat index of "discard one card of resource r", from the static table.
 _DISCARD_ROWS = {
-    int(_IDX[f]): int(f)
-    for f in np.where(_ATYPE == int(ActionType.DISCARD))[0]
+    int(_IDX[f]): int(f) for f in np.where(_ATYPE == int(ActionType.DISCARD))[0]
 }
 
 
@@ -78,7 +82,7 @@ class TestDiscardOneCard:
         )
         # The action mask and step gate read the cached flat legality; refresh
         # it after the direct state surgery above.
-        e._env._avail = _flat_available_b(e._env._layout, e._env._state)
+        e._env._avail = flat_available_b(e._env._layout, e._env._state)
         e.agent_selection = e._acting_agent()
 
     def test_mask_offers_held_resources_only(self) -> None:

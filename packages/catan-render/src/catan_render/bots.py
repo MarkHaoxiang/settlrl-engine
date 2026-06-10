@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 from catan_agents import POLICIES, AgentSpec
 from catan_agents.shared.policy import BeliefPolicy, Policy
-from catan_engine.env import BatchedCatanEnv
+from catan_engine.env import BatchedCatanEnv, Observation
 
 __all__ = ["POLICIES", "AgentSpec", "bot_act", "supported_counts"]
 
@@ -34,7 +34,7 @@ def bot_act(kind: str, key: jax.Array, benv: BatchedCatanEnv, seat: int) -> int:
         _BOT_ACTS[kind] = jax.jit(spec.policy)
     mask = benv.flat_mask()[0]
     if spec.observes == "observation":
-        obs = {k: v[0] for k, v in benv.observe(seat).items()}
+        obs = cast(Observation, jax.tree.map(lambda x: x[0], benv.observe(seat)))
         return int(cast(Policy, _BOT_ACTS[kind])(key, obs, mask))
     layout = jax.tree.map(lambda x: x[0], benv.board[0])
     view = jax.tree.map(lambda x: x[0], benv.belief_view(seat))

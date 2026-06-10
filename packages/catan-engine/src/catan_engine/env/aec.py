@@ -34,20 +34,13 @@ import jax.numpy as jnp
 import numpy as np
 from pettingzoo.utils.env import AECEnv
 
-from catan_engine.mechanics.action import (
-    _ATYPE,
-    _IDX,
-    _N_FLAT,
-    _TARGET,
-    ActionParams,
-)
-from catan_engine.env.batched import BatchedCatanEnv
+from catan_engine.env.batched import BatchedCatanEnv, N_FLAT, flat_to_action
 from catan_engine.board.resources import N_PLAYERS
 
 __all__ = ["CatanAECEnv", "env"]
 
 # The flat action table (index -> (ActionType, ActionParams)) lives in
-# ``mechanics/action.py`` -- shared with ``BatchedCatanEnv.random_actions``.
+# ``mechanics/flat.py`` -- shared with ``BatchedCatanEnv.random_actions``.
 
 
 class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any base)
@@ -94,7 +87,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         # Spaces are built once and returned by identity (PettingZoo requires the
         # same object each call so space seeding works).
         self.action_spaces: dict[str, spaces.Space[Any]] = {
-            a: spaces.Discrete(_N_FLAT) for a in self.possible_agents
+            a: spaces.Discrete(N_FLAT) for a in self.possible_agents
         }
         obs_space = self._build_observation_space()
         self.observation_spaces: dict[str, spaces.Space[Any]] = {
@@ -119,7 +112,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
         return spaces.Dict(
             {
                 "observation": spaces.Dict(inner),
-                "action_mask": spaces.Box(0, 1, (_N_FLAT,), dtype=np.int8),
+                "action_mask": spaces.Box(0, 1, (N_FLAT,), dtype=np.int8),
             }
         )
 
@@ -157,9 +150,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
 
         reward = np.asarray(self._env.rewards[0])  # (n_players,)
         done = bool(np.asarray(self._env.terminations[0, 0]))
-        self.rewards = {
-            a: float(reward[i]) for i, a in enumerate(self.possible_agents)
-        }
+        self.rewards = {a: float(reward[i]) for i, a in enumerate(self.possible_agents)}
         if done:
             self.terminations = {a: True for a in self.agents}
         self.agent_selection = self._acting_agent()
@@ -170,7 +161,7 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
 
     def observe(self, agent: str) -> dict[str, Any]:
         obs = self._env.observe(self._index[agent])
-        inner = {key: np.asarray(value[0]) for key, value in obs.items()}
+        inner = {key: np.asarray(value)[0] for key, value in obs.items()}
         return {"observation": inner, "action_mask": self._action_mask()}
 
     def render(self) -> str | None:
@@ -193,14 +184,11 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
 
     def _action_mask(self) -> np.ndarray:
         """Binary legality vector over the flat action set for the acting player."""
-        return np.asarray(self._env._avail[0]).astype(np.int8)
+        return np.asarray(self._env.flat_mask()[0]).astype(np.int8)
 
     def _apply(self, flat: int) -> None:
-        params = ActionParams(
-            idx=jnp.asarray([int(_IDX[flat])], dtype=jnp.int32),
-            target=jnp.asarray([int(_TARGET[flat])], dtype=jnp.int32),
-        )
-        self._env.step(jnp.asarray([int(_ATYPE[flat])], dtype=jnp.int32), params)
+        at, params = flat_to_action(jnp.asarray([flat], dtype=jnp.int32))
+        self._env.step(at, params)
 
 
 def env(
