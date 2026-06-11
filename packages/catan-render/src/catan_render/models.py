@@ -84,14 +84,18 @@ class DevCardCounts(BaseModel):
 
 
 class PlayerModel(BaseModel):
-    """Summary stats for one (0-indexed) player, shown in the corner panels."""
+    """Summary stats for one (0-indexed) player.
+
+    The per-type breakdowns are private: the server nulls them out for every
+    seat the requester doesn't own (counts stay public, as at a real table).
+    """
 
     player: int
     resource_cards: int  # total resource cards in hand
     dev_cards: int  # total unplayed development cards in hand
     victory_points: int  # building victory points (settlement=1, city=2)
-    resources: ResourceCounts  # per-type breakdown of resource_cards
-    dev_card_types: DevCardCounts  # per-type breakdown of dev_cards
+    resources: ResourceCounts | None = None
+    dev_card_types: DevCardCounts | None = None
 
 
 class BankModel(BaseModel):
@@ -229,14 +233,21 @@ class BeliefModel(BaseModel):
 
 
 class GameModel(BaseModel):
-    """Everything the Play view needs after a move: board + status + legal moves."""
+    """One requester's snapshot: board + status + their legal moves.
 
+    Views are per-seat: ``your_turn`` / ``actions`` / unredacted hands /
+    ``belief`` follow the seats the request's tokens prove.
+    """
+
+    id: str
     board: BoardModel
     status: GameStatusModel
     actions: list[ActionModel] = []
-    # Set on POST /api/game/bot responses: the move that endpoint just played.
+    # Set on bot-step responses: the move that endpoint just played.
     bot_move: BotMoveModel | None = None
     # The game's chat / log (moves, chat messages, the win), oldest first.
     log: list[LogEntryModel] = []
-    # Card counting for the hand-panel seat; None with no human seats.
+    # Card counting for the requester's hand seat; None for spectators.
     belief: BeliefModel | None = None
+    # Which seats are claimed (join offers the rest).
+    seats_claimed: list[int] = []

@@ -38,8 +38,9 @@ export interface Player {
   resourceCards: number;
   devCards: number;
   victoryPoints: number;
-  resources: Record<ResourceKind, number>;
-  devCardTypes: Record<DevCardKind, number>;
+  // Per-type breakdowns are private: null for seats this client doesn't own.
+  resources: Record<ResourceKind, number> | null;
+  devCardTypes: Record<DevCardKind, number> | null;
 }
 
 // Cards left in the supply: resource stacks plus the development deck.
@@ -107,8 +108,8 @@ interface PlayerWire {
   resource_cards: number;
   dev_cards: number;
   victory_points: number;
-  resources: Record<ResourceKind, number>;
-  dev_card_types: Record<DevCardKind, number>;
+  resources: Record<ResourceKind, number> | null;
+  dev_card_types: Record<DevCardKind, number> | null;
 }
 
 export interface BoardWire {

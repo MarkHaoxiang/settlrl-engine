@@ -36,11 +36,15 @@ A menu lets you choose between two modes, each at its own URL:
   advances, and the record can be saved back to a file. The server replays the record through
   the engine once and serves the board after every move.
 
-The game is driven through `catan-engine`'s single-game PettingZoo-AEC env
-(`catan_engine.env.aec`): the server holds one live game and applies your moves. Bot seats
-are stepped one move per request (`POST /api/game/bot`), so the frontend paces them with a
-short delay and animates each move (pieces pop in, the robber slides, and the bar shows what
-each bot just played).
+Each game is driven through `catan-engine`'s single-game PettingZoo-AEC env
+(`catan_engine.env.aec`); the server holds many live games at once, addressed by id.
+Claiming a human seat (creating or joining a game) issues a bearer token, and every request
+proves its seats via the `X-Seat-Tokens` header: snapshots are per-seat views — your own
+hand arrives in full, everyone else's only as public counts, and the legal-move list only
+ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
+link, and opening it claims a free human seat (or spectates when none is left). Bot seats
+are stepped one move per request (`POST /api/games/{id}/bot`), so clients pace them with a
+short delay and animate each move.
 
 ## Requirements
 
@@ -97,21 +101,21 @@ uv run pytest packages/catan-render/tests
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/board` | Returns the current board as JSON |
-| `GET /api/game` | Live game snapshot: board + turn status + your legal moves + the game log |
-| `POST /api/game/action` | Apply your move `{ "flat": <action index> }`; returns the new snapshot. `409` if the move is illegal |
-| `POST /api/game/bot` | Play one due bot move; the snapshot's `bot_move` says who played what (null when it's a human's turn) |
-| `POST /api/game/chat` | Append a chat message to the game log `{ "text": <string>, "player": <seat> \| null }` |
-| `GET /api/game/record` | Download the game as a `catan_engine.record` JSON transcript — self-contained and replayable (`winner` is null while the game is running) |
-| `POST /api/replay` | Load a game record (the `GET /api/game/record` JSON) for replay; returns the opening state. `422` if it's malformed or fails replay validation |
-| `POST /api/replay/from-game` | Load the live game (as played so far) for replay |
-| `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board): board + the moves played up to that point. `404` until a replay is loaded |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "none" }` — returns the game id and the creator's seat tokens |
+| `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
+| `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
+| `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
+| `POST /api/games/{id}/bot` | Play one due bot move; the snapshot's `bot_move` says who played what (null when none was due) |
+| `POST /api/games/{id}/chat` | Append a chat message `{ "text", "player"?: <owned seat> }` (no seat: spectator) |
+| `GET /api/games/{id}/record` | The finished game as a replayable `catan_engine.record` transcript (`409` while running: a record reconstructs hidden hands) |
+| `POST /api/games/{id}/replay` | Load a finished game for replay (`409` while running) |
+| `POST /api/replay` | Load a game record (the record JSON) for replay; returns the opening state. `422` if malformed |
+| `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board). `404` until a replay is loaded |
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
-| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports and its configurable parameters (`{counts, params: {name: {type, default}}}`) |
-| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral", "seats": [...] }` — each seat `"human"`, a bot kind, or a configured bot `{ "kind", "params" }` with knob overrides from `GET /api/bots` (one entry per seat; default: you + 3 random bots) |
+| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports and its configurable parameters |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
-Each legal move in `GET /api/game` is a decoded action descriptor carrying its `flat` index
+Each legal move in `GET /api/games/{id}` is a decoded action descriptor carrying its `flat` index
 (post it back to apply it), a `type`, a human `label`, and — depending on the type — the board
 target (`vertex` / `edge` / `tile` + `victim`) or resources involved, in the same cube/axial
 coordinates the board uses.
@@ -135,7 +139,8 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/catan-render/
 ├── src/catan_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
-│   ├── server.py        # FastAPI app: /api/board + /api/game* + /api/replay* endpoints
+│   ├── server.py        # FastAPI app: /api/games* + /api/replay* endpoints (per-seat views)
+│   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
 │   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots.py          # catan-agents registry adapted to the single game (bot_act)
@@ -152,7 +157,8 @@ packages/catan-render/
         ├── lib/game.ts       # Live-game API client (/api/game*)
         ├── lib/replay.ts     # Replay API client (/api/replay*)
         ├── lib/actionMeta.ts # Action display metadata: icons, labels, costs, confirm phrasing
-        ├── lib/useGame.ts    # Hook driving the live game (act / reset)
+        ├── lib/useGame.ts    # Hook driving one live game (act / chat / bot pacing)
+        ├── lib/seats.ts      # Seat tokens this browser holds, per game (localStorage)
         ├── lib/viewport.ts   # useTableViewport: pan / zoom / rotate (mouse, touch, keyboard)
         ├── lib/theme.ts      # Light / dark theme switching (persisted)
         ├── lib/ui.ts         # Shared panel / button / highlight styles (theme variables)

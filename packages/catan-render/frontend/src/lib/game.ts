@@ -1,13 +1,19 @@
-// Live-game API client (/api/game*): snapshot types + the three calls.
+// Live-game API client (/api/games*): snapshot types + the calls.
 //
-// A snapshot is the server's GameModel — board + turn status + the human's
-// legal moves, each decoded into a GameAction carrying its flat engine index
-// (post it back to apply the move) and whatever geometry / resource choice it
-// targets.
+// A snapshot is the server's GameModel as one requester sees it — board +
+// turn status + their legal moves (each a GameAction carrying its flat engine
+// index) — scoped by the seat tokens sent with every request: your_turn,
+// actions, unredacted hands, and belief all follow the seats you can prove.
 
 import { api } from "./api";
 import { adaptBoard, type Board, type BoardWire, type ResourceKind } from "./boardData";
 import type { Cube, CubeEdge, Hex } from "./hex";
+import type { SeatTokens } from "./seats";
+
+const seatHeaders = (tokens: SeatTokens): Record<string, string> => {
+  const values = Object.values(tokens);
+  return values.length ? { "X-Seat-Tokens": values.join(",") } : {};
+};
 
 export interface GameAction {
   flat: number;
@@ -81,21 +87,25 @@ export interface Belief {
 }
 
 export interface GameSnapshot {
+  id: string;
   board: Board;
   status: GameStatus;
   actions: GameAction[];
   bot_move: BotMove | null;
   log: LogEntry[];
   belief: Belief | null;
+  seats_claimed: number[];
 }
 
 interface GameWire {
+  id: string;
   board: BoardWire;
   status: GameStatus;
   actions: GameAction[];
   bot_move: BotMove | null;
   log: LogEntry[];
   belief: Belief | null;
+  seats_claimed: number[];
 }
 
 const adaptGame = (wire: GameWire): GameSnapshot => ({
@@ -103,32 +113,48 @@ const adaptGame = (wire: GameWire): GameSnapshot => ({
   board: adaptBoard(wire.board),
 });
 
-export async function fetchGame(): Promise<GameSnapshot> {
-  return adaptGame(await api<GameWire>("/api/game"));
+export async function fetchGame(gameId: string, tokens: SeatTokens): Promise<GameSnapshot> {
+  return adaptGame(await api<GameWire>(`/api/games/${gameId}`, { headers: seatHeaders(tokens) }));
 }
 
-export async function postAction(flat: number): Promise<GameSnapshot> {
+export async function postAction(
+  gameId: string,
+  tokens: SeatTokens,
+  flat: number
+): Promise<GameSnapshot> {
   return adaptGame(
-    await api<GameWire>("/api/game/action", {
+    await api<GameWire>(`/api/games/${gameId}/action`, {
       method: "POST",
       body: JSON.stringify({ flat }),
+      headers: seatHeaders(tokens),
     })
   );
 }
 
 // Step one due bot move; the snapshot's bot_move says what was played (null
 // when no bot move was due).
-export async function postBotStep(): Promise<GameSnapshot> {
-  return adaptGame(await api<GameWire>("/api/game/bot", { method: "POST" }));
+export async function postBotStep(gameId: string, tokens: SeatTokens): Promise<GameSnapshot> {
+  return adaptGame(
+    await api<GameWire>(`/api/games/${gameId}/bot`, {
+      method: "POST",
+      headers: seatHeaders(tokens),
+    })
+  );
 }
 
-// Append a chat message to the game log (player: the seat it belongs to;
-// null for a spectator).
-export async function postChat(text: string, player: number | null): Promise<GameSnapshot> {
+// Append a chat message to the game log (player: an owned seat it belongs
+// to; null for a spectator).
+export async function postChat(
+  gameId: string,
+  tokens: SeatTokens,
+  text: string,
+  player: number | null
+): Promise<GameSnapshot> {
   return adaptGame(
-    await api<GameWire>("/api/game/chat", {
+    await api<GameWire>(`/api/games/${gameId}/chat`, {
       method: "POST",
       body: JSON.stringify({ text, player }),
+      headers: seatHeaders(tokens),
     })
   );
 }
@@ -158,21 +184,39 @@ export interface NewGameConfig {
   seats: SeatConfig[];
 }
 
-export async function postReset(config: NewGameConfig): Promise<GameSnapshot> {
-  return adaptGame(
-    await api<GameWire>("/api/game/reset", {
-      method: "POST",
-      body: JSON.stringify({
-        seed: config.seed,
-        n_players: config.nPlayers,
-        number_placement: config.numberPlacement,
-        // Plain kind strings unless a seat carries knob overrides.
-        seats: config.seats.map((s) =>
-          s.params && Object.keys(s.params).length > 0 ? { kind: s.kind, params: s.params } : s.kind
-        ),
-      }),
-    })
-  );
+// A freshly created game: its id plus the creator's seat tokens (every human
+// seat is claimed for the hotseat default).
+export interface CreatedGame {
+  id: string;
+  seats: string[];
+  tokens: SeatTokens;
+}
+
+export async function createGame(config: NewGameConfig): Promise<CreatedGame> {
+  return api<CreatedGame>("/api/games", {
+    method: "POST",
+    body: JSON.stringify({
+      seed: config.seed,
+      n_players: config.nPlayers,
+      number_placement: config.numberPlacement,
+      // Plain kind strings unless a seat carries knob overrides.
+      seats: config.seats.map((s) =>
+        s.params && Object.keys(s.params).length > 0 ? { kind: s.kind, params: s.params } : s.kind
+      ),
+      claim: "all",
+    }),
+  });
+}
+
+// Claim a human seat in an existing game (a specific one, or the first free).
+export async function joinGame(
+  gameId: string,
+  seat?: number
+): Promise<{ id: string; seat: number; token: string }> {
+  return api(`/api/games/${gameId}/join`, {
+    method: "POST",
+    body: JSON.stringify(seat == null ? {} : { seat }),
+  });
 }
 
 // One knob of a bot kind, as described by GET /api/bots.

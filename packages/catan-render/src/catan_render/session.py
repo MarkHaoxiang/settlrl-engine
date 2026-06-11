@@ -159,16 +159,18 @@ class GameSession:
         mask = np.asarray(self.env.observe(self.env.agent_selection)["action_mask"])
         return np.flatnonzero(mask)
 
-    def belief(self) -> BeliefModel | None:
-        """Card counting for the hand-panel seat (the acting human, falling
-        back to the first human), or None with no human seats. The observer's
-        own row is omitted; everything served is publicly derivable."""
-        acting = self.acting_seat()
-        observer = (
-            acting
-            if self.seats[acting] == HUMAN
-            else next((i for i, s in enumerate(self.seats) if s == HUMAN), None)
-        )
+    def belief(self, observer: int | None = None) -> BeliefModel | None:
+        """Card counting from ``observer``'s perspective (default: the acting
+        human, falling back to the first human; None with no human seats). The
+        observer's own row is omitted; everything served is publicly
+        derivable."""
+        if observer is None:
+            acting = self.acting_seat()
+            observer = (
+                acting
+                if self.seats[acting] == HUMAN
+                else next((i for i, s in enumerate(self.seats) if s == HUMAN), None)
+            )
         if observer is None:
             return None
         beliefs = self.env._env.beliefs

@@ -122,7 +122,7 @@ export default function TradePopover({
             <TradeChip
               key={r}
               r={r}
-              annotation={`${me.resources[r]}`}
+              annotation={`${me.resources?.[r] ?? 0}`}
               selected={give === r}
               disabled={!givable.has(r)}
               onClick={() => setGive(give === r ? null : r)}

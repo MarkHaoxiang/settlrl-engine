@@ -32,9 +32,9 @@ export async function loadReplay(doc: unknown): Promise<ReplayState> {
   );
 }
 
-// Load the live game (as played so far) for replay.
-export async function loadReplayFromGame(): Promise<ReplayState> {
-  return adapt(await api<ReplayWire>("/api/replay/from-game", { method: "POST" }));
+// Load a finished game for replay (409 while it is still running).
+export async function loadReplayFromGame(gameId: string): Promise<ReplayState> {
+  return adapt(await api<ReplayWire>(`/api/games/${gameId}/replay`, { method: "POST" }));
 }
 
 export async function fetchReplayState(move: number): Promise<ReplayState> {

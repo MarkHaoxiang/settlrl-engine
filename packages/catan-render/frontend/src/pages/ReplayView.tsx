@@ -10,6 +10,7 @@ import {
   loadReplayFromGame,
   type ReplayState,
 } from "../lib/replay";
+import { lastGameId } from "../lib/seats";
 import { HIGHLIGHT, buttonStyle, panelStyle } from "../lib/ui";
 
 const PLAY_INTERVAL_MS = 600;
@@ -64,7 +65,11 @@ function LoadButtons({
       <button
         style={style}
         title="Replay the live game as played so far"
-        onClick={() => loadReplayFromGame().then(onLoad, (e: unknown) => onError(String(e)))}
+        onClick={() => {
+          const last = lastGameId();
+          if (!last) onError("no recent game on this browser");
+          else loadReplayFromGame(last).then(onLoad, (e: unknown) => onError(String(e)));
+        }}
       >
         {small ? "🎮" : "🎮 Use current game"}
       </button>

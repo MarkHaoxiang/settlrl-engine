@@ -140,18 +140,21 @@ export default function HelpView() {
 
         <Section title="Seats & turns">
           <span>
-            Each seat is a human or a bot, chosen in the New game dialog. With several humans the
-            game is hotseat: the hand panel follows whichever human is acting. While bots play, the
-            bar shows who's thinking and a chip with each move as it lands; with no human seats the
-            game simply plays itself. Some moves are forced out of turn — a 7 can make everyone
-            discard — so watch the status line.
+            Each seat is a human or a bot, chosen in the New game dialog. Creating a game claims
+            every human seat on this screen (hotseat); the 🔗 button copies an invite link, and
+            opening it claims a free human seat instead — or spectates when none is left. Hands
+            are private on the server: you only ever receive your own cards. While bots play, the
+            bar shows who's thinking and a chip with each move as it lands; with no human seats
+            the game simply plays itself. Some moves are forced out of turn — a 7 can make
+            everyone discard — so watch the status line.
           </span>
         </Section>
 
         <Section title="Replays">
           <span>
-            The Replay view steps through a recorded game. Load a saved record file (💾 saves one;
-            so does <code>GET /api/game/record</code>) or pull in the live game as played so far,
+            The Replay view steps through a recorded game. Load a saved record file (💾 saves
+            one) or pull in your last finished game (records only export once a game is over —
+            replaying one reconstructs hidden hands),
             then scrub with the slider, step move by move, or press play — the log fills in as the
             game advances.
           </span>

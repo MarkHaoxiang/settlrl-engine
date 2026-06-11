@@ -126,7 +126,7 @@ export default function Hand({
         return (
           <Chip
             key={r}
-            count={player.resources[r]}
+            count={player.resources?.[r] ?? 0}
             label={canDiscard ? `${RESOURCE_LABELS[r]} — click to discard one` : RESOURCE_LABELS[r]}
             // The board tiles' motif, so chips match the terrain they come from.
             icon={
@@ -146,7 +146,7 @@ export default function Hand({
         return (
           <Chip
             key={d.key}
-            count={player.devCardTypes[d.key]}
+            count={player.devCardTypes?.[d.key] ?? 0}
             label={canPlay ? `${d.label} — click to play` : d.label}
             icon={<span style={{ fontSize: 17, opacity: 0.8 }}>{d.icon}</span>}
             fill={DEV_CARD_BACK.fill}

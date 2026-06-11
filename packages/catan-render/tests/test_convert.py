@@ -76,6 +76,8 @@ def test_player_resource_and_dev_breakdown() -> None:
     p0 = model.players[0]
 
     # Per-resource breakdown in enum order: sheep=1, wheat=2, wood=3, brick=4, ore=5.
+    # (board_to_model always fills the breakdowns; the server redacts per seat.)
+    assert p0.resources is not None and p0.dev_card_types is not None
     expected_res = dict(zip(_RESOURCE_NAMES, [1, 2, 3, 4, 5], strict=True))
     res = p0.resources.model_dump()
     assert {k: res[k] for k in _RESOURCE_NAMES} == expected_res

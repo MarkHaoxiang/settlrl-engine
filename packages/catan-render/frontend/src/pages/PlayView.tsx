@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import BoardView, {
   type BoardInteraction,
   type BoardTargetPoint,
@@ -13,7 +14,8 @@ import TradePopover from "../components/TradePopover";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
-import type { GameAction } from "../lib/game";
+import { createGame, joinGame, type GameAction, type NewGameConfig } from "../lib/game";
+import { rememberGame, saveTokens, tokensFor, type SeatTokens } from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
 import { ACCENT, DIVIDER, buttonStyle, overlayMsgStyle, panelStyle, smallButtonStyle } from "../lib/ui";
@@ -43,7 +45,43 @@ const PHASE_LABEL: Record<string, string> = {
 };
 
 export default function PlayView() {
-  const { snapshot, error, busy, act, reset, chat } = useGame();
+  const { id: gameId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  // The seats this browser owns in this game (multiplayer identity).
+  const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
+  const [joinFailed, setJoinFailed] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  // One join request at a time: the token effect above re-fires this one
+  // before the first claim resolves, and a double-join would grab two seats.
+  const joining = useRef(false);
+  useEffect(() => {
+    setTokens(gameId ? tokensFor(gameId) : {});
+    setJoinFailed(false);
+    joining.current = false;
+    if (gameId) rememberGame(gameId);
+  }, [gameId]);
+  // Deep-linked with no claim: take the first free human seat, else spectate.
+  useEffect(() => {
+    if (!gameId || joinFailed || joining.current || Object.keys(tokens).length > 0) return;
+    joining.current = true;
+    joinGame(gameId).then(
+      (j) => {
+        saveTokens(gameId, { [j.seat]: j.token });
+        joining.current = false;
+        setTokens(tokensFor(gameId));
+      },
+      () => {
+        joining.current = false;
+        setJoinFailed(true);
+      }
+    );
+  }, [gameId, tokens, joinFailed]);
+
+  const { snapshot, error, busy, act, chat } = useGame(gameId ?? null, tokens);
+  const mySeats = useMemo(
+    () => Object.keys(tokens).map(Number).sort((a, b) => a - b),
+    [tokens]
+  );
   // The chooser anchored to a clicked board target.
   const [popup, setPopup] = useState<{ actions: GameAction[]; x: number; y: number } | null>(null);
   // The bottom-panel resource chooser (monopoly / year of plenty / trade).
@@ -52,9 +90,23 @@ export default function PlayView() {
   const [knightArming, setKnightArming] = useState(false);
   // The trade offer being composed, anchored at the partner's hand pile.
   const [tradeWith, setTradeWith] = useState<{ partner: number; x: number; y: number } | null>(null);
-  // Whether the new-game configuration dialog is open (shown on entry, and
-  // reopened by the New game button).
-  const [configuring, setConfiguring] = useState(true);
+  // Whether the new-game configuration dialog is open (shown on entry
+  // without a game, and reopened by the New game button).
+  const [configuring, setConfiguring] = useState(!gameId);
+
+  // Creating a game claims every human seat (hotseat); invitees re-claim
+  // theirs via the invite link (auto-join above).
+  const start = async (config: NewGameConfig) => {
+    setConfiguring(false);
+    try {
+      const created = await createGame(config);
+      saveTokens(created.id, created.tokens);
+      rememberGame(created.id);
+      navigate(`/play/${created.id}`);
+    } catch (e) {
+      setCreateError(`Could not create the game: ${String(e)}`);
+    }
+  };
 
   const actions = snapshot?.actions ?? [];
 
@@ -109,22 +161,31 @@ export default function PlayView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, actions, knightArming]);
 
+  if (!gameId)
+    return (
+      <div style={{ width: "100vw", height: "100vh" }}>
+        {createError && <div style={overlayMsgStyle}>{createError}</div>}
+        {configuring && (
+          <NewGameDialog onStart={(c) => void start(c)} onClose={() => navigate("/")} />
+        )}
+      </div>
+    );
   if (error) return <div style={overlayMsgStyle}>{error}</div>;
   if (!snapshot) return <div style={overlayMsgStyle}>Loading game…</div>;
 
   const { status, board } = snapshot;
-  // Hotseat: the hand panel follows whichever human seat is acting (falling
-  // back to the first human while bots play out or at game over). With no
-  // human seats at all the game is a spectated bot match: no hand panel.
-  const seats = status.seats;
-  const soloHuman = seats.filter((s) => s === "human").length === 1;
-  const handSeat = seats[status.acting_player] === "human" ? status.acting_player : seats.indexOf("human");
+  // The hand panel follows whichever owned seat is acting (falling back to
+  // this client's first seat). Owning no seats means spectating: no hand.
+  const handSeat = mySeats.includes(status.acting_player)
+    ? status.acting_player
+    : (mySeats[0] ?? -1);
+  const soloSeat = mySeats.length === 1;
   const me = handSeat >= 0 ? board.players[handSeat] : null;
   const winnerLabel =
     status.winner == null
       ? ""
-      : seats[status.winner] === "human"
-        ? soloHuman
+      : mySeats.includes(status.winner)
+        ? soloSeat
           ? "You win! 🎉"
           : `${playerName(status.winner)} wins! 🎉`
         : `${playerName(status.winner)} wins`;
@@ -164,10 +225,11 @@ export default function PlayView() {
   };
 
   const canAfford = (cost: ResourceKind[]): boolean => {
-    if (!me) return false;
+    if (!me?.resources) return false;
     const need: Partial<Record<ResourceKind, number>> = {};
     for (const r of cost) need[r] = (need[r] ?? 0) + 1;
-    return (Object.entries(need) as [ResourceKind, number][]).every(([r, n]) => me.resources[r] >= n);
+    const hand = me.resources;
+    return (Object.entries(need) as [ResourceKind, number][]).every(([r, n]) => hand[r] >= n);
   };
 
   // Road Building's free roads arrive as ordinary build_road actions; when the
@@ -202,11 +264,11 @@ export default function PlayView() {
   };
 
   // The status line doubles as the prompt for what to click.
-  const turnLabel = soloHuman ? "Your turn" : `${playerName(status.acting_player)}'s turn`;
+  const turnLabel = soloSeat && status.your_turn ? "Your turn" : `${playerName(status.acting_player)}'s turn`;
   const hint = status.terminal
     ? "Game over"
     : !status.your_turn
-      ? `${playerName(status.acting_player)} is thinking…`
+      ? `${mySeats.length === 0 ? "Spectating — " : ""}${playerName(status.acting_player)} is thinking…`
       : knightArming
         ? `${turnLabel} — click a tile for the robber`
         : (
@@ -237,6 +299,13 @@ export default function PlayView() {
           }}
         />
         <TopBar mode="Play">
+          <button
+            style={smallButtonStyle}
+            title="Copy the invite link (others join free human seats)"
+            onClick={() => void navigator.clipboard.writeText(window.location.href)}
+          >
+            🔗
+          </button>
           <button style={smallButtonStyle} onClick={() => setConfiguring(true)}>
             New game
           </button>
@@ -321,7 +390,7 @@ export default function PlayView() {
             {me && (
               <Hand
                 player={me}
-                you={soloHuman}
+                you={soloSeat}
                 discardable={discardable}
                 onDiscard={onDiscard}
                 playableDev={playableDev}
@@ -399,13 +468,7 @@ export default function PlayView() {
       />
 
       {configuring && (
-        <NewGameDialog
-          onStart={(config) => {
-            setConfiguring(false);
-            reset(config);
-          }}
-          onClose={() => setConfiguring(false)}
-        />
+        <NewGameDialog onStart={(c) => void start(c)} onClose={() => setConfiguring(false)} />
       )}
     </div>
   );

@@ -9,6 +9,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Menu />} />
       <Route path="/play" element={<PlayView />} />
+      <Route path="/play/:id" element={<PlayView />} />
       <Route path="/help" element={<HelpView />} />
       <Route path="/replay" element={<ReplayView />} />
       <Route path="*" element={<Navigate to="/" replace />} />
