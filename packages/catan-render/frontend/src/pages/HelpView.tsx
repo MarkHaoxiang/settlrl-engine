@@ -15,7 +15,7 @@ const BOARD_HELP: [string, string][] = [
   ["build_road", "A dash on an edge: click it to build a road there."],
   ["move_robber", "A 7 was rolled: click a highlighted tile, then pick who to rob."],
   ["maritime_trade", "Click the bank pile you want: trade at 4:1, or better via your ports."],
-  ["propose_trade", "Click an opponent's hand pile: pick what you give, then what you want."],
+  ["propose_trade", "Click an opponent's hand pile: a two-sided composer shows your counts and what card counting proves about theirs — pick a card from each side and propose."],
 ];
 const HAND_HELP: [string, string][] = [
   ["play_knight", "Click the card, then a tile for the robber (and who to rob)."],

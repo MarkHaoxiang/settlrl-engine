@@ -242,12 +242,15 @@ export default function PlayView() {
           </button>
         </TopBar>
 
-        {tradeWith && (
+        {tradeWith && me && (
           <TradePopover
             partner={tradeWith.partner}
             actions={proposals.filter((a) => a.partner === tradeWith.partner)}
+            me={me}
+            bounds={snapshot.belief?.players.find((b) => b.player === tradeWith.partner)}
             x={tradeWith.x}
             y={tradeWith.y}
+            disabled={busy}
             onPick={(flat) => {
               setTradeWith(null);
               act(flat);
