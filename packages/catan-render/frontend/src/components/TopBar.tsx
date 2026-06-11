@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { panelStyle } from "../lib/ui";
+import { LINK, panelStyle } from "../lib/ui";
 
 // The top bar shared by the game views: a help link on the left (tucked under
 // the top-left player panel), and a back-to-menu link with the current mode
@@ -21,7 +21,7 @@ export default function TopBar({ mode }: { mode: string }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "#9ec5e8",
+          color: LINK,
           textDecoration: "none",
           fontSize: 16,
           fontWeight: 700,
@@ -44,7 +44,7 @@ export default function TopBar({ mode }: { mode: string }) {
           zIndex: 10,
         }}
       >
-        <Link to="/" style={{ color: "#9ec5e8", textDecoration: "none", fontSize: 14 }}>
+        <Link to="/" style={{ color: LINK, textDecoration: "none", fontSize: 14 }}>
           ← Menu
         </Link>
         <span style={{ fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: 1 }}>

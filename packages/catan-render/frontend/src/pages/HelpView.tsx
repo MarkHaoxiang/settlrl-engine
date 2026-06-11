@@ -4,24 +4,43 @@
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { ACTION_META } from "../lib/actionMeta";
-import { panelStyle } from "../lib/ui";
+import { LINK, panelStyle } from "../lib/ui";
 
-// What each control-bar icon does, keyed by action type (display order).
-const ACTION_HELP: [string, string][] = [
+// What each control does, keyed by action type and grouped by where it lives:
+// directly on the board, on a hand chip, or on the bottom bar (display order).
+const BOARD_HELP: [string, string][] = [
+  ["build_settlement", "A faint house on a corner: click it to build a settlement there."],
+  ["build_city", "A dashed outline over your settlement: click it to upgrade to a city."],
+  ["build_road", "A faint dashed edge: click it to build a road there."],
+  ["move_robber", "A 7 was rolled: click a highlighted tile, then pick who to rob."],
+];
+const HAND_HELP: [string, string][] = [
+  ["play_knight", "Click the card, then a tile for the robber (and who to rob)."],
+  ["play_road_building", "Click the card, then place two free roads on the board."],
+  ["play_monopoly", "Click the card and pick a resource to take from everyone."],
+  ["play_year_of_plenty", "Click the card and pick two resources from the bank."],
+  ["discard", "A 7 costs you half your hand: click resource cards to discard them."],
+];
+const BAR_HELP: [string, string][] = [
   ["roll_dice", "Roll the dice to start your turn."],
-  ["build_settlement", "Build a settlement — click a highlighted vertex."],
-  ["build_city", "Upgrade a settlement to a city — click a highlighted vertex."],
-  ["build_road", "Build a road — click a highlighted edge."],
   ["buy_development_card", "Buy a development card."],
-  ["play_knight", "Play a knight: move the robber — click a highlighted tile."],
-  ["move_robber", "A 7 was rolled: move the robber — click a highlighted tile."],
-  ["play_road_building", "Play Road Building: place two free roads."],
-  ["play_monopoly", "Play Monopoly: pick a resource to take from everyone."],
-  ["play_year_of_plenty", "Play Year of Plenty: pick two resources from the bank."],
   ["maritime_trade", "Trade with the bank (4:1, or better via your ports)."],
-  ["discard", "Half your hand is lost to a 7: pick the cards to discard."],
   ["end_turn", "End your turn."],
 ];
+
+function ActionTable({ rows }: { rows: [string, string][] }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: "6px 12px", alignItems: "baseline" }}>
+      {rows.map(([type, text]) => (
+        <Fragment key={type}>
+          <span style={{ fontSize: 18 }}>{ACTION_META[type].icon}</span>
+          <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{ACTION_META[type].label}</span>
+          <span style={{ opacity: 0.8 }}>{text}</span>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -63,33 +82,35 @@ export default function HelpView() {
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
           <span style={{ fontSize: 20, fontWeight: 700 }}>How to play</span>
-          <Link to="/" style={{ color: "#9ec5e8", fontSize: 13, marginLeft: "auto" }}>
+          <Link to="/" style={{ color: LINK, fontSize: 13, marginLeft: "auto" }}>
             ← Menu
           </Link>
         </div>
 
         <Section title="The board">
           <span>
-            Scroll or pinch to zoom, and drag to pan. When a move targets the board, the legal
-            spots light up — click a highlighted vertex (settlement / city), edge (road), or
-            tile (robber) to play there. Click the button again to put it away.
+            Scroll or pinch to zoom, and drag to pan. Everything you can build right now is
+            ghosted on the board in your colour (so the ghosts also show what you can afford) —
+            click one and confirm in the popup, which lists the build cost. Esc or a click
+            elsewhere cancels.
           </span>
+          <ActionTable rows={BOARD_HELP} />
         </Section>
 
-        <Section title="Actions">
+        <Section title="Your hand">
           <span style={{ opacity: 0.8 }}>
-            The bar at the bottom offers one button per move you can currently make
-            (hover one for its name):
+            The chips in the bottom panel are the acting human's hand: resources and development
+            cards by type (the corner panels track every player's card counts and victory
+            points). Glowing chips are playable — click one:
           </span>
-          <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: "6px 12px", alignItems: "baseline" }}>
-            {ACTION_HELP.map(([type, text]) => (
-              <Fragment key={type}>
-                <span style={{ fontSize: 18 }}>{ACTION_META[type].icon}</span>
-                <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{ACTION_META[type].label}</span>
-                <span style={{ opacity: 0.8 }}>{text}</span>
-              </Fragment>
-            ))}
-          </div>
+          <ActionTable rows={HAND_HELP} />
+        </Section>
+
+        <Section title="The bar">
+          <span style={{ opacity: 0.8 }}>
+            The bottom bar keeps the turn-flow moves, one button per move currently available:
+          </span>
+          <ActionTable rows={BAR_HELP} />
         </Section>
 
         <Section title="Seats & turns">
@@ -99,13 +120,6 @@ export default function HelpView() {
             bar shows who's thinking and a chip with each move as it lands; with no human seats the
             game simply plays itself. Some moves are forced out of turn — a 7 can make everyone
             discard — so watch the status line.
-          </span>
-        </Section>
-
-        <Section title="Your hand">
-          <span>
-            The bottom-left of the bar is the acting human's hand: resources and development cards
-            by type. The corner panels track every player's card counts and victory points.
           </span>
         </Section>
 
