@@ -47,5 +47,11 @@ export const overlayMsgStyle: React.CSSProperties = {
   fontFamily: FONT,
 };
 
+export const smallButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  padding: "5px 12px",
+  fontSize: 12,
+};
+
 // Hairline separators inside panels.
 export const DIVIDER = "var(--divider)";

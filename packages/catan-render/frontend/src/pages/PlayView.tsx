@@ -2,68 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 import BoardView, { type BoardInteraction, type BoardTargetPoint } from "../components/BoardView";
 import BoardPopover from "../components/BoardPopover";
 import ChatPanel from "../components/ChatPanel";
+import ChoicePopover from "../components/ChoicePopover";
+import Hand, { DEV_PLAY_TYPE } from "../components/Hand";
 import NewGameDialog from "../components/NewGameDialog";
-import TerrainIcon from "../components/TerrainIcon";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import type { GameAction } from "../lib/game";
-import {
-  PLAYER_COLORS,
-  PLAYER_STROKES,
-  TERRAIN_FILL,
-  TERRAIN_STROKE,
-  playerName,
-  type DevCardKind,
-  type Player,
-  type ResourceKind,
-} from "../lib/boardData";
+import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
-import {
-  ACCENT,
-  ACCENT_GLOW,
-  DIVIDER,
-  buttonStyle,
-  overlayMsgStyle,
-  panelStyle,
-} from "../lib/ui";
-
-const RESOURCES: { key: ResourceKind; label: string }[] = [
-  { key: "wood", label: "Wood" },
-  { key: "brick", label: "Brick" },
-  { key: "sheep", label: "Sheep" },
-  { key: "wheat", label: "Wheat" },
-  { key: "ore", label: "Ore" },
-];
-
-const DEV_CARDS: { key: DevCardKind; label: string; icon: string }[] = [
-  { key: "knight", label: "Knight", icon: "⚔️" },
-  { key: "road_building", label: "Road building", icon: "🚧" },
-  { key: "year_of_plenty", label: "Year of plenty", icon: "🎁" },
-  { key: "monopoly", label: "Monopoly", icon: "🎩" },
-  { key: "victory_point", label: "Victory point", icon: "⭐" },
-];
-
-const DEV_FILL = "#5B4B8A";
-const DEV_STROKE = "#3C3160";
+import { ACCENT, DIVIDER, buttonStyle, overlayMsgStyle, panelStyle, smallButtonStyle } from "../lib/ui";
 
 // Board-targeted action types, by the target geometry they carry. These are
-// always ghosted directly on the board — no arming step.
+// always marked directly on the board — no arming step.
 const VERTEX_KIND: Record<string, "settlement" | "city"> = {
   setup_settlement: "settlement",
   build_settlement: "settlement",
   build_city: "city",
 };
 const EDGE_TYPES = new Set(["setup_road", "build_road"]);
-
-// The play action behind each dev-card hand chip (victory points are never
-// played, so they have no entry).
-const DEV_PLAY_TYPE: Partial<Record<DevCardKind, string>> = {
-  knight: "play_knight",
-  road_building: "play_road_building",
-  year_of_plenty: "play_year_of_plenty",
-  monopoly: "play_monopoly",
-};
 
 // Turn-flow actions that stay on the bottom bar (display order).
 const BAR_TYPES = [
@@ -85,221 +42,6 @@ const PHASE_LABEL: Record<string, string> = {
   trade_response: "Trade",
   game_over: "Game over",
 };
-
-const smallButton: React.CSSProperties = { ...buttonStyle, padding: "5px 12px", fontSize: 12 };
-
-const stealText = (victim: number | null) =>
-  victim != null && victim >= 0 ? ` — steal from ${playerName(victim)}` : "";
-
-// What a board-popover button offers, phrased as the move it confirms.
-function popupLabel(a: GameAction): string {
-  switch (a.type) {
-    case "setup_settlement":
-      return "Place settlement";
-    case "build_settlement":
-      return "Build settlement";
-    case "build_city":
-      return "Upgrade to city";
-    case "setup_road":
-      return "Place road";
-    case "build_road":
-      return "Build road";
-    case "move_robber":
-      return `Move robber${stealText(a.victim)}`;
-    case "play_knight":
-      return `Play knight${stealText(a.victim)}`;
-    default:
-      return a.label;
-  }
-}
-
-// A build price as a row of mini resource chips (board-popover buttons).
-function CostRow({ cost }: { cost: ResourceKind[] }) {
-  return (
-    <span style={{ display: "inline-flex", gap: 2, marginLeft: 4 }}>
-      {cost.map((r, i) => (
-        <span
-          key={i}
-          title={r}
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: 4,
-            background: TERRAIN_FILL[r],
-            border: `1px solid ${TERRAIN_STROKE[r]}`,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <svg width={12} height={12} viewBox="-11 -11 22 22">
-            <TerrainIcon terrain={r} cx={0} cy={0} scale={0.9} />
-          </svg>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-// A hand chip: the count over a faded background icon (the card's name is the
-// hover tooltip). Clickable chips glow; `selected` marks an armed card (the
-// knight while choosing its robber tile).
-function Chip({
-  count,
-  label,
-  icon,
-  fill,
-  stroke,
-  onClick,
-  selected,
-}: {
-  count: number;
-  label: string;
-  icon: React.ReactNode;
-  fill: string;
-  stroke: string;
-  onClick?: () => void;
-  selected?: boolean;
-}) {
-  const empty = count === 0;
-  return (
-    <div
-      title={label}
-      onClick={onClick}
-      style={{
-        position: "relative",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 40,
-        height: 34,
-        borderRadius: 8,
-        background: fill,
-        border: `2px solid ${stroke}`,
-        opacity: empty ? 0.4 : 1,
-        ...(onClick ? { cursor: "pointer", boxShadow: ACCENT_GLOW } : {}),
-        ...(selected ? { outline: `2px solid ${ACCENT}`, outlineOffset: 1 } : {}),
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {icon}
-      </span>
-      <span
-        style={{
-          position: "relative",
-          fontSize: 16,
-          fontWeight: 800,
-          lineHeight: 1,
-          color: "#1a1a1a",
-          // A halo in the chip colour keeps the digit legible over the icon.
-          textShadow: `0 0 4px ${fill}, 0 0 4px ${fill}, 0 0 3px ${fill}`,
-        }}
-      >
-        {count}
-      </span>
-    </div>
-  );
-}
-
-// The acting human's hand: resources + dev cards by type, on a single row.
-// Chips double as controls: dev cards in `playableDev` play on click, and
-// resources in `discardable` discard one on click.
-function Hand({
-  player,
-  you,
-  discardable,
-  onDiscard,
-  playableDev,
-  armedDev,
-  onDev,
-}: {
-  player: Player;
-  you: boolean;
-  discardable?: Set<ResourceKind>;
-  onDiscard?: (r: ResourceKind) => void;
-  playableDev?: Set<DevCardKind>;
-  armedDev?: DevCardKind | null;
-  onDev?: (k: DevCardKind) => void;
-}) {
-  const color = PLAYER_COLORS[player.player] ?? "#888";
-  const stroke = PLAYER_STROKES[player.player] ?? "#444";
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 8 }}>
-        <span style={{ width: 14, height: 14, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }} />
-        <span style={{ fontWeight: 700, fontSize: 13 }}>
-          {playerName(player.player)}
-          {you ? " (you)" : ""}
-        </span>
-      </div>
-      {RESOURCES.map((r) => {
-        const canDiscard = discardable?.has(r.key) ?? false;
-        return (
-          <Chip
-            key={r.key}
-            count={player.resources[r.key]}
-            label={canDiscard ? `${r.label} — click to discard one` : r.label}
-            // The board tiles' motif, so chips match the terrain they come from.
-            icon={
-              <svg width={28} height={28} viewBox="-11 -11 22 22">
-                <TerrainIcon terrain={r.key} cx={0} cy={0} scale={1.1} opacity={0.9} />
-              </svg>
-            }
-            fill={TERRAIN_FILL[r.key]}
-            stroke={TERRAIN_STROKE[r.key]}
-            onClick={canDiscard ? () => onDiscard?.(r.key) : undefined}
-          />
-        );
-      })}
-      <span style={{ width: 1, alignSelf: "stretch", background: DIVIDER, margin: "0 8px" }} />
-      {DEV_CARDS.map((d) => {
-        const canPlay = playableDev?.has(d.key) ?? false;
-        return (
-          <Chip
-            key={d.key}
-            count={player.devCardTypes[d.key]}
-            label={canPlay ? `${d.label} — click to play` : d.label}
-            icon={<span style={{ fontSize: 17, opacity: 0.8 }}>{d.icon}</span>}
-            fill={DEV_FILL}
-            stroke={DEV_STROKE}
-            onClick={canPlay ? () => onDev?.(d.key) : undefined}
-            selected={armedDev === d.key}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// A popover listing concrete actions to pick from (resource choices: monopoly,
-// year of plenty, maritime trade).
-function ChoicePopover({ actions, onPick, onClose }: { actions: GameAction[]; onPick: (flat: number) => void; onClose: () => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: `1px solid ${DIVIDER}`, paddingTop: 10 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>Choose</span>
-        <button style={{ ...smallButton, padding: "2px 10px" }} onClick={onClose}>
-          Cancel
-        </button>
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", maxWidth: 640 }}>
-        {actions.map((a) => (
-          <button key={a.flat} style={buttonStyle} onClick={() => onPick(a.flat)}>
-            {a.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default function PlayView() {
   const { snapshot, error, busy, act, reset, chat } = useGame();
@@ -338,9 +80,9 @@ export default function PlayView() {
   const byType = (type: string) => actions.filter((a) => a.type === type);
   const availableTypes = useMemo(() => new Set(actions.map((a) => a.type)), [actions]);
 
-  // Ghost targets for every board-placeable action, all live at once. Knight
-  // tiles only appear while the knight chip is armed — always-on they'd flood
-  // the board any turn the card is in hand.
+  // Board targets for every placeable action, all live at once. Knight tiles
+  // only appear while the knight chip is armed — always-on they'd flood the
+  // board any turn the card is in hand.
   const interaction: BoardInteraction | undefined = useMemo(() => {
     if (!snapshot || !snapshot.status.your_turn || snapshot.status.terminal) return undefined;
     const open = (list: GameAction[], at: BoardTargetPoint) => {
@@ -415,7 +157,7 @@ export default function PlayView() {
   const onBarButton = (type: string) => {
     const matches = byType(type);
     if (matches.length === 1) act(matches[0].flat);
-    else setChoice(matches); // maritime trade: pick the exchange
+    else setChoice(matches); // trades: pick the exchange
   };
 
   const canAfford = (cost: ResourceKind[]): boolean => {
@@ -474,32 +216,24 @@ export default function PlayView() {
           }}
         />
         <TopBar mode="Play">
-          <button style={smallButton} onClick={() => setConfiguring(true)}>
+          <button style={smallButtonStyle} onClick={() => setConfiguring(true)}>
             New game
           </button>
         </TopBar>
 
         {popup && (
-          <BoardPopover x={popup.x} y={popup.y} onClose={() => setPopup(null)}>
-            {popup.actions.map((a) => {
-              const cost = costFor(a);
-              return (
-                <button
-                  key={a.flat}
-                  disabled={busy}
-                  style={{ ...buttonStyle, display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}
-                  onClick={() => {
-                    setPopup(null);
-                    act(a.flat);
-                  }}
-                >
-                  <span style={{ fontSize: 16 }}>{actionMeta(a.type).icon}</span>
-                  <span>{popupLabel(a)}</span>
-                  {cost && <CostRow cost={cost} />}
-                </button>
-              );
-            })}
-          </BoardPopover>
+          <BoardPopover
+            x={popup.x}
+            y={popup.y}
+            actions={popup.actions}
+            costFor={costFor}
+            disabled={busy}
+            onPick={(flat) => {
+              setPopup(null);
+              act(flat);
+            }}
+            onClose={() => setPopup(null)}
+          />
         )}
 
         {status.terminal && (

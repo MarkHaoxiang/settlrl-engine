@@ -1,27 +1,28 @@
-import { PLAYER_COLORS, PLAYER_STROKES, type Board, type Player } from "../lib/boardData";
+import {
+  DEV_CARD_BACK,
+  HAND_CARD_BACK,
+  PLAYER_COLORS,
+  PLAYER_STROKES,
+  type Board,
+  type Player,
+} from "../lib/boardData";
+import CardPile from "./CardPile";
 import { housePath } from "./Building";
-
-// Card backs: the resource hand (leather tan) and development cards (purple).
-const HAND_BACK = "#C9A66B";
-const HAND_EDGE = "#7A5C33";
-const DEV_BACK = "#5B4B8A";
-const DEV_EDGE = "#3C3160";
 
 // Piece supply per player (base game).
 const ROAD_SUPPLY = 15;
 const SETTLEMENT_SUPPLY = 5;
 const CITY_SUPPLY = 4;
 
-// A face-down pile of cards with a count token (nothing is drawn when empty —
-// an empty hand leaves bare table).
+// A face-down pile: a card back with an inner border and the owner's colour
+// striped along its top edge. Gone entirely when empty (bare table).
 function FaceDownPile({
   cx,
   cy,
   w,
   h,
   count,
-  fill,
-  edge,
+  back,
   owner,
   label,
 }: {
@@ -30,21 +31,23 @@ function FaceDownPile({
   w: number;
   h: number;
   count: number;
-  fill: string;
-  edge: string;
-  // Player colour, striped along the pile's top edge so piles stay owned.
+  back: { fill: string; stroke: string };
   owner: string;
   label: string;
 }) {
-  if (count === 0) return null;
-  const card = { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: w * 0.09 };
   return (
-    <g>
-      <title>{`${label}: ${count}`}</title>
-      {count > 2 && (
-        <rect {...card} transform={`rotate(-3 ${cx} ${cy})`} fill={fill} stroke={edge} strokeWidth={1.5} opacity={0.85} />
-      )}
-      <rect {...card} fill={fill} stroke={edge} strokeWidth={1.5} />
+    <CardPile
+      cx={cx}
+      cy={cy}
+      w={w}
+      h={h}
+      count={count}
+      fill={back.fill}
+      stroke={back.stroke}
+      label={label}
+      underlays={count > 2 ? [-3] : []}
+      empty="hide"
+    >
       <rect
         x={cx - w * 0.32}
         y={cy - h * 0.32}
@@ -52,25 +55,12 @@ function FaceDownPile({
         height={h * 0.64}
         rx={w * 0.06}
         fill="none"
-        stroke={edge}
+        stroke={back.stroke}
         strokeWidth={1.2}
         opacity={0.6}
       />
-      <rect x={card.x} y={card.y} width={card.width} height={h * 0.08} rx={w * 0.04} fill={owner} opacity={0.9} />
-      <circle cx={cx} cy={cy + h * 0.26} r={h * 0.13} fill="#FDF6E3" stroke="#A08050" strokeWidth={1.2} />
-      <text
-        x={cx}
-        y={cy + h * 0.26}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={h * 0.14}
-        fontWeight="bold"
-        fill="#2C1A00"
-        fontFamily="Georgia, 'Times New Roman', serif"
-      >
-        {count}
-      </text>
-    </g>
+      <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h * 0.08} rx={w * 0.04} fill={owner} opacity={0.9} />
+    </CardPile>
   );
 }
 
@@ -109,8 +99,7 @@ function Area({
   const pilesW = cardW * 2 + 16;
   const piecesW =
     ROAD_SUPPLY * roadStep + 26 + SETTLEMENT_SUPPLY * settleStep + 22 + CITY_SUPPLY * cityStep;
-  const total = pilesW + 40 + piecesW;
-  let x = -total / 2;
+  let x = -(pilesW + 40 + piecesW) / 2;
 
   const handX = x + cardW / 2;
   const devX = x + cardW * 1.5 + 16;
@@ -123,28 +112,8 @@ function Area({
 
   return (
     <g>
-      <FaceDownPile
-        cx={handX}
-        cy={0}
-        w={cardW}
-        h={cardH}
-        count={player.resourceCards}
-        fill={HAND_BACK}
-        edge={HAND_EDGE}
-        owner={color}
-        label={`${"resource cards"}`}
-      />
-      <FaceDownPile
-        cx={devX}
-        cy={0}
-        w={cardW}
-        h={cardH}
-        count={player.devCards}
-        fill={DEV_BACK}
-        edge={DEV_EDGE}
-        owner={color}
-        label="development cards"
-      />
+      <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards" />
+      <FaceDownPile cx={devX} cy={0} w={cardW} h={cardH} count={player.devCards} back={DEV_CARD_BACK} owner={color} label="development cards" />
       <g>
         <title>{`unbuilt roads: ${roadsLeft}`}</title>
         {Array.from({ length: roadsLeft }, (_, i) => (
@@ -241,18 +210,14 @@ export default function PlayerAreas({
       {board.players.map((p, i) => {
         const edge = edges[i] ?? "bottom";
         const { x, y } = centre(edge);
-        const roadsLeft = ROAD_SUPPLY - board.roads.filter((r) => r.player === p.player).length;
         const builds = board.buildings.filter((b) => b.player === p.player);
-        const settlementsLeft =
-          SETTLEMENT_SUPPLY - builds.filter((b) => b.kind === "settlement").length;
-        const citiesLeft = CITY_SUPPLY - builds.filter((b) => b.kind === "city").length;
         return (
           <g key={p.player} transform={`translate(${x} ${y}) rotate(${EDGE_ANGLE[edge]})`}>
             <Area
               player={p}
-              roadsLeft={Math.max(0, roadsLeft)}
-              settlementsLeft={Math.max(0, settlementsLeft)}
-              citiesLeft={Math.max(0, citiesLeft)}
+              roadsLeft={Math.max(0, ROAD_SUPPLY - board.roads.filter((r) => r.player === p.player).length)}
+              settlementsLeft={Math.max(0, SETTLEMENT_SUPPLY - builds.filter((b) => b.kind === "settlement").length)}
+              citiesLeft={Math.max(0, CITY_SUPPLY - builds.filter((b) => b.kind === "city").length)}
               cardW={cardW}
               cardH={cardH}
               hex={hex}

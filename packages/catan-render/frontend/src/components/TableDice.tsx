@@ -1,39 +1,15 @@
 import { HIGHLIGHT } from "../lib/ui";
 
-// Pip layout per face, in pip-grid offsets around the die centre.
-const PIPS: Record<number, [number, number][]> = {
-  1: [[0, 0]],
-  2: [
-    [-1, -1],
-    [1, 1],
-  ],
-  3: [
-    [-1, -1],
-    [0, 0],
-    [1, 1],
-  ],
-  4: [
-    [-1, -1],
-    [1, -1],
-    [-1, 1],
-    [1, 1],
-  ],
-  5: [
-    [-1, -1],
-    [1, -1],
-    [0, 0],
-    [-1, 1],
-    [1, 1],
-  ],
-  6: [
-    [-1, -1],
-    [1, -1],
-    [-1, 0],
-    [1, 0],
-    [-1, 1],
-    [1, 1],
-  ],
-};
+// Pip layout per face value (index 0 unused), in grid offsets from centre.
+// prettier-ignore
+const PIPS: [number, number][][] = [
+  [], [[0, 0]],
+  [[-1, -1], [1, 1]],
+  [[-1, -1], [0, 0], [1, 1]],
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]],
+  [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]],
+  [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]],
+];
 
 function Die({
   cx,
@@ -62,7 +38,7 @@ function Die({
         stroke="#A08050"
         strokeWidth={1.5}
       />
-      {(PIPS[value] ?? []).map(([px, py], i) => (
+      {(PIPS[value] ?? PIPS[0]).map(([px, py], i) => (
         <circle key={i} cx={cx + px * off} cy={cy + py * off} r={size * 0.09} fill="#2C1A00" />
       ))}
     </g>

@@ -2,15 +2,13 @@ import { useState } from "react";
 import {
   PLAYER_COLORS,
   PLAYER_STROKES,
+  RESOURCE_ORDER,
   TERRAIN_FILL,
   TERRAIN_STROKE,
   playerName,
   type Player,
-  type ResourceKind,
 } from "../lib/boardData";
 import type { Belief } from "../lib/game";
-
-const RES_ORDER: ResourceKind[] = ["wood", "brick", "sheep", "wheat", "ore"];
 
 // One proven bound, "n" when exact or "lo–hi" when a steal blurred it.
 const boundText = (lo: number, hi: number): string => (lo === hi ? `${lo}` : `${lo}–${hi}`);
@@ -165,7 +163,7 @@ export default function PlayersPanel({
             </div>
             {open && b && (
               <div style={{ display: "flex", gap: 3, paddingLeft: 18 }} className="fade-in">
-                {RES_ORDER.map((r) => (
+                {RESOURCE_ORDER.map((r) => (
                   <span
                     key={r}
                     title={`${r}: ${boundText(b.res_lo[r], b.res_hi[r])}`}

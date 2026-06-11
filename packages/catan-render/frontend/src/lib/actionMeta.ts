@@ -1,8 +1,8 @@
-// Icon + short label per action type, shared by the Play control bar (icon
-// buttons with the label as tooltip) and the help page (which documents what
-// each icon does).
+// Action-type display metadata: icon + short label per type (control bar,
+// help page, log), build prices, and the phrasing of board-popover buttons.
 
-import type { ResourceKind } from "./boardData";
+import { playerName, type ResourceKind } from "./boardData";
+import type { GameAction } from "./game";
 
 // Build prices (the rulebook's Building Costs card), one entry per card paid;
 // shown beside build buttons as confirmation context.
@@ -41,3 +41,28 @@ export const ACTION_META: Record<string, ActionMeta> = {
 
 export const actionMeta = (type: string): ActionMeta =>
   ACTION_META[type] ?? { icon: "❔", label: type };
+
+const stealText = (victim: number | null) =>
+  victim != null && victim >= 0 ? ` — steal from ${playerName(victim)}` : "";
+
+// What a board-popover button offers, phrased as the move it confirms.
+export function confirmLabel(a: GameAction): string {
+  switch (a.type) {
+    case "setup_settlement":
+      return "Place settlement";
+    case "build_settlement":
+      return "Build settlement";
+    case "build_city":
+      return "Upgrade to city";
+    case "setup_road":
+      return "Place road";
+    case "build_road":
+      return "Build road";
+    case "move_robber":
+      return `Move robber${stealText(a.victim)}`;
+    case "play_knight":
+      return `Play knight${stealText(a.victim)}`;
+    default:
+      return a.label;
+  }
+}

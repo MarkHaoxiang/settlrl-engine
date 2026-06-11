@@ -85,6 +85,21 @@ export const TERRAIN_STROKE: Record<Terrain, string> = {
   desert: "#C4B080",
 };
 
+// Display order and labels for the five resources, shared by every list of
+// resource chips / piles in the UI.
+export const RESOURCE_ORDER: ResourceKind[] = ["wood", "brick", "sheep", "wheat", "ore"];
+export const RESOURCE_LABELS: Record<ResourceKind, string> = {
+  wood: "Wood",
+  brick: "Brick",
+  sheep: "Sheep",
+  wheat: "Wheat",
+  ore: "Ore",
+};
+
+// Card colours: the development cards' purple and the face-down hand back.
+export const DEV_CARD_BACK = { fill: "#5B4B8A", stroke: "#3C3160" };
+export const HAND_CARD_BACK = { fill: "#C9A66B", stroke: "#7A5C33" };
+
 // -- wire format (models.py BoardModel) ----------------------------------------
 
 interface PlayerWire {

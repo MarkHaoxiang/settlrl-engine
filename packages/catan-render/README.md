@@ -146,27 +146,38 @@ packages/catan-render/
         ├── App.tsx          # Routes: menu, /play, /help, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError)
-        ├── lib/boardData.ts  # Board types + palette + adaptBoard (wire -> camelCase)
+        ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard
         ├── lib/game.ts       # Live-game API client (/api/game*)
         ├── lib/replay.ts     # Replay API client (/api/replay*)
-        ├── lib/actionMeta.ts # Icon + label per action type (control bar + help page)
+        ├── lib/actionMeta.ts # Action display metadata: icons, labels, costs, confirm phrasing
         ├── lib/useGame.ts    # Hook driving the live game (act / reset)
-        ├── lib/ui.ts         # Shared panel / button / highlight styles
+        ├── lib/viewport.ts   # useTableViewport: pan / zoom / rotate (mouse, touch, keyboard)
+        ├── lib/theme.ts      # Light / dark theme switching (persisted)
+        ├── lib/ui.ts         # Shared panel / button / highlight styles (theme variables)
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play or Replay
-        │   ├── PlayView.tsx   # Play mode: interactive board + live action bar
+        │   ├── PlayView.tsx   # Play mode: game state + handlers wiring the components below
         │   ├── HelpView.tsx   # Help page: controls, action icons, seats
         │   └── ReplayView.tsx # Replay mode: load a record, scrub / step / play it
         └── components/
-            ├── TopBar.tsx       # Back-to-menu + mode label bar
-            ├── BoardView.tsx    # SVG viewport, zoom + pan, optional click/highlight interaction
+            ├── TopBar.tsx       # Back-to-menu + mode label + theme toggle + view actions
+            ├── BoardView.tsx    # The table scene: composes everything below in one SVG
+            ├── InteractionOverlay.tsx # Legal-placement markers / hover ghosts / robber tiles
+            ├── BoardPopover.tsx # Anchored action chooser (confirm + cost / victim pick)
+            ├── ChoicePopover.tsx # Bottom-panel resource picker (monopoly / plenty / trades)
+            ├── Hand.tsx         # The acting human's chips (resources, dev cards; clickable)
+            ├── CardPile.tsx     # Top-down card pile + count token (bank, player decks)
+            ├── BankStacks.tsx   # The bank's card grid (resource piles + dev deck)
+            ├── PlayerAreas.tsx  # Each seat's table edge: hand/dev piles + unbuilt pieces
+            ├── TableDice.tsx    # The dice on the table (click to roll when glowing)
+            ├── PlayersPanel.tsx # Seat list atop the chat column (stats + belief inspect)
             ├── NewGameDialog.tsx # Modal: configure players / seats / numbers / seed for a new game
-            ├── ChatPanel.tsx    # Right-hand chat / log column (Play; read-only in Replay)
-            ├── HexTile.tsx      # Hex polygon, terrain colour + motifs, number token
+            ├── ChatPanel.tsx    # Right-hand column: players section + chat / log
+            ├── ThemeToggle.tsx  # Light / dark switch
+            ├── HexTile.tsx      # Hex polygon, terrain colour, icon-and-number token
             ├── TerrainIcon.tsx  # Per-terrain silhouette motif (pine, sheep, …)
             ├── Road.tsx         # Player road along an edge
             ├── Building.tsx     # Settlement / city on a vertex
             ├── Robber.tsx       # Robber pawn on a tile
-            ├── Port.tsx         # Harbour badge (2:1 / 3:1) with docks
-            └── PlayerPanel.tsx  # Per-player corner panel (cards / dev / VP)
+            └── Port.tsx         # Harbour badge (2:1 / 3:1) with docks
 ```
