@@ -1,27 +1,34 @@
 """Serialisable records of complete games: generate, save as JSON, and replay.
 
 A game is fully determined by ``(seed, n_players, number_placement)`` plus
-the flat action trace (all engine randomness derives from the seed); the JSON
-move annotations are readable derivations, ignored on load -- ``flat`` is
-authoritative. Schema (version 1)::
+the action trace (all engine randomness derives from the seed). Each move is
+stored as the action-type *name* plus its ``(idx, target)`` parameters --
+stable identifiers that survive growth of the flat action table, unlike flat
+indices or ``ActionType`` integer values, which renumber whenever actions are
+added (the version-1 schema stored flat indices and every pre-trade record
+went stale). The remaining per-move fields are readable derivations, ignored
+on load. Schema (version 2)::
 
     {
-      "version": 1,
+      "version": 2,
       "seed": 7,
       "n_players": 4,
       "number_placement": "random",
       "winner": 2,                      // null while unfinished
       "meta": {...},                    // free-form caller metadata, if any
       "moves": [
-        {"player": 0, "flat": 93, "type": "setup_settlement", "vertex": 21},
-        {"player": 0, "flat": 0, "type": "roll_dice", "dice": 8},
-        {"player": 0, "flat": 412, "type": "maritime_trade",
+        {"player": 0, "type": "setup_settlement", "idx": 21, "target": 0,
+         "vertex": 21},
+        {"player": 0, "type": "roll_dice", "idx": 0, "target": 0, "dice": 8},
+        {"player": 0, "type": "maritime_trade", "idx": 2, "target": 4,
          "give": "wood", "receive": "ore"},
         ...
       ]
     }
 
-Positions are the engine's vertex/edge/tile indices (cube lookups live in
+Version-1 files are migrated on load from their annotations (which carry the
+same stable identifiers); their recorded flat indices are ignored. Positions
+are the engine's vertex/edge/tile indices (cube lookups live in
 ``board.layout``); ``dice`` records each roll so :func:`replay` can verify
 determinism.
 """
@@ -58,15 +65,22 @@ __all__ = [
     "replay",
 ]
 
-_VERSION = 1
+_VERSION = 2
 
-# Host-side copy of the flat action table: row -> (type, idx, target).
+# Host-side copy of the flat action table: row -> (type, idx, target), and the
+# reverse map serialisation uses to recover a move's flat row from its stable
+# (type, idx, target) identifier.
 _row_type, _row_params = flat_to_action(jnp.arange(N_FLAT))
 _ATYPE = np.asarray(_row_type)
 _IDX = np.asarray(_row_params.idx)
 _TARGET = np.asarray(_row_params.target)
+_ROW: dict[tuple[int, int, int], int] = {
+    (int(a), int(i), int(t)): row
+    for row, (a, i, t) in enumerate(zip(_ATYPE, _IDX, _TARGET, strict=True))
+}
 
 _RESOURCE_NAMES = tuple(t.name.lower() for t in Tile if t is not Tile.DESERT)
+_RESOURCE_INDEX = {name: i for i, name in enumerate(_RESOURCE_NAMES)}
 
 _VERTEX_TYPES = {
     ActionType.SETUP_SETTLEMENT,
@@ -119,16 +133,29 @@ class GameRecord:
         if self.meta:
             doc["meta"] = self.meta
         doc["moves"] = [
-            {"player": m.player, "flat": m.flat, **_describe(m)} for m in self.moves
+            {
+                "player": m.player,
+                "type": ActionType(int(_ATYPE[m.flat])).name.lower(),
+                "idx": int(_IDX[m.flat]),
+                "target": int(_TARGET[m.flat]),
+                **_describe(m),
+            }
+            for m in self.moves
         ]
         return json.dumps(doc, indent=indent)
 
     @classmethod
     def from_json(cls, text: str) -> GameRecord:
-        """Parse a record; per-move annotations are ignored (``flat`` rules)."""
+        """Parse a record; the stable ``(type, idx, target)`` triple rules.
+
+        Version-1 files (which stored flat indices) are migrated through
+        their annotations; everything not needed to identify the move is
+        ignored.
+        """
         doc = json.loads(text)
-        if doc.get("version") != _VERSION:
-            raise ValueError(f"unsupported record version: {doc.get('version')!r}")
+        version = doc.get("version")
+        if version not in (1, _VERSION):
+            raise ValueError(f"unsupported record version: {version!r}")
         winner = doc["winner"]
         return cls(
             seed=int(doc["seed"]),
@@ -137,7 +164,7 @@ class GameRecord:
             moves=tuple(
                 Move(
                     player=int(m["player"]),
-                    flat=int(m["flat"]),
+                    flat=_move_flat(m, version),
                     dice=None if m.get("dice") is None else int(m["dice"]),
                 )
                 for m in doc["moves"]
@@ -147,12 +174,52 @@ class GameRecord:
         )
 
 
+def _move_flat(m: dict[str, Any], version: int) -> int:
+    """The flat row of a serialized move, from its stable identifiers."""
+    try:
+        at = ActionType[str(m["type"]).upper()]
+    except KeyError as exc:
+        raise ValueError(f"unknown action type {m['type']!r}") from exc
+    idx, target = (
+        (int(m["idx"]), int(m["target"])) if version >= 2 else _v1_params(at, m)
+    )
+    try:
+        return _ROW[(int(at), idx, target)]
+    except KeyError as exc:
+        raise ValueError(
+            f"move {m['type']!r} (idx={idx}, target={target}) is not a move "
+            "of the current action table"
+        ) from exc
+
+
+def _v1_params(at: ActionType, m: dict[str, Any]) -> tuple[int, int]:
+    """``(idx, target)`` recovered from a version-1 move's annotations (the
+    recorded flat index is stale: the table has grown since)."""
+    if at in _VERTEX_TYPES:
+        return int(m["vertex"]), 0
+    if at in _EDGE_TYPES:
+        return int(m["edge"]), 0
+    if at in _ROBBER_TYPES:
+        return int(m["tile"]), int(m.get("victim", -1))
+    if at in _RESOURCE_TYPES:
+        return _RESOURCE_INDEX[m["resource"]], 0
+    if at is ActionType.PLAY_YEAR_OF_PLENTY:
+        first, second = m["resources"]
+        return _RESOURCE_INDEX[first], _RESOURCE_INDEX[second]
+    if at is ActionType.MARITIME_TRADE:
+        return _RESOURCE_INDEX[m["give"]], _RESOURCE_INDEX[m["receive"]]
+    if at is ActionType.PROPOSE_TRADE:
+        give, receive = _RESOURCE_INDEX[m["give"]], _RESOURCE_INDEX[m["receive"]]
+        return give * N_RESOURCES + receive, int(m["partner"])
+    return 0, 0  # parameterless (roll / buy dev / road building / trade response)
+
+
 def _describe(move: Move) -> dict[str, Any]:
-    """The readable annotation for a move (action type + decoded parameters)."""
+    """The readable annotation for a move (decoded parameters by name)."""
     at = ActionType(int(_ATYPE[move.flat]))
     idx = int(_IDX[move.flat])
     target = int(_TARGET[move.flat])
-    out: dict[str, Any] = {"type": at.name.lower()}
+    out: dict[str, Any] = {}
     if at in _VERTEX_TYPES:
         out["vertex"] = idx
     elif at in _EDGE_TYPES:

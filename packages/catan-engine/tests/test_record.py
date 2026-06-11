@@ -46,16 +46,40 @@ def test_json_roundtrip(record4: GameRecord) -> None:
 
 def test_json_is_readable(record4: GameRecord) -> None:
     doc = json.loads(record4.to_json())
-    assert doc["version"] == 1
+    assert doc["version"] == 2
     assert doc["meta"] == {"note": "test game"}
     moves = doc["moves"]
     first = moves[0]
     # Setup opens with a settlement: annotated with its type and vertex.
     assert first["type"] == "setup_settlement" and isinstance(first["vertex"], int)
+    # Moves carry the stable identifiers, not table positions.
+    assert first["idx"] == first["vertex"] and "flat" not in first
     types = {m["type"] for m in moves}
     assert {"setup_road", "roll_dice", "end_turn"} <= types
     roll = next(m for m in moves if m["type"] == "roll_dice")
     assert 2 <= roll["dice"] <= 12
+
+
+def test_version_1_records_migrate_via_annotations(record4: GameRecord) -> None:
+    # A v1 file stored flat table positions, which went stale when the table
+    # grew; the loader must recover every move from its annotations instead.
+    doc = json.loads(record4.to_json())
+    doc["version"] = 1
+    for move in doc["moves"]:
+        del move["idx"], move["target"]
+        move["flat"] = 0  # deliberately wrong: must be ignored
+    assert GameRecord.from_json(json.dumps(doc)) == record4
+
+
+def test_from_json_rejects_unknown_moves(record2: GameRecord) -> None:
+    doc = json.loads(record2.to_json())
+    doc["moves"][0]["type"] = "build_spaceship"
+    with pytest.raises(ValueError, match="unknown action type"):
+        GameRecord.from_json(json.dumps(doc))
+    doc["moves"][0]["type"] = "setup_settlement"
+    doc["moves"][0]["idx"] = 99_999
+    with pytest.raises(ValueError, match="current action table"):
+        GameRecord.from_json(json.dumps(doc))
 
 
 def test_replay_reproduces_the_game(record2: GameRecord) -> None:
