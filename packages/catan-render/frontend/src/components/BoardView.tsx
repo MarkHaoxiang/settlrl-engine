@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { hexToPixel, cubeToPixel, hexCorners, type Cube, type CubeEdge, type Hex } from "../lib/hex";
 import { PLAYER_COLORS, type Board } from "../lib/boardData";
-import { HIGHLIGHT } from "../lib/ui";
+import { HIGHLIGHT, panelStyle } from "../lib/ui";
 import HexTile from "./HexTile";
 import Road from "./Road";
 import Building, { housePath } from "./Building";
@@ -69,6 +69,9 @@ interface Props {
 export default function BoardView({ board, interaction, dice }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  // Table rotation in degrees, cumulative so each 90° step animates the
+  // short way round instead of unwinding.
+  const [rotation, setRotation] = useState(0);
 
   // Active drag-to-pan gesture; `moved` flips once past the click-vs-drag
   // threshold, after which the pointer is captured so releasing over a board
@@ -231,6 +234,15 @@ export default function BoardView({ board, interaction, dice }: Props) {
           transformOrigin: "center center",
         }}
       >
+        {/* Rotation lives on its own layer so its transition never drags on
+            pan/zoom updates. */}
+        <div
+          style={{
+            transform: `rotate(${rotation}deg)`,
+            transformOrigin: "center center",
+            transition: "transform 0.45s ease",
+          }}
+        >
         <svg
           width={width}
           height={height}
@@ -464,6 +476,36 @@ export default function BoardView({ board, interaction, dice }: Props) {
             </g>
           )}
         </svg>
+        </div>
+      </div>
+
+      {/* Spin the table a quarter turn at a time (e.g. to face your seat) */}
+      <div
+        style={{ position: "absolute", bottom: 16, left: 16, display: "flex", gap: 6, zIndex: 9 }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {([["↺", -90, "Rotate the table counter-clockwise"], ["↻", 90, "Rotate the table clockwise"]] as const).map(
+          ([glyph, step, label]) => (
+            <button
+              key={glyph}
+              title={label}
+              style={{
+                ...panelStyle,
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                fontSize: 16,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onClick={() => setRotation((r) => r + step)}
+            >
+              {glyph}
+            </button>
+          )
+        )}
       </div>
 
     </div>

@@ -89,7 +89,8 @@ export default function HelpView() {
 
         <Section title="The board">
           <span>
-            Scroll or pinch to zoom, and drag to pan. Every build you can afford right now is
+            Scroll or pinch to zoom, drag to pan, and spin the table a quarter turn with
+            the ↺ ↻ buttons (bottom-left). Every build you can afford right now is
             marked on the board in your colour — a small dot on a corner, a short dash on an
             edge. Hover one to preview the piece, then click and confirm in the popup, which
             lists the build cost. Esc or a click elsewhere cancels. The scene is the whole
