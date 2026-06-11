@@ -11,14 +11,20 @@ not the posterior itself.
 
 from __future__ import annotations
 
-from typing import TypeAlias, cast
+from typing import TypeAlias
 
 import jax
 import jax.numpy as jnp
 from catan_engine.belief import BeliefView, ResBoundsVec, ResTotalVec
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES, DevDeckVec
 from catan_engine.board.resources import N_RESOURCES
-from catan_engine.board.state import BoardState, IntScalar, KeyScalar, to_u8
+from catan_engine.board.state import (
+    BoardState,
+    BoolScalar,
+    IntScalar,
+    KeyScalar,
+    to_u8,
+)
 from jaxtyping import Array, UInt8
 
 _DECK_SIZE = sum(DEV_CARD_COUNTS)
@@ -59,7 +65,7 @@ def _deal_dev_hands(
     return to_u8(dev_hand), to_u8(pool.astype(jnp.int32) - dealt)
 
 
-_DealCarry: TypeAlias = tuple[ResBoundsVec, ResTotalVec, KeyScalar]
+_DealCarry: TypeAlias = tuple[IntScalar, ResBoundsVec, ResTotalVec, KeyScalar]
 
 
 def _deal_resources(key: KeyScalar, view: BeliefView) -> ResBoundsVec:
@@ -75,28 +81,27 @@ def _deal_resources(key: KeyScalar, view: BeliefView) -> ResBoundsVec:
     need = view.belief.hand_size - res.sum(axis=1)  # (P,) 0 where lo is exact
 
     def deal_player(p: int, carry: _DealCarry) -> _DealCarry:
-        res, pool, key = carry
         hi = view.belief.res_hi[p].astype(jnp.int32)
 
-        def deal_one(i: IntScalar, inner: _DealCarry) -> _DealCarry:
-            res, pool, key = inner
+        def owes(c: _DealCarry) -> BoolScalar:
+            return c[0] < jnp.minimum(need[p], _MAX_DEAL)
+
+        def deal_one(c: _DealCarry) -> _DealCarry:
+            i, res, pool, key = c
             key, k = jax.random.split(key)
-            active = i < need[p]
             w = jnp.minimum(jnp.clip(hi - res[p], 0, None), pool)
             w = jnp.where(w.sum() > 0, w, pool)  # infeasible bounds: relax hi
             r = jax.random.categorical(k, jnp.log(w.astype(jnp.float32)))
             r = jnp.clip(r, 0, N_RESOURCES - 1)
-            add = active.astype(jnp.int32)
-            return res.at[p, r].add(add), pool.at[r].add(-add), key
+            return i + 1, res.at[p, r].add(1), pool.at[r].add(-1), key
 
-        return cast(
-            _DealCarry, jax.lax.fori_loop(0, _MAX_DEAL, deal_one, (res, pool, key))
-        )
+        i, res, pool, key = carry
+        return jax.lax.while_loop(owes, deal_one, (jnp.zeros_like(i), res, pool, key))
 
-    carry = (res, pool, key)
+    carry = (jnp.int32(0), res, pool, key)
     for p in range(view.n_players):
         carry = deal_player(p, carry)
-    res, _, _ = carry
+    _, res, _, _ = carry
     return res
 
 

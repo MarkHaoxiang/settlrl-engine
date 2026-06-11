@@ -30,7 +30,11 @@ agents run at 2–4 players with beliefs of varying sharpness.
   untouched; hand sizes, dev counts, per-type totals, and the observer's own
   rows all match the public record. The resource deal's
   proportional-headroom weighting is a *surrogate* for the exact posterior,
-  not the posterior (`hi` is relaxed if jointly infeasible). The closing
+  not the posterior (`hi` is relaxed if jointly infeasible). The deal's
+  `while_loop` stops at the owed count rather than the worst-case 95: same
+  sampling law (each draw is a fresh key), 13x on `sample_world`, 7x on a
+  lookahead move at B=1 (RTX 5090; the sequential chain was launch-bound).
+  The closing
   `BoardState(...)` is built by explicit keyword on purpose: a new
   `BoardState` field fails to compile here until classified public or hidden.
 - `value.py` — heuristic strength function; value = own strength − best
