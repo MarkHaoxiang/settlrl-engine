@@ -210,6 +210,61 @@ export default function BoardView({ board, interaction, dice }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height]);
 
+  // Keyboard navigation: arrows pan, +/- zoom, [ ] spin the table, 0 re-fits.
+  // Ignored while typing (chat box, dialog fields).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const PAN_STEP = 60;
+      switch (e.key) {
+        case "ArrowLeft":
+          setPan((p) => ({ ...p, x: p.x + PAN_STEP }));
+          break;
+        case "ArrowRight":
+          setPan((p) => ({ ...p, x: p.x - PAN_STEP }));
+          break;
+        case "ArrowUp":
+          setPan((p) => ({ ...p, y: p.y + PAN_STEP }));
+          break;
+        case "ArrowDown":
+          setPan((p) => ({ ...p, y: p.y - PAN_STEP }));
+          break;
+        case "+":
+        case "=":
+          setZoom((z) => clamp(z * 1.15, MIN_ZOOM, MAX_ZOOM));
+          break;
+        case "-":
+        case "_":
+          setZoom((z) => clamp(z / 1.15, MIN_ZOOM, MAX_ZOOM));
+          break;
+        case "[":
+          setRotation((r) => r - 90);
+          break;
+        case "]":
+          setRotation((r) => r + 90);
+          break;
+        case "0": {
+          const el = containerRef.current;
+          if (el) {
+            const fit = Math.min(el.clientWidth / width, el.clientHeight / height, 1);
+            setZoom(clamp(fit * 0.98, MIN_ZOOM, 1));
+          }
+          setPan({ x: 0, y: 0 });
+          // Unwind to the nearest full turn so the reset spins the short way.
+          setRotation((r) => Math.round(r / 360) * 360);
+          break;
+        }
+        default:
+          return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [width, height]);
+
+
   return (
     <div
       ref={containerRef}
@@ -484,7 +539,7 @@ export default function BoardView({ board, interaction, dice }: Props) {
         style={{ position: "absolute", bottom: 16, left: 16, display: "flex", gap: 6, zIndex: 9 }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {([["↺", -90, "Rotate the table counter-clockwise"], ["↻", 90, "Rotate the table clockwise"]] as const).map(
+        {([["↺", -90, "Rotate the table counter-clockwise ( [ )"], ["↻", 90, "Rotate the table clockwise ( ] )"]] as const).map(
           ([glyph, step, label]) => (
             <button
               key={glyph}

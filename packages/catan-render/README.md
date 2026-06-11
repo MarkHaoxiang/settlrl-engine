@@ -14,7 +14,8 @@ A menu lets you choose between two modes, each at its own URL:
   picks come from a popover) and resource cards to discard after a 7. A small bottom bar keeps
   the turn-flow moves (buy a dev card, bank trade, end turn — the dice sit on the table by
   the board's corner and take the click to roll); the top bar holds New
-  game and a light/dark theme toggle. The scene is a top-down table (zoom, pan, and spin it with the ↺ ↻ buttons):
+  game and a light/dark theme toggle. The scene is a top-down table (zoom, pan, and spin it — mouse, touch, or keyboard:
+  arrows pan, +/− zoom, [ ] spin, 0 re-fits):
   the bank's card piles (true to card scale) sit left of the board, and each seat's play
   area lines its table edge — face-down hand and dev piles plus their unbuilt roads,
   settlements, and cities, so supplies are read straight off the table. The bar
