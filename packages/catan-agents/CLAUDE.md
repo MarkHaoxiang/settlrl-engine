@@ -183,3 +183,12 @@ tests — a new agent just registers in `POLICIES`. `sample_world` is
 infrastructure, not a policy, so it gets unit tests (`tests/test_sample.py`).
 `tests/conftest.py` installs the jaxtyping/beartype hook for all
 `catan_agents` modules.
+
+`tests/benchmark/` holds the pytest-benchmark suite (move latency,
+`sample_world`, the fused self-play window), parametrized over `POLICIES` at
+*shipped* defaults — it measures what ships, unlike the tests' cheap
+`for_testing` members. `benchmark`-marked and deselected from the default
+run; the repo-root `run_benchmarks.sh` re-selects it (engine + agents). The
+self-play window reuses `evaluate`'s private `_picker`/`_actor` so one actor
+identity persists across rounds — calling `evaluate()` per round would
+retrace its fresh closure every time.

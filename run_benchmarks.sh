@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Run the environment throughput benchmarks. The flags re-select the benchmarks
-# (deselected from the default test run), run only them, and drop coverage. See
-# packages/catan-engine/tests/benchmark/README.md for options and examples.
+# Run the throughput benchmarks: the engine's env rollouts and the agents'
+# move/evaluate latencies. The flags re-select the benchmarks (deselected from
+# the default test runs), run only them, and drop coverage. See the
+# tests/benchmark/README.md in each package for options and examples.
 set -euo pipefail
 
 # -n 0 turns xdist back off: pytest-benchmark needs a single process for
-# stable timings (the default addopts run the regular suite with -n auto).
-uv run --package catan-engine pytest packages/catan-engine/tests/benchmark \
-    -m benchmark --benchmark-only --no-cov -n 0 "$@"
+# stable timings (the default addopts run the regular suites with -n auto).
+# `|| [ $? -eq 5 ]` tolerates a package where a -k filter selects nothing.
+for pkg in catan-engine catan-agents; do
+    uv run --package "$pkg" pytest "packages/$pkg/tests/benchmark" \
+        -m benchmark --benchmark-only --no-cov -n 0 "$@" || [ "$?" -eq 5 ]
+done
