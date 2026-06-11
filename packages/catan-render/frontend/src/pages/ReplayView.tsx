@@ -163,7 +163,7 @@ export default function ReplayView() {
           <div style={{ display: "flex", gap: 10 }}>
             <LoadButtons onLoad={loaded} onError={setError} />
           </div>
-          {error && <span style={{ color: "#B03A2E", fontSize: 12 }}>{error}</span>}
+          {error && <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>}
         </div>
       </div>
     );
@@ -285,7 +285,7 @@ export default function ReplayView() {
                 💾
               </a>
             </span>
-            {error && <span style={{ color: "#B03A2E", fontSize: 12 }}>{error}</span>}
+            {error && <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>}
           </div>
         </div>
       </div>

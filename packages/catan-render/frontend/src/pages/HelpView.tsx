@@ -9,9 +9,9 @@ import { LINK, panelStyle } from "../lib/ui";
 // What each control does, keyed by action type and grouped by where it lives:
 // directly on the board, on a hand chip, or on the bottom bar (display order).
 const BOARD_HELP: [string, string][] = [
-  ["build_settlement", "A faint house on a corner: click it to build a settlement there."],
-  ["build_city", "A dashed outline over your settlement: click it to upgrade to a city."],
-  ["build_road", "A faint dashed edge: click it to build a road there."],
+  ["build_settlement", "A dot on a corner: click it to build a settlement there."],
+  ["build_city", "A larger dot on your settlement: click it to upgrade to a city."],
+  ["build_road", "A dash on an edge: click it to build a road there."],
   ["move_robber", "A 7 was rolled: click a highlighted tile, then pick who to rob."],
 ];
 const HAND_HELP: [string, string][] = [
@@ -89,10 +89,12 @@ export default function HelpView() {
 
         <Section title="The board">
           <span>
-            Scroll or pinch to zoom, and drag to pan. Everything you can build right now is
-            ghosted on the board in your colour (so the ghosts also show what you can afford) —
-            click one and confirm in the popup, which lists the build cost. Esc or a click
-            elsewhere cancels.
+            Scroll or pinch to zoom, and drag to pan. Every build you can afford right now is
+            marked on the board in your colour — a small dot on a corner, a short dash on an
+            edge. Hover one to preview the piece, then click and confirm in the popup, which
+            lists the build cost. Esc or a click elsewhere cancels. The card stacks on the
+            table beside the board are the bank: each resource pile and the development deck,
+            with the count left.
           </span>
           <ActionTable rows={BOARD_HELP} />
         </Section>
@@ -111,6 +113,17 @@ export default function HelpView() {
             The bottom bar keeps the turn-flow moves, one button per move currently available:
           </span>
           <ActionTable rows={BAR_HELP} />
+        </Section>
+
+        <Section title="The top bar">
+          <span>
+            Back to the menu, the light/dark theme toggle, and in Play: <b>New game</b>
+            (reconfigure seats; cancelling keeps the game in progress) and <b>🧮 card
+            counting</b>, which adds proven bounds on each opponent's hand to their corner
+            panel — "2" is a known count, "0–3" is what a hidden robber steal allows. Only
+            public information is used, so it never reveals anything you couldn't have
+            tracked yourself.
+          </span>
         </Section>
 
         <Section title="Seats & turns">

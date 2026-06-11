@@ -20,8 +20,15 @@ from catan_engine.env.aec import CatanAECEnv
 from catan_engine.record import GameRecord, Move
 
 from .actions import decode_actions
-from .bots import POLICIES, BeliefSpec, Knob, bot_act, coerce_params
-from .models import GameStatusModel, LogEntryModel
+from .bots import POLICIES, Knob, bot_act, coerce_params
+from .convert import _RESOURCE_NAMES
+from .models import (
+    BeliefModel,
+    GameStatusModel,
+    LogEntryModel,
+    PlayerBeliefModel,
+    ResourceCounts,
+)
 
 # A seat assignment: "human", a bot kind, or a configured bot
 # {"kind": name, "params": {knob: value}}.
@@ -120,11 +127,9 @@ class GameSession:
             seed=seed,
             n_players=self.n_players,
             number_placement=number_placement,
-            # Belief seats read the env's honest per-observer card counting.
-            track_beliefs=any(
-                kind != HUMAN and isinstance(POLICIES[kind], BeliefSpec)
-                for kind in self.seats
-            ),
+            # Always on: belief bots read it, and the UI's card-counting panel
+            # serves it to human seats (a tracked step costs microseconds).
+            track_beliefs=True,
         )
         # Dedicated key so bot choices are reproducible per seed and independent
         # of the engine's own randomness.
@@ -152,6 +157,38 @@ class GameSession:
         """Flat indices of the actions legal for the acting player right now."""
         mask = np.asarray(self.env.observe(self.env.agent_selection)["action_mask"])
         return np.flatnonzero(mask)
+
+    def belief(self) -> BeliefModel | None:
+        """Card counting for the hand-panel seat (the acting human, falling
+        back to the first human), or None with no human seats. The observer's
+        own row is omitted; everything served is publicly derivable."""
+        acting = self.acting_seat()
+        observer = (
+            acting
+            if self.seats[acting] == HUMAN
+            else next((i for i, s in enumerate(self.seats) if s == HUMAN), None)
+        )
+        if observer is None:
+            return None
+        beliefs = self.env._env.beliefs
+        lo = np.asarray(beliefs.res_lo[0, observer])
+        hi = np.asarray(beliefs.res_hi[0, observer])
+        return BeliefModel(
+            observer=observer,
+            players=[
+                PlayerBeliefModel(
+                    player=p,
+                    res_lo=ResourceCounts(
+                        **{n: int(lo[p, i]) for i, n in enumerate(_RESOURCE_NAMES)}
+                    ),
+                    res_hi=ResourceCounts(
+                        **{n: int(hi[p, i]) for i, n in enumerate(_RESOURCE_NAMES)}
+                    ),
+                )
+                for p in range(self.n_players)
+                if p != observer
+            ],
+        )
 
     # -- moves ------------------------------------------------------------
 

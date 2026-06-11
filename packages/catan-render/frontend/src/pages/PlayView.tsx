@@ -19,7 +19,15 @@ import {
   type ResourceKind,
 } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
-import { ACCENT, DIVIDER, buttonStyle, overlayMsgStyle, panelStyle } from "../lib/ui";
+import {
+  ACCENT,
+  ACCENT_GLOW,
+  DIVIDER,
+  buttonStyle,
+  overlayMsgStyle,
+  panelStyle,
+  selectedStyle,
+} from "../lib/ui";
 
 const RESOURCES: { key: ResourceKind; label: string }[] = [
   { key: "wood", label: "Wood" },
@@ -162,7 +170,7 @@ function Chip({
         background: fill,
         border: `2px solid ${stroke}`,
         opacity: empty ? 0.4 : 1,
-        ...(onClick ? { cursor: "pointer", boxShadow: `0 0 8px 2px ${ACCENT}66` } : {}),
+        ...(onClick ? { cursor: "pointer", boxShadow: ACCENT_GLOW } : {}),
         ...(selected ? { outline: `2px solid ${ACCENT}`, outlineOffset: 1 } : {}),
       }}
     >
@@ -297,6 +305,8 @@ export default function PlayView() {
   // Whether the new-game configuration dialog is open (shown on entry, and
   // reopened by the New game button).
   const [configuring, setConfiguring] = useState(true);
+  // Whether the corner panels show card-counting bounds (top-bar toggle).
+  const [showBelief, setShowBelief] = useState(false);
 
   const actions = snapshot?.actions ?? [];
 
@@ -444,8 +454,25 @@ export default function PlayView() {
     <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
       {/* Board area: the chrome inside is anchored to it, not the viewport */}
       <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
-        <BoardView board={board} interaction={interaction} />
-        <TopBar mode="Play" />
+        <BoardView
+          board={board}
+          interaction={interaction}
+          beliefs={showBelief && snapshot.belief ? snapshot.belief.players : undefined}
+        />
+        <TopBar mode="Play">
+          {snapshot.belief && (
+            <button
+              title="Card counting: show proven bounds on opponents' hands"
+              style={{ ...smallButton, padding: "3px 8px", fontSize: 13, ...(showBelief ? selectedStyle : {}) }}
+              onClick={() => setShowBelief((v) => !v)}
+            >
+              🧮
+            </button>
+          )}
+          <button style={smallButton} onClick={() => setConfiguring(true)}>
+            New game
+          </button>
+        </TopBar>
 
         {popup && (
           <BoardPopover x={popup.x} y={popup.y} onClose={() => setPopup(null)}>
@@ -570,9 +597,6 @@ export default function PlayView() {
                     {actionMeta(type).icon} {actionMeta(type).label}
                   </button>
                 ))}
-              <button style={{ ...smallButton, marginLeft: "auto" }} onClick={() => setConfiguring(true)}>
-                New game
-              </button>
             </div>
 
             {choice && (

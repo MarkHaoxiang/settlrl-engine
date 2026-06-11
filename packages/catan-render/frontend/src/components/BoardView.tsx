@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { hexToPixel, cubeToPixel, hexCorners, type Cube, type CubeEdge, type Hex } from "../lib/hex";
 import { PLAYER_COLORS, type Board } from "../lib/boardData";
+import type { PlayerBelief } from "../lib/game";
 import { HIGHLIGHT } from "../lib/ui";
 import HexTile from "./HexTile";
 import Road from "./Road";
@@ -8,6 +9,7 @@ import Building, { housePath } from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
 import PlayerPanel from "./PlayerPanel";
+import BankStacks from "./BankStacks";
 
 // A popover anchor in this component's container coordinates (top-centre of
 // the clicked element, valid for the pan/zoom at click time).
@@ -45,13 +47,16 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 interface Props {
   board: Board;
   interaction?: BoardInteraction;
+  // Card-counting rows for the corner panels (per non-observer player).
+  beliefs?: PlayerBelief[];
 }
 
-// Renders a Catan board (tiles, ports, roads, buildings, robber) as a zoomable,
-// pannable SVG, with per-player stat panels anchored to the viewport corners. It fills
-// its parent container, so a parent can overlay mode-specific controls on top
-// (the replay scrubber, the play action bar, a back button, …).
-export default function BoardView({ board, interaction }: Props) {
+// Renders a Catan board (tiles, ports, roads, buildings, robber, the bank's
+// card stacks on the table beside it) as a zoomable, pannable SVG, with
+// per-player stat panels anchored to the viewport corners. It fills its parent
+// container, so a parent can overlay mode-specific controls on top (the replay
+// scrubber, the play action bar, a back button, …).
+export default function BoardView({ board, interaction, beliefs }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -167,9 +172,12 @@ export default function BoardView({ board, interaction }: Props) {
   const minY = Math.min(...pixels.map((p) => p.y));
   const maxY = Math.max(...pixels.map((p) => p.y));
 
-  const width = maxX - minX + HEX_SIZE * 2 + PADDING * 2;
+  // Table space left of the ocean for the bank's card stacks: they live in
+  // board coordinates so they pan and zoom with the board.
+  const gutter = board.bank ? HEX_SIZE * 1.5 : 0;
+  const width = maxX - minX + HEX_SIZE * 2 + PADDING * 2 + gutter;
   const height = maxY - minY + HEX_SIZE * 2 + PADDING * 2;
-  const offsetX = -minX + HEX_SIZE + PADDING;
+  const offsetX = -minX + HEX_SIZE + PADDING + gutter;
   const offsetY = -minY + HEX_SIZE + PADDING;
 
   return (
@@ -209,8 +217,13 @@ export default function BoardView({ board, interaction }: Props) {
             </radialGradient>
           </defs>
 
-          {/* Ocean background */}
-          <rect width={width} height={height} fill="url(#oceanGrad)" rx={24} />
+          {/* Ocean background (the gutter stays open table) */}
+          <rect x={gutter} width={width - gutter} height={height} fill="url(#oceanGrad)" rx={24} />
+
+          {/* The bank's card stacks on the table beside the board */}
+          {board.bank && (
+            <BankStacks bank={board.bank} cx={gutter * 0.42} cy={height / 2} size={HEX_SIZE} />
+          )}
 
           {/* Ports sit in the ocean; drawn first so docks tuck under the coast */}
           {board.ports.map((port, i) => {
@@ -315,7 +328,8 @@ export default function BoardView({ board, interaction }: Props) {
                 );
               })}
 
-              {/* Road ghosts on legal edges (with a fat transparent hit line) */}
+              {/* Road slots on legal edges: a short quiet centre dash, the
+                  full ghost road on hover (with a fat transparent hit line) */}
               {interaction.edges.map((edge, i) => {
                 const a = cubeToPixel(edge.a, HEX_SIZE);
                 const b = cubeToPixel(edge.b, HEX_SIZE);
@@ -325,6 +339,12 @@ export default function BoardView({ board, interaction }: Props) {
                   x2: b.x + offsetX,
                   y2: b.y + offsetY,
                 };
+                const lerp = (t: number) => ({
+                  x: line.x1 + (line.x2 - line.x1) * t,
+                  y: line.y1 + (line.y2 - line.y1) * t,
+                });
+                const m1 = lerp(0.32);
+                const m2 = lerp(0.68);
                 return (
                   <g
                     key={`iedge-${i}`}
@@ -332,7 +352,17 @@ export default function BoardView({ board, interaction }: Props) {
                     onClick={(e) => interaction.onEdge?.(edge, anchorOf(e.currentTarget))}
                   >
                     <line
-                      className="ghost"
+                      className="ghost-min"
+                      x1={m1.x}
+                      y1={m1.y}
+                      x2={m2.x}
+                      y2={m2.y}
+                      stroke={PLAYER_COLORS[interaction.player]}
+                      strokeWidth={HEX_SIZE * 0.07}
+                      strokeLinecap="round"
+                    />
+                    <line
+                      className="ghost-full"
                       {...line}
                       stroke={PLAYER_COLORS[interaction.player]}
                       strokeWidth={HEX_SIZE * 0.14}
@@ -344,8 +374,9 @@ export default function BoardView({ board, interaction }: Props) {
                 );
               })}
 
-              {/* Building ghosts on legal vertices: a faint settlement on empty
-                  corners, a larger dashed outline over an upgradable settlement */}
+              {/* Building slots on legal vertices: a small quiet dot, the full
+                  ghost piece on hover (settlement house, or the larger city
+                  outline over an upgradable settlement) */}
               {interaction.vertices.map(({ cube, kind }, i) => {
                 const { x, y } = cubeToPixel(cube, HEX_SIZE);
                 const s = HEX_SIZE * 0.3 * (kind === "city" ? 1.5 : 1);
@@ -355,8 +386,17 @@ export default function BoardView({ board, interaction }: Props) {
                     className="board-ghost"
                     onClick={(e) => interaction.onVertex?.(cube, anchorOf(e.currentTarget))}
                   >
+                    <circle
+                      className="ghost-min"
+                      cx={x + offsetX}
+                      cy={y + offsetY}
+                      r={HEX_SIZE * (kind === "city" ? 0.12 : 0.09)}
+                      fill={PLAYER_COLORS[interaction.player]}
+                      stroke={HIGHLIGHT}
+                      strokeWidth={1.5}
+                    />
                     <path
-                      className="ghost"
+                      className="ghost-full"
                       d={housePath(x + offsetX, y + offsetY, s)}
                       fill={PLAYER_COLORS[interaction.player]}
                       fillOpacity={0.5}
@@ -376,7 +416,12 @@ export default function BoardView({ board, interaction }: Props) {
 
       {/* Corner player panels — fixed in the viewport, unaffected by zoom */}
       {board.players.map((p) => (
-        <PlayerPanel key={`player-${p.player}`} player={p} corner={CORNERS[p.player]} />
+        <PlayerPanel
+          key={`player-${p.player}`}
+          player={p}
+          corner={CORNERS[p.player]}
+          belief={beliefs?.find((b) => b.player === p.player)}
+        />
       ))}
     </div>
   );

@@ -22,9 +22,11 @@ from catan_engine.board.layout import (
     vertex_index,
 )
 from catan_engine.board.port import Port
+from catan_engine.board.resources import BANK_INITIAL
 from catan_engine.board.tile import Tile
 
 from .models import (
+    BankModel,
     BoardModel,
     BuildingModel,
     CubeModel,
@@ -192,6 +194,18 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
             )
         )
 
+    # -- Bank (derived: the supply holds what the hands don't) ---------------
+    held = player_resources.sum(axis=0)
+    bank = BankModel(
+        resources=ResourceCounts(
+            **{
+                name: BANK_INITIAL - int(held[i])
+                for i, name in enumerate(_RESOURCE_NAMES)
+            }
+        ),
+        dev_cards=int(state.dev_deck[batch_index].sum()),
+    )
+
     return BoardModel(
         tiles=tiles,
         buildings=buildings,
@@ -199,4 +213,5 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
         ports=ports,
         players=players,
         robber=robber,
+        bank=bank,
     )

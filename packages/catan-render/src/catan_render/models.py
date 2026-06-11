@@ -94,6 +94,13 @@ class PlayerModel(BaseModel):
     dev_card_types: DevCardCounts  # per-type breakdown of dev_cards
 
 
+class BankModel(BaseModel):
+    """Cards left in the supply: resource stacks plus the development deck."""
+
+    resources: ResourceCounts
+    dev_cards: int
+
+
 class BoardModel(BaseModel):
     tiles: list[TileModel]
     buildings: list[BuildingModel] = []
@@ -102,6 +109,7 @@ class BoardModel(BaseModel):
     players: list[PlayerModel] = []
     # Tile the robber currently occupies (axial coordinate), if any.
     robber: HexModel | None = None
+    bank: BankModel | None = None
 
 
 class EdgeModel(BaseModel):
@@ -187,6 +195,26 @@ class ReplayStateModel(BaseModel):
     seats: list[str] | None = None
 
 
+class PlayerBeliefModel(BaseModel):
+    """The observer's proven bounds on one player's hand (``lo == hi``: exact)."""
+
+    player: int
+    res_lo: ResourceCounts
+    res_hi: ResourceCounts
+
+
+class BeliefModel(BaseModel):
+    """Card counting from one human seat's perspective.
+
+    Everything here is derivable from public information (the engine's belief
+    tracker), so showing it to that seat never leaks hidden state. The
+    observer's own row is omitted — their hand is already on screen.
+    """
+
+    observer: int
+    players: list[PlayerBeliefModel]
+
+
 class GameModel(BaseModel):
     """Everything the Play view needs after a move: board + status + legal moves."""
 
@@ -197,3 +225,5 @@ class GameModel(BaseModel):
     bot_move: BotMoveModel | None = None
     # The game's chat / log (moves, chat messages, the win), oldest first.
     log: list[LogEntryModel] = []
+    # Card counting for the hand-panel seat; None with no human seats.
+    belief: BeliefModel | None = None

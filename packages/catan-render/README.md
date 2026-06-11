@@ -8,11 +8,14 @@ A menu lets you choose between two modes, each at its own URL:
   sharing the screen (hotseat) or a bot (a `catan-agents` policy, e.g. random or greedy —
   search bots expose their build parameters, like `mcts`'s simulation budget, behind the seat's gear button);
   with no human seats the game plays itself as a spectated bot match. Input follows the board:
-  every placement you can currently make is ghosted on the board in your colour — click a
-  corner, edge, or tile and confirm in a popup there (which shows the build cost, or who to
-  rob). The hand is live too: click a glowing development card to play it (resource picks come
-  from a popover) and resource cards to discard after a 7. A small bottom bar keeps the
-  turn-flow moves (roll, buy a dev card, bank trade, end turn). The bar
+  every placement you can currently make is marked on the board in your colour (hover to
+  preview the piece) — click it and confirm in a popup there (which shows the build cost, or
+  who to rob). The hand is live too: click a glowing development card to play it (resource
+  picks come from a popover) and resource cards to discard after a 7. A small bottom bar keeps
+  the turn-flow moves (roll, buy a dev card, bank trade, end turn); the top bar holds New
+  game, a light/dark theme toggle, and a card-counting toggle that annotates each opponent's
+  corner panel with proven hand bounds (public information only). The bank sits beside the board
+  as card stacks (one pile per resource plus the development deck) showing what's left. The bar
   also shows the acting human's hand (resources + dev cards by type), and a chat panel on the
   right doubles as the game log: the server logs every move as it is played (and the win), and
   humans can post messages. A help page (`/help`, the **?** button top-left) documents the

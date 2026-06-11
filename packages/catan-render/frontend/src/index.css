@@ -2,6 +2,38 @@
   box-sizing: border-box;
 }
 
+/* Theme palettes (lib/ui.ts exposes these to inline styles). Light: warm
+   paper on a sunlit table. Dark: the original night-table glass. */
+body {
+  --bg: radial-gradient(ellipse at 50% 35%, #f3e8cd 0%, #d9c7a0 75%);
+  --panel-bg: rgba(253, 248, 235, 0.92);
+  --panel-border: rgba(90, 70, 40, 0.3);
+  --text: #2b2418;
+  --button-bg: rgba(90, 70, 40, 0.08);
+  --button-border: rgba(90, 70, 40, 0.4);
+  --accent: #a87b16;
+  --accent-glow: rgba(168, 123, 22, 0.45);
+  --selected-bg: rgba(201, 154, 46, 0.25);
+  --divider: rgba(90, 70, 40, 0.25);
+  --link: #2c5f9e;
+  --error: #b03a2e;
+}
+
+body[data-theme="dark"] {
+  --bg: radial-gradient(ellipse at 50% 35%, #15293d 0%, #090f17 75%);
+  --panel-bg: rgba(12, 28, 46, 0.82);
+  --panel-border: rgba(255, 255, 255, 0.15);
+  --text: #f2efe6;
+  --button-bg: rgba(255, 255, 255, 0.08);
+  --button-border: rgba(255, 255, 255, 0.2);
+  --accent: #fce38a;
+  --accent-glow: rgba(252, 227, 138, 0.4);
+  --selected-bg: rgba(252, 227, 138, 0.25);
+  --divider: rgba(255, 255, 255, 0.15);
+  --link: #9ec5e8;
+  --error: #e89a9a;
+}
+
 /* Newly placed board pieces (roads / buildings) pop in. Applied to SVG groups:
    the piece scales up around its own bounding box. */
 @keyframes pop-in {
@@ -16,7 +48,8 @@
   animation: pop-in 0.35s ease-out;
 }
 
-/* Ghost previews of legal placements (BoardView): faint until hovered. */
+/* Legal placements (BoardView): a small quiet marker by default, swapped for
+   the full ghost piece on hover. Robber tiles use .ghost (always shown). */
 .board-ghost {
   cursor: pointer;
 }
@@ -27,6 +60,24 @@
 }
 
 .board-ghost:hover .ghost {
+  opacity: 0.95;
+}
+
+.board-ghost .ghost-min {
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.board-ghost .ghost-full {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.board-ghost:hover .ghost-min {
+  opacity: 0;
+}
+
+.board-ghost:hover .ghost-full {
   opacity: 0.95;
 }
 
@@ -41,8 +92,7 @@
 
 body {
   margin: 0;
-  /* A sunlit tabletop: warm and light, so the ocean-blue board pops. */
-  background: radial-gradient(ellipse at 50% 35%, #f3e8cd 0%, #d9c7a0 75%);
+  background: var(--bg);
   display: flex;
   justify-content: center;
   align-items: center;

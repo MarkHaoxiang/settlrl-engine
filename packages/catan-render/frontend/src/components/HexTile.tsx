@@ -3,14 +3,6 @@ import { TERRAIN_FILL as FILL, TERRAIN_STROKE as STROKE } from "../lib/boardData
 import type { Terrain } from "../lib/boardData";
 import TerrainIcon from "./TerrainIcon";
 
-// Where the terrain motifs sit (fractions of the hex size from the centre):
-// one above and two below the number token.
-const MOTIF_SPOTS: [number, number][] = [
-  [0, -0.52],
-  [-0.45, 0.3],
-  [0.45, 0.3],
-];
-
 interface Props {
   cx: number;
   cy: number;
@@ -23,6 +15,9 @@ function probDotCount(n: number): number {
   return 6 - Math.abs(7 - n);
 }
 
+// A clean tile: flat terrain colour, with one token integrating the terrain
+// icon, the number, and its probability pips. The desert (no number) carries
+// just a faint centred icon.
 export default function HexTile({ cx, cy, size, terrain, number }: Props) {
   const corners = hexCorners(cx, cy, size);
   const outerPoints = corners.map(([x, y]) => `${x},${y}`).join(" ");
@@ -50,31 +45,31 @@ export default function HexTile({ cx, cy, size, terrain, number }: Props) {
         strokeWidth={1}
         opacity={0.4}
       />
-      {MOTIF_SPOTS.map(([dx, dy], i) => (
-        <TerrainIcon
-          key={i}
-          terrain={terrain}
-          cx={cx + dx * size}
-          cy={cy + dy * size}
-          scale={size * 0.013}
-        />
-      ))}
-      {number !== undefined && (
+      {number === undefined ? (
+        <TerrainIcon terrain={terrain} cx={cx} cy={cy} scale={size * 0.016} opacity={0.45} />
+      ) : (
         <g>
           <circle
             cx={cx}
             cy={cy}
-            r={size * 0.23}
+            r={size * 0.3}
             fill="#FDF6E3"
             stroke="#A08050"
             strokeWidth={1.5}
           />
+          <TerrainIcon
+            terrain={terrain}
+            cx={cx}
+            cy={cy - size * 0.15}
+            scale={size * 0.0085}
+            opacity={0.8}
+          />
           <text
             x={cx}
-            y={cy - 2}
+            y={cy + size * 0.07}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={size * 0.22}
+            fontSize={size * 0.21}
             fontWeight="bold"
             fill={tokenColor}
             fontFamily="Georgia, 'Times New Roman', serif"
@@ -86,7 +81,7 @@ export default function HexTile({ cx, cy, size, terrain, number }: Props) {
             <circle
               key={i}
               cx={cx - dotsWidth / 2 + i * dotSpacing}
-              cy={cy + size * 0.13}
+              cy={cy + size * 0.215}
               r={1.8}
               fill={tokenColor}
             />

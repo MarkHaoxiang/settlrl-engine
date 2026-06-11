@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import ThemeToggle from "../components/ThemeToggle";
 import { panelStyle } from "../lib/ui";
 
 const cardStyle: React.CSSProperties = {
@@ -9,7 +10,7 @@ const cardStyle: React.CSSProperties = {
   width: 240,
   padding: "26px 24px",
   borderRadius: 16,
-  border: "2px solid rgba(90, 70, 40, 0.3)",
+  border: "2px solid var(--panel-border)",
   textDecoration: "none",
   boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
 };
@@ -32,13 +33,16 @@ export default function Menu() {
         alignItems: "center",
         gap: 36,
         padding: 24,
-        color: "#2B2418",
+        color: "var(--text)",
         fontFamily: "Georgia, serif",
       }}
     >
-      <h1 style={{ fontSize: 48, margin: 0, letterSpacing: 1, textShadow: "0 2px 8px rgba(255,255,255,0.6)" }}>
+      <h1 style={{ fontSize: 48, margin: 0, letterSpacing: 1 }}>
         Catan
       </h1>
+      <div style={{ position: "fixed", top: 16, right: 16 }}>
+        <ThemeToggle />
+      </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
         <MenuCard to="/play" title="Play" subtitle="Start a new game and take turns on the board." />
         <MenuCard to="/replay" title="Replay" subtitle="Step through a recorded game from start to finish." />

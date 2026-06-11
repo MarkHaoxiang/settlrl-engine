@@ -6,7 +6,7 @@
 // targets.
 
 import { api } from "./api";
-import { adaptBoard, type Board, type BoardWire } from "./boardData";
+import { adaptBoard, type Board, type BoardWire, type ResourceKind } from "./boardData";
 import type { Cube, CubeEdge, Hex } from "./hex";
 
 export interface GameAction {
@@ -55,12 +55,27 @@ export interface LogEntry {
   text: string;
 }
 
+// Card counting from the hand-panel seat's perspective (engine belief
+// tracker: all publicly derivable). The observer's own row is omitted;
+// lo == hi where the count is known exactly.
+export interface PlayerBelief {
+  player: number;
+  res_lo: Record<ResourceKind, number>;
+  res_hi: Record<ResourceKind, number>;
+}
+
+export interface Belief {
+  observer: number;
+  players: PlayerBelief[];
+}
+
 export interface GameSnapshot {
   board: Board;
   status: GameStatus;
   actions: GameAction[];
   bot_move: BotMove | null;
   log: LogEntry[];
+  belief: Belief | null;
 }
 
 interface GameWire {
@@ -69,6 +84,7 @@ interface GameWire {
   actions: GameAction[];
   bot_move: BotMove | null;
   log: LogEntry[];
+  belief: Belief | null;
 }
 
 const adaptGame = (wire: GameWire): GameSnapshot => ({

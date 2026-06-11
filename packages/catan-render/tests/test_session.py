@@ -175,6 +175,19 @@ def test_two_player_session() -> None:
     assert status.winner is not None and 0 <= status.winner < 2
 
 
+def test_belief_serves_the_hand_seat() -> None:
+    # Fresh game: the human observer sees every opponent's (empty) hand
+    # exactly; their own row is omitted. All-bot games have no observer.
+    sess = GameSession(seed=0)
+    belief = sess.belief()
+    assert belief is not None and belief.observer == 0
+    assert [b.player for b in belief.players] == [1, 2, 3]
+    for b in belief.players:
+        assert b.res_lo == b.res_hi  # nothing dealt yet: bounds are exact
+
+    assert GameSession(seed=0, seats=["random"] * 4).belief() is None
+
+
 def test_reset_keeps_seat_count_unless_changed() -> None:
     sess = GameSession(seed=0, n_players=2)
     sess.reset(seed=1)  # no n_players -> keeps 2

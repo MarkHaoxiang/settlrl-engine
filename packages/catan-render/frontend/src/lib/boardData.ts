@@ -42,6 +42,12 @@ export interface Player {
   devCardTypes: Record<DevCardKind, number>;
 }
 
+// Cards left in the supply: resource stacks plus the development deck.
+export interface Bank {
+  resources: Record<ResourceKind, number>;
+  devCards: number;
+}
+
 export interface Board {
   tiles: Tile[];
   buildings: Building[];
@@ -49,6 +55,7 @@ export interface Board {
   ports: PortData[];
   players: Player[];
   robber?: Hex;
+  bank?: Bank;
 }
 
 // -- palette ------------------------------------------------------------------
@@ -96,6 +103,7 @@ export interface BoardWire {
   ports: PortData[];
   players: PlayerWire[];
   robber: Hex | null;
+  bank: { resources: Record<ResourceKind, number>; dev_cards: number } | null;
 }
 
 export function adaptBoard(wire: BoardWire): Board {
@@ -117,6 +125,9 @@ export function adaptBoard(wire: BoardWire): Board {
       devCardTypes: p.dev_card_types,
     })),
     robber: wire.robber ?? undefined,
+    bank: wire.bank
+      ? { resources: wire.bank.resources, devCards: wire.bank.dev_cards }
+      : undefined,
   };
 }
 

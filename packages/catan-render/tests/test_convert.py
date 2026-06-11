@@ -17,7 +17,7 @@ from catan_engine.board import (
     place_settlement,
     set_robber,
 )
-from catan_engine.board.dev_cards import DevCard
+from catan_engine.board.dev_cards import DEV_CARD_COUNTS, DevCard
 from catan_engine.board.layout import edge_index, tile_index, vertex_cube, vertex_index
 from catan_engine.board.port import Port
 from catan_render.convert import _DEV_CARD_NAMES, _RESOURCE_NAMES, board_to_model
@@ -91,6 +91,19 @@ def test_player_resource_and_dev_breakdown() -> None:
     assert p0.dev_cards == 3
     # Field set matches the dev-card enum ordering used to fill it.
     assert tuple(dev) == _DEV_CARD_NAMES
+
+
+def test_bank_mirrors_hands() -> None:
+    model = board_to_model(_build_board())
+    assert model.bank is not None
+    # Seat 0 holds [1, 2, 3, 4, 5]; the bank holds 19 minus what's in hands.
+    bank = model.bank.resources.model_dump()
+    expected = dict(zip(_RESOURCE_NAMES, [18, 17, 16, 15, 14], strict=True))
+    assert {k: bank[k] for k in _RESOURCE_NAMES} == expected
+
+    fresh = board_to_model(make_board(batch_size=1, seed=0))
+    assert fresh.bank is not None
+    assert fresh.bank.dev_cards == sum(DEV_CARD_COUNTS)
 
 
 def test_robber_coordinate() -> None:

@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { LINK, panelStyle } from "../lib/ui";
+import ThemeToggle from "./ThemeToggle";
 
 // The top bar shared by the game views: a help link on the left (tucked under
 // the top-left player panel), and a back-to-menu link with the current mode
-// label top-centre. Pure presentation.
-export default function TopBar({ mode }: { mode: string }) {
+// label top-centre, followed by the theme toggle and any view-specific
+// controls (`children` — settings-like actions such as New game).
+export default function TopBar({ mode, children }: { mode: string; children?: React.ReactNode }) {
   return (
     <>
       <Link
@@ -50,6 +52,8 @@ export default function TopBar({ mode }: { mode: string }) {
         <span style={{ fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: 1 }}>
           {mode}
         </span>
+        {children}
+        <ThemeToggle />
       </div>
     </>
   );

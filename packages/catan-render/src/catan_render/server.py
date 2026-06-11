@@ -71,6 +71,7 @@ def _game_model(bot_move: BotMoveModel | None = None) -> GameModel:
         actions=actions,
         bot_move=bot_move,
         log=_SESSION.log(),
+        belief=_SESSION.belief(),
     )
 
 
