@@ -28,3 +28,9 @@ catan-agents = { workspace = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-n auto"
+
+# Empty: makes the workspace-wide CI opt-out (UV_NO_GROUP=cuda in ci.yml) a
+# valid group name under `uv run --package <this>`. The real cuda group lives
+# in the workspace root's pyproject.
+[dependency-groups]
+cuda = []
