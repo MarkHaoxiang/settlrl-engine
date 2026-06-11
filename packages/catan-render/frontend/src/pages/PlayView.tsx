@@ -26,7 +26,6 @@ import {
   buttonStyle,
   overlayMsgStyle,
   panelStyle,
-  selectedStyle,
 } from "../lib/ui";
 
 const RESOURCES: { key: ResourceKind; label: string }[] = [
@@ -305,8 +304,6 @@ export default function PlayView() {
   // Whether the new-game configuration dialog is open (shown on entry, and
   // reopened by the New game button).
   const [configuring, setConfiguring] = useState(true);
-  // Whether the corner panels show card-counting bounds (top-bar toggle).
-  const [showBelief, setShowBelief] = useState(false);
 
   const actions = snapshot?.actions ?? [];
 
@@ -454,21 +451,8 @@ export default function PlayView() {
     <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
       {/* Board area: the chrome inside is anchored to it, not the viewport */}
       <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
-        <BoardView
-          board={board}
-          interaction={interaction}
-          beliefs={showBelief && snapshot.belief ? snapshot.belief.players : undefined}
-        />
+        <BoardView board={board} interaction={interaction} />
         <TopBar mode="Play">
-          {snapshot.belief && (
-            <button
-              title="Card counting: show proven bounds on opponents' hands"
-              style={{ ...smallButton, padding: "3px 8px", fontSize: 13, ...(showBelief ? selectedStyle : {}) }}
-              onClick={() => setShowBelief((v) => !v)}
-            >
-              🧮
-            </button>
-          )}
           <button style={smallButton} onClick={() => setConfiguring(true)}>
             New game
           </button>
@@ -616,6 +600,10 @@ export default function PlayView() {
       <ChatPanel
         entries={snapshot.log}
         onSend={(text) => chat(text, handSeat >= 0 ? handSeat : null)}
+        players={board.players}
+        acting={status.terminal ? undefined : status.acting_player}
+        you={handSeat >= 0 ? handSeat : undefined}
+        belief={snapshot.belief}
       />
 
       {configuring && (

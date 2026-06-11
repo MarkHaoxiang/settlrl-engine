@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { hexToPixel, cubeToPixel, hexCorners, type Cube, type CubeEdge, type Hex } from "../lib/hex";
 import { PLAYER_COLORS, type Board } from "../lib/boardData";
-import type { PlayerBelief } from "../lib/game";
 import { HIGHLIGHT } from "../lib/ui";
 import HexTile from "./HexTile";
 import Road from "./Road";
 import Building, { housePath } from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
-import PlayerPanel from "./PlayerPanel";
 import BankStacks from "./BankStacks";
 
 // A popover anchor in this component's container coordinates (top-centre of
@@ -39,24 +37,18 @@ const PADDING = 90;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3;
 
-// Players are assigned to corners 0..3 = TL, TR, BL, BR.
-const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 interface Props {
   board: Board;
   interaction?: BoardInteraction;
-  // Card-counting rows for the corner panels (per non-observer player).
-  beliefs?: PlayerBelief[];
 }
 
 // Renders a Catan board (tiles, ports, roads, buildings, robber, the bank's
-// card stacks on the table beside it) as a zoomable, pannable SVG, with
-// per-player stat panels anchored to the viewport corners. It fills its parent
-// container, so a parent can overlay mode-specific controls on top (the replay
-// scrubber, the play action bar, a back button, …).
-export default function BoardView({ board, interaction, beliefs }: Props) {
+// card stacks on the table beside it) as a zoomable, pannable SVG. It fills
+// its parent container, so a parent can overlay mode-specific controls on top
+// (the replay scrubber, the play action bar, a back button, …).
+export default function BoardView({ board, interaction }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -414,15 +406,6 @@ export default function BoardView({ board, interaction, beliefs }: Props) {
         </svg>
       </div>
 
-      {/* Corner player panels — fixed in the viewport, unaffected by zoom */}
-      {board.players.map((p) => (
-        <PlayerPanel
-          key={`player-${p.player}`}
-          player={p}
-          corner={CORNERS[p.player]}
-          belief={beliefs?.find((b) => b.player === p.player)}
-        />
-      ))}
     </div>
   );
 }

@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import { actionMeta } from "../lib/actionMeta";
-import { PLAYER_COLORS, playerName } from "../lib/boardData";
-import type { LogEntry } from "../lib/game";
-import { buttonStyle, panelStyle } from "../lib/ui";
+import { PLAYER_COLORS, playerName, type Player } from "../lib/boardData";
+import type { Belief, LogEntry } from "../lib/game";
+import { DIVIDER, buttonStyle, panelStyle } from "../lib/ui";
+import PlayersPanel from "./PlayersPanel";
 
 interface Props {
   entries: LogEntry[];
   // Omit to render a read-only log (no input row), e.g. for replays.
   onSend?: (text: string) => void;
   title?: string;
+  // When set, the column opens with the seat list (playing order) above the
+  // log; `acting` / `you` / `belief` flow through to it.
+  players?: Player[];
+  acting?: number;
+  you?: number;
+  belief?: Belief | null;
 }
 
-// Right-hand chat & game log column, rendering the server-side log: every
-// move lands here as an event line, and humans can type messages.
-export default function ChatPanel({ entries, onSend, title = "Chat" }: Props) {
+// Right-hand column: the seat list on top (when given), then the chat & game
+// log rendering the server-side log — every move lands here as an event line,
+// and humans can type messages.
+export default function ChatPanel({ entries, onSend, title = "Chat", players, acting, you, belief }: Props) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -39,6 +47,12 @@ export default function ChatPanel({ entries, onSend, title = "Chat" }: Props) {
         flexDirection: "column",
       }}
     >
+      {players && (
+        <>
+          <PlayersPanel players={players} acting={acting} you={you} belief={belief} />
+          <div style={{ height: 1, background: DIVIDER, margin: "0 14px 2px" }} />
+        </>
+      )}
       <span
         style={{
           fontSize: 11,

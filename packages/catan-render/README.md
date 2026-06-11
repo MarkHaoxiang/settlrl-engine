@@ -13,11 +13,12 @@ A menu lets you choose between two modes, each at its own URL:
   who to rob). The hand is live too: click a glowing development card to play it (resource
   picks come from a popover) and resource cards to discard after a 7. A small bottom bar keeps
   the turn-flow moves (roll, buy a dev card, bank trade, end turn); the top bar holds New
-  game, a light/dark theme toggle, and a card-counting toggle that annotates each opponent's
-  corner panel with proven hand bounds (public information only). The bank sits beside the board
+  game and a light/dark theme toggle. The bank sits beside the board
   as card stacks (one pile per resource plus the development deck) showing what's left. The bar
-  also shows the acting human's hand (resources + dev cards by type), and a chat panel on the
-  right doubles as the game log: the server logs every move as it is played (and the win), and
+  also shows the acting human's hand (resources + dev cards by type). The right column opens
+  with the seats in playing order (⭐ points, 🎴 cards, 🃏 devs — and 🔍 to inspect an
+  opponent's proven hand bounds, i.e. public card counting) over the chat panel, which doubles
+  as the game log: the server logs every move as it is played (and the win), and
   humans can post messages. A help page (`/help`, the **?** button top-left) documents the
   controls and icons. On entry — and from the
   **New game** button — a dialog configures the next game: player count (2 or 4), what controls

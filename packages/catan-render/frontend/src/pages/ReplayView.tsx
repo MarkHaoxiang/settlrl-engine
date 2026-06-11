@@ -290,7 +290,7 @@ export default function ReplayView() {
         </div>
       </div>
 
-      <ChatPanel entries={state.log} title="Log" />
+      <ChatPanel entries={state.log} title="Log" players={state.board.players} />
     </div>
   );
 }

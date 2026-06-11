@@ -102,8 +102,7 @@ export default function HelpView() {
         <Section title="Your hand">
           <span style={{ opacity: 0.8 }}>
             The chips in the bottom panel are the acting human's hand: resources and development
-            cards by type (the corner panels track every player's card counts and victory
-            points). Glowing chips are playable — click one:
+            cards by type. Glowing chips are playable — click one:
           </span>
           <ActionTable rows={HAND_HELP} />
         </Section>
@@ -118,11 +117,18 @@ export default function HelpView() {
         <Section title="The top bar">
           <span>
             Back to the menu, the light/dark theme toggle, and in Play: <b>New game</b>
-            (reconfigure seats; cancelling keeps the game in progress) and <b>🧮 card
-            counting</b>, which adds proven bounds on each opponent's hand to their corner
-            panel — "2" is a known count, "0–3" is what a hidden robber steal allows. Only
-            public information is used, so it never reveals anything you couldn't have
-            tracked yourself.
+            (reconfigure seats; cancelling keeps the game in progress).
+          </span>
+        </Section>
+
+        <Section title="Players & chat">
+          <span>
+            The right column opens with the seats in playing order — ⭐ victory points,
+            🎴 resource cards, 🃏 development cards, the acting seat tinted — over the
+            chat / game log. <b>🔍 Inspect</b> on an opponent unfolds card counting: proven
+            per-resource bounds on their hand, where "2" is a known count and "0–3" is what
+            a hidden robber steal allows. Only public information is used, so it never
+            reveals anything you couldn't have tracked yourself.
           </span>
         </Section>
 
