@@ -14,7 +14,8 @@ _ROW_TYPE, _ = flat_to_action(jnp.arange(N_FLAT))
 
 def random_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatAction:
     """Uniform over the legal action *types*, then uniform over that type's
-    legal moves (``obs`` is ignored).
+    legal moves (``obs`` is ignored) — the same type-first sampling as
+    ``BatchedCatanEnv.random_actions``.
 
     Two-stage rather than flat-uniform so bulk-enumerated types don't crowd
     out single-row ones: the ~100 trade-proposal rows would otherwise make

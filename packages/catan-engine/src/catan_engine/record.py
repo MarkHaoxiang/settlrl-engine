@@ -208,8 +208,14 @@ Act = Callable[[KeyScalar, BatchedCatanEnv], int]
 
 
 def _uniform_random(key: KeyScalar, env: BatchedCatanEnv) -> int:
+    """A uniform legal action type, then a uniform legal move of that type
+    (the same type-first sampling as ``BatchedCatanEnv.random_actions``)."""
+    k_type, k_row = jax.random.split(key)
     legal = np.flatnonzero(np.asarray(env.flat_mask()[0]))
-    return int(legal[jax.random.randint(key, (), 0, legal.size)])
+    types = np.unique(_ATYPE[legal])
+    t = types[jax.random.randint(k_type, (), 0, types.size)]
+    rows = legal[_ATYPE[legal] == t]
+    return int(rows[jax.random.randint(k_row, (), 0, rows.size)])
 
 
 def record_game(
@@ -223,9 +229,10 @@ def record_game(
 ) -> GameRecord:
     """Play one game to completion and return its record.
 
-    ``act`` chooses each move (default: uniformly random over the legal
-    actions); a returned illegal action raises ``ValueError``, and a game not
-    finishing within ``max_moves`` raises ``RuntimeError``.
+    ``act`` chooses each move (default: random type-first legal play, like
+    ``BatchedCatanEnv.random_actions``); a returned illegal action raises
+    ``ValueError``, and a game not finishing within ``max_moves`` raises
+    ``RuntimeError``.
     """
     record = GameRecord(
         seed=seed, n_players=n_players, number_placement=number_placement

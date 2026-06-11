@@ -70,6 +70,7 @@ from catan_engine.mechanics.common import (
     player_total_vp,
 )
 from catan_engine.mechanics.flat import (
+    FLAT_ATYPE,
     INDEX_MASKS,
     N_FLAT,
     FlatMaskArray,
@@ -236,14 +237,23 @@ def _fresh_board(
 def _random_actions_core(
     avail_flat: FlatMaskArray, key: KeyScalar
 ) -> tuple[ActionTypeArray, ActionParams]:
-    """Sample a uniformly-random legal action per lane.
+    """Sample a random legal action per lane: a uniform legal action *type*,
+    then a uniform legal move of that type.
 
-    ``avail_flat`` is the ``(B, N_FLAT)`` flat-legality sweep. Legal moves are
-    scored with uniform noise and the per-lane argmax is taken (illegal scored
+    Two-stage rather than flat-uniform so bulk-enumerated types don't crowd
+    out single-row ones (the ~100 trade-proposal rows would make almost every
+    MAIN move an offer, stretching random games several-fold). ``avail_flat``
+    is the ``(B, N_FLAT)`` flat-legality sweep; each stage scores its legal
+    entries with uniform noise and takes the per-lane argmax (illegal scored
     -1, so only picked if the lane has no legal move).
     """
-    noise = jax.random.uniform(key, avail_flat.shape)
-    chosen = jnp.argmax(jnp.where(avail_flat, noise, -1.0), axis=1)
+    k_type, k_row = jax.random.split(key)
+    type_legal = type_mask_from_flat(avail_flat)  # (B, N_ACTION_TYPES)
+    t_noise = jax.random.uniform(k_type, type_legal.shape)
+    t = jnp.argmax(jnp.where(type_legal, t_noise, -1.0), axis=1)  # (B,)
+    row_legal = avail_flat & (FLAT_ATYPE[None, :] == t[:, None])
+    noise = jax.random.uniform(k_row, avail_flat.shape)
+    chosen = jnp.argmax(jnp.where(row_legal, noise, -1.0), axis=1)
     return flat_to_action(chosen)
 
 
@@ -584,7 +594,8 @@ class BatchedCatanEnv:
         return fn(self._layout, self._state)
 
     def random_actions(self, key: KeyScalar) -> tuple[ActionTypeArray, ActionParams]:
-        """A uniformly-random *legal* action per lane (the random-rollout driver).
+        """A random *legal* action per lane (the random-rollout driver): a
+        uniform legal action type, then a uniform legal move of that type.
 
         A lane with no legal action yields an INVALID action and simply stalls
         until its next auto-reset. ``key`` is a JAX PRNG key, split per lane.
@@ -596,9 +607,10 @@ class BatchedCatanEnv:
     ) -> RewardArray:
         """Advance every lane ``n_steps`` steps as one fused ``lax.scan``.
 
-        Actions come from ``actor`` (see :data:`Actor`), or uniformly-random
-        legal play when it is None — in which case the trajectory is identical
-        to a :meth:`random_actions` + :meth:`step` loop for the same ``key``;
+        Actions come from ``actor`` (see :data:`Actor`), or random legal play
+        (:meth:`random_actions`'s type-first sampling) when it is None — in
+        which case the trajectory is identical to a :meth:`random_actions` +
+        :meth:`step` loop for the same ``key``;
         afterwards the env reflects the final step. Returns the reward summed
         over the window (under ``"sparse"`` reward: each player's win count).
         Compiles once per distinct ``(n_steps, actor identity)``.
