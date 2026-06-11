@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 from catan_engine.board import (
@@ -26,6 +27,7 @@ from catan_engine.board import (
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import TILE_V, BoardLayout
 from catan_engine.board.state import BoardState, GamePhase
+from catan_engine.mechanics.trade import pack_trade, propose_trade_step
 
 from tests.mechanics.actions.fixtures import road_fixture, settlement_fixture
 from tests.render import BoardRenderer
@@ -98,6 +100,24 @@ def trade_board() -> Board:
     """MAIN board where player 0 holds 4 sheep (no port -> 4:1 bank trade)."""
     board = to_main(make_board())
     return give(board, 0, [4, 0, 0, 0, 0])
+
+
+@pytest.fixture
+def propose_board() -> Board:
+    """MAIN board (4p): player 0 holds 1 sheep, player 2 holds 3 wood, player 1
+    holds nothing -- the domestic-trade success and invalid cases."""
+    board = to_main(make_board(seed=0))
+    board = give(board, 0, [1, 0, 0, 0, 0])
+    return give(board, 2, [0, 0, 3, 0, 0])
+
+
+@pytest.fixture
+def response_board(propose_board: Board) -> Board:
+    """TRADE_RESPONSE board: player 0 has offered player 2 a sheep for a wood."""
+    state, _ = propose_trade_step(
+        propose_board, (jnp.array([pack_trade(0, 2)]), jnp.array([2]))
+    )
+    return (propose_board[0], state)
 
 
 @pytest.fixture

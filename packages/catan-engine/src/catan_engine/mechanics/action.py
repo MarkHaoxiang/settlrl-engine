@@ -63,7 +63,16 @@ from catan_engine.mechanics.setup import (
     _setup_settlement_apply,
     _setup_settlement_avail,
 )
-from catan_engine.mechanics.trade import _maritime_apply, _maritime_avail
+from catan_engine.mechanics.trade import (
+    _accept_trade_apply,
+    _accept_trade_avail,
+    _maritime_apply,
+    _maritime_avail,
+    _propose_trade_apply,
+    _propose_trade_avail,
+    _reject_trade_apply,
+    _reject_trade_avail,
+)
 from catan_engine.mechanics.turn import _end_turn_apply, _end_turn_avail
 
 __all__ = [
@@ -102,7 +111,10 @@ class ActionType(IntEnum):
     PLAY_YEAR_OF_PLENTY = 11
     PLAY_MONOPOLY = 12
     MARITIME_TRADE = 13
-    END_TURN = 14
+    PROPOSE_TRADE = 14
+    ACCEPT_TRADE = 15
+    REJECT_TRADE = 16
+    END_TURN = 17
 
 
 N_ACTION_TYPES = len(ActionType)
@@ -115,8 +127,10 @@ class ActionParams(NamedTuple):
     reads only what it needs; unused fields are ignored. By action:
 
     - vertex/edge/tile/resource/give (single index)  -> ``idx``
-      (Discard's ``idx`` is the resource to give up one card of)
-    - victim / receive / second resource (Year of Plenty) -> ``target``
+      (Discard's ``idx`` is the resource to give up one card of; ProposeTrade's
+      packs (give, receive) as ``give * N_RESOURCES + receive``)
+    - victim / receive / second resource (Year of Plenty) / trade partner
+      -> ``target``
     - RollDice reads ``idx`` as an optional forced outcome (2..12), and
       BuyDevelopmentCard as an optional forced card type (1..5, meaning type
       ``idx - 1``); any other value, including the flat table's 0, samples
@@ -150,6 +164,9 @@ _APPLY_BRANCHES = (
     lambda lay, st, pp, av: _yop_apply(lay, st, (pp.idx, pp.target), av),
     lambda lay, st, pp, av: _monopoly_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _maritime_apply(lay, st, (pp.idx, pp.target), av),
+    lambda lay, st, pp, av: _propose_trade_apply(lay, st, (pp.idx, pp.target), av),
+    lambda lay, st, pp, av: _accept_trade_apply(lay, st, None, av),
+    lambda lay, st, pp, av: _reject_trade_apply(lay, st, None, av),
     lambda lay, st, pp, av: _end_turn_apply(lay, st, None, av),
 )
 
@@ -168,6 +185,9 @@ _AVAIL_BRANCHES = (
     lambda lay, st, pp: _yop_avail(lay, st, (pp.idx, pp.target)),
     lambda lay, st, pp: _monopoly_avail(lay, st, pp.idx),
     lambda lay, st, pp: _maritime_avail(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _propose_trade_avail(lay, st, (pp.idx, pp.target)),
+    lambda lay, st, pp: _accept_trade_avail(lay, st, None),
+    lambda lay, st, pp: _reject_trade_avail(lay, st, None),
     lambda lay, st, pp: _end_turn_avail(lay, st, None),
 )
 

@@ -13,6 +13,7 @@ from catan_reference.board import (
     Port,
 )
 from catan_reference.game import (
+    AcceptTrade,
     Action,
     BuildCity,
     BuildRoad,
@@ -28,6 +29,8 @@ from catan_reference.game import (
     PlayMonopoly,
     PlayRoadBuilding,
     PlayYearOfPlenty,
+    ProposeTrade,
+    RejectTrade,
     Roll,
     SetupRoad,
     SetupSettlement,
@@ -44,6 +47,7 @@ __all__ = [
     "N_EDGES",
     "N_TILES",
     "N_VERTICES",
+    "AcceptTrade",
     "Action",
     "BuildCity",
     "BuildRoad",
@@ -65,6 +69,8 @@ __all__ = [
     "Player",
     "Port",
     "PortType",
+    "ProposeTrade",
+    "RejectTrade",
     "Resource",
     "Roll",
     "SetupRoad",

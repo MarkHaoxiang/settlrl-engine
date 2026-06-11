@@ -18,11 +18,13 @@ export interface GameAction {
   edge: CubeEdge | null;
   tile: Hex | null;
   victim: number | null;
-  // Resource choices: monopoly / year-of-plenty / maritime trade.
+  // Resource choices: monopoly / year-of-plenty / maritime trade, and the
+  // domestic trade proposal (give/receive plus the proposed-to partner).
   resource: string | null;
   resources: string[] | null;
   give: string | null;
   receive: string | null;
+  partner: number | null;
 }
 
 export interface GameStatus {

@@ -44,6 +44,14 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   `is_legal` accepts any owing player; `legal_actions()` enumerates only the
   lowest-indexed owing player, matching the engine's fixed order so the
   differential driver exercises identical action streams.
+- **Domestic trade is one card each way**
+  (`ProposeTrade(partner, give, receive)` → `AcceptTrade` / `RejectTrade`,
+  through `Phase.TRADE_RESPONSE`): a deliberate restriction of the rulebook's
+  free-form negotiation to a flat action set, matching the engine. Proposing
+  is gated on *public* information only (the proposer holds the give card,
+  the partner's hand is non-empty); whether the partner holds the asked-for
+  card is settled by Accept (illegal without it) / Reject (always legal).
+  Disabled in 2-player games.
 
 ## Checks
 

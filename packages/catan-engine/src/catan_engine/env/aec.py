@@ -167,7 +167,8 @@ class CatanAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any b
     # -- internals --------------------------------------------------------
 
     def _acting_agent(self) -> str:
-        """The player whose turn it is (current player, or discarder in DISCARD)."""
+        """The acting player (current player, the discarder in DISCARD, or the
+        trade partner in TRADE_RESPONSE)."""
         return self.possible_agents[int(self._env.agent_selection[0])]
 
     def _action_mask(self) -> np.ndarray:

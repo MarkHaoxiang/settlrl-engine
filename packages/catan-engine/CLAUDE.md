@@ -65,7 +65,7 @@ rule helpers and the action cores built on them. A core exposes the batched
 public `<name>_available` / `<name>_step` plus the private single-game
 `_<name>_avail` / `_<name>_apply` used by the dispatch. `_<name>_apply` takes
 the precomputed `available` legality instead of computing it: under `vmap`
-every `lax.switch` branch runs, so an internal avail call would be paid ~15×
+every `lax.switch` branch runs, so an internal avail call would be paid ~18×
 per lane. A core applies only its own state change; award reassignment and the
 win check are **stage 2**, run once per step by `awards.resolve_step`. The
 `*_step` wrappers that can change an award (BuildRoad / BuildSettlement /
@@ -99,6 +99,18 @@ the standalone API stays fully resolved.
 - `robber.py` — Discard is **one card per action**, repeated until the owed
   count reaches zero: keeps the choice space flat instead of enumerating
   combinatorial whole-hand splits.
+- `trade.py` — domestic trade is **one card each way** (ProposeTrade packs
+  (give, receive) into one index via `pack_trade`; the partner is `target`),
+  the same flat-choice-space trade-off as Discard — the rulebook's arbitrary
+  bundles are out of the action space. Propose legality reads *public*
+  information only (proposer holds the give card; the partner's hand is
+  non-empty), so the legality mask never leaks the partner's hidden hand;
+  whether the partner holds the asked-for card is checked by AcceptTrade,
+  whose mask only the partner sees. The proposal parks the game in
+  TRADE_RESPONSE (`trade_partner`/`trade_give`/`trade_receive` on the state;
+  partner = NO_INDEX when none); Accept/Reject return to MAIN. Disabled at 2
+  players (`n_players > 2` is static, so the propose rows are statically
+  illegal there, like unseated robber victims).
 - `setup.py` — the snake order is computed arithmetically because `n_players`
   is per-game state; the host-side `setup_order` restates it plainly for
   tests.
@@ -110,11 +122,10 @@ the standalone API stays fully resolved.
 - `action.py` — the `lax.switch` dispatch over the cores. `apply_action`
   takes precomputed `available` and applies branchlessly (candidate always
   computed, then `tree_select`-ed), followed by the stage-2 resolve.
-  DomesticTrade is intentionally deferred.
 - `flat.py` — the flat action space, the public seam (imports `action.py`,
   never the reverse). The table is fully static. The legality sweep calls each
   core directly over its own static slice of the table — vmapping the switch
-  over the table would evaluate all 15 branches per entry. `flat_legality`
+  over the table would evaluate every branch per entry. `flat_legality`
   reads one chosen action's bit out of a cached sweep, so the env never
   recomputes avail for the action it applies.
 
@@ -132,7 +143,8 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
   arbitrary params: legality computed internally via the switch) and
   `BatchedCatanEnv`, a batched PettingZoo-AEC env (batch axis = parallel
   games; the acting agent per lane is its `current_player`, or the next owing
-  player during DISCARD). Design points:
+  player during DISCARD, or the trade partner during TRADE_RESPONSE). Design
+  points:
   - **One cached legality source, `self._avail`** (the flat sweep), computed
     at `reset` and refreshed by every `step`; the step gate, `random_actions`,
     and `action_mask` all read it. `_vps` / `_agent_sel` are cached the same
@@ -177,9 +189,9 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
   derivable entirely from public information (handing it to an agent never
   leaks). Information model: a robber steal's card *type* is hidden from third
   parties (thief and victim see it) and held dev-card identities are hidden;
-  everything else — production, costs, discards, Monopoly surrenders,
-  hand/dev counts, the bank — is public, so per-type resource totals across
-  hands stay public too. `update_belief` is diff-based; every tightening rule
+  everything else — production, costs, discards, domestic trades (offer and
+  swap are announced), Monopoly surrenders, hand/dev counts, the bank — is
+  public, so per-type resource totals across hands stay public too. `update_belief` is diff-based; every tightening rule
   is individually sound, and INVALID transitions are no-ops by construction
   (zero diff). **Derived theorem, tested:** with 2 players the bounds stay
   exact (`lo == hi`), recovering "2p is perfect-info up to dev identities"

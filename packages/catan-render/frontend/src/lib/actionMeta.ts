@@ -33,6 +33,9 @@ export const ACTION_META: Record<string, ActionMeta> = {
   play_monopoly: { icon: "🎩", label: "Monopoly" },
   play_year_of_plenty: { icon: "🎁", label: "Year of plenty" },
   maritime_trade: { icon: "🚢", label: "Maritime trade" },
+  propose_trade: { icon: "🤝", label: "Propose trade" },
+  accept_trade: { icon: "✅", label: "Accept trade" },
+  reject_trade: { icon: "❌", label: "Reject trade" },
   discard: { icon: "🗑️", label: "Discard" },
 };
 

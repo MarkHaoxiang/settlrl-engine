@@ -83,6 +83,7 @@ _PHASE: dict[int, ref.Phase] = {
     int(GamePhase.DISCARD): ref.Phase.DISCARD,
     int(GamePhase.MOVE_ROBBER): ref.Phase.MOVE_ROBBER,
     int(GamePhase.MAIN): ref.Phase.MAIN,
+    int(GamePhase.TRADE_RESPONSE): ref.Phase.TRADE_RESPONSE,
     int(GamePhase.GAME_OVER): ref.Phase.GAME_OVER,
 }
 
@@ -101,6 +102,12 @@ def _port_type(port_value: int) -> ref.PortType:
 
 def _owner_or_none(value: int) -> int | None:
     return None if value == NO_INDEX else value
+
+
+def _trade_resource(partner: int, value: int) -> ref.Resource | None:
+    """A pending trade's resource (``None`` when no proposal is pending: the
+    engine zeroes the give/receive fields, the reference uses ``None``)."""
+    return None if partner == NO_INDEX else ref.Resource(value)
 
 
 # --- layout conversion ------------------------------------------------------
@@ -210,6 +217,13 @@ def _build_game(layout: ref.Layout, state: BoardState, b: int) -> ref.Game:
         dev_played_this_turn=bool(int(state.dev_played[b])),
         free_roads=int(state.free_roads[b]),
         pending_discard=[int(pending[p]) for p in range(n_players)],
+        trade_partner=_owner_or_none(int(state.trade_partner[b])),
+        trade_give=_trade_resource(
+            int(state.trade_partner[b]), int(state.trade_give[b])
+        ),
+        trade_receive=_trade_resource(
+            int(state.trade_partner[b]), int(state.trade_receive[b])
+        ),
         longest_road_owner=_owner_or_none(int(state.longest_road_owner[b])),
         largest_army_owner=_owner_or_none(int(state.largest_army_owner[b])),
         longest_road_len=int(state.longest_road_len[b]),
@@ -372,6 +386,12 @@ def to_engine_action(action: ref.Action) -> tuple[int, int, int]:
             return int(ActionType.PLAY_MONOPOLY), int(r), -1
         case ref.MaritimeTrade(give=g, receive=r):
             return int(ActionType.MARITIME_TRADE), int(g), int(r)
+        case ref.ProposeTrade(partner=p, give=g, receive=r):
+            return int(ActionType.PROPOSE_TRADE), int(g) * N_RESOURCES + int(r), p
+        case ref.AcceptTrade():
+            return int(ActionType.ACCEPT_TRADE), 0, -1
+        case ref.RejectTrade():
+            return int(ActionType.REJECT_TRADE), 0, -1
         case ref.EndTurn():
             return int(ActionType.END_TURN), 0, -1
         case _:  # pragma: no cover - the match above is exhaustive over Action
@@ -407,6 +427,9 @@ def assert_states_match(
     check("dev_played", expected.dev_played_this_turn, game.dev_played_this_turn)
     check("free_roads", expected.free_roads, game.free_roads)
     check("pending_discard", expected.pending_discard, game.pending_discard)
+    check("trade_partner", expected.trade_partner, game.trade_partner)
+    check("trade_give", expected.trade_give, game.trade_give)
+    check("trade_receive", expected.trade_receive, game.trade_receive)
     check("robber", expected.robber, game.robber)
     check("buildings", expected.buildings, game.buildings)
     check("roads", expected.roads, game.roads)

@@ -66,7 +66,14 @@ const DEV_PLAY_TYPE: Partial<Record<DevCardKind, string>> = {
 };
 
 // Turn-flow actions that stay on the bottom bar (display order).
-const BAR_TYPES = ["buy_development_card", "maritime_trade", "end_turn"];
+const BAR_TYPES = [
+  "buy_development_card",
+  "maritime_trade",
+  "propose_trade",
+  "accept_trade",
+  "reject_trade",
+  "end_turn",
+];
 
 const PHASE_LABEL: Record<string, string> = {
   setup_settlement: "Setup",
@@ -75,6 +82,7 @@ const PHASE_LABEL: Record<string, string> = {
   discard: "Discard",
   move_robber: "Robber",
   main: "Main",
+  trade_response: "Trade",
   game_over: "Game over",
 };
 
@@ -448,6 +456,7 @@ export default function PlayView() {
               discard: `${turnLabel} — click resource cards to discard`,
               move_robber: `${turnLabel} — click a tile to move the robber`,
               roll: `${turnLabel} — click the dice to roll`,
+              trade_response: `${turnLabel} — accept or reject the trade`,
             } as Record<string, string>
           )[status.phase] ?? turnLabel;
 

@@ -136,11 +136,13 @@ class ActionModel(BaseModel):
     edge: EdgeModel | None = None
     tile: HexModel | None = None
     victim: int | None = None
-    # Resource choices: monopoly (one), year-of-plenty (two), maritime trade.
+    # Resource choices: monopoly (one), year-of-plenty (two), maritime trade,
+    # and the domestic trade proposal (give/receive plus the proposed-to partner).
     resource: str | None = None
     resources: list[str] | None = None
     give: str | None = None
     receive: str | None = None
+    partner: int | None = None
 
 
 class GameStatusModel(BaseModel):

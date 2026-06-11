@@ -148,6 +148,33 @@ class MaritimeTrade:
 
 
 @dataclass(frozen=True)
+class ProposeTrade:
+    """Offer ``partner`` 1 card of ``give`` for 1 card of ``receive``.
+
+    Domestic trade, one card each way (rulebook p.7: the active player trades
+    with one other player; both sides must give something, and like-for-like
+    is barred by ``give != receive``). Proposing is legal on *public*
+    information only -- the proposer holds the give card and the partner's
+    hand is non-empty -- whether the partner actually holds the asked-for
+    card is settled by their Accept / Reject. Not available in 2-player games.
+    """
+
+    partner: int
+    give: Resource
+    receive: Resource
+
+
+@dataclass(frozen=True)
+class AcceptTrade:
+    """The proposed-to partner accepts: the two cards swap hands."""
+
+
+@dataclass(frozen=True)
+class RejectTrade:
+    """The proposed-to partner declines: nothing moves."""
+
+
+@dataclass(frozen=True)
 class EndTurn:
     pass
 
@@ -167,6 +194,9 @@ Action = (
     | PlayYearOfPlenty
     | PlayMonopoly
     | MaritimeTrade
+    | ProposeTrade
+    | AcceptTrade
+    | RejectTrade
     | EndTurn
 )
 
@@ -202,6 +232,10 @@ class Game:
     dev_played_this_turn: bool = False
     free_roads: int = 0  # owed by Road Building
     pending_discard: list[int] = field(default_factory=list)  # len n_players
+    # The pending trade proposal (set during TRADE_RESPONSE, else None).
+    trade_partner: int | None = None
+    trade_give: Resource | None = None
+    trade_receive: Resource | None = None
 
     longest_road_owner: int | None = None
     largest_army_owner: int | None = None
@@ -494,6 +528,12 @@ class Game:
                 return self._legal_monopoly(action)
             case MaritimeTrade():
                 return self._legal_maritime(action)
+            case ProposeTrade():
+                return self._legal_propose_trade(action)
+            case AcceptTrade():
+                return self._legal_accept_trade(action)
+            case RejectTrade():
+                return self._legal_reject_trade(action)
             case EndTurn():
                 return self._legal_end_turn(action)
 
@@ -654,6 +694,30 @@ class Game:
         ratio = self.port_ratio(p, a.give)
         return self.players[p].resources[a.give] >= ratio and self.bank(a.receive) >= 1
 
+    def _legal_propose_trade(self, a: ProposeTrade) -> bool:
+        """Legal on public information only (see :class:`ProposeTrade`)."""
+        if self.phase is not Phase.MAIN or not self.has_rolled:
+            return False
+        if self.n_players <= 2:
+            return False
+        p = self.current_player
+        if not 0 <= a.partner < self.n_players or a.partner == p:
+            return False
+        if a.give == a.receive:
+            return False
+        if self.players[p].resources[a.give] < 1:
+            return False
+        return sum(self.players[a.partner].resources.values()) > 0
+
+    def _legal_accept_trade(self, a: AcceptTrade) -> bool:
+        if self.phase is not Phase.TRADE_RESPONSE:
+            return False
+        assert self.trade_partner is not None and self.trade_receive is not None
+        return self.players[self.trade_partner].resources[self.trade_receive] >= 1
+
+    def _legal_reject_trade(self, a: RejectTrade) -> bool:
+        return self.phase is Phase.TRADE_RESPONSE
+
     def _legal_end_turn(self, a: EndTurn) -> bool:
         return self.phase is Phase.MAIN and self.has_rolled
 
@@ -687,6 +751,11 @@ class Game:
             return out
         if self.phase is Phase.DISCARD:
             return self._legal_discards()
+        if self.phase is Phase.TRADE_RESPONSE:
+            if self._legal_accept_trade(AcceptTrade()):
+                out.append(AcceptTrade())
+            out.append(RejectTrade())
+            return out
         if self.phase is Phase.MOVE_ROBBER:
             out += self._robber_actions(MoveRobber)
             return out
@@ -728,6 +797,13 @@ class Game:
             for g in RESOURCES
             for r in RESOURCES
             if self._legal_maritime(MaritimeTrade(g, r))
+        ]
+        out += [
+            t
+            for g in RESOURCES
+            for r in RESOURCES
+            for partner in range(self.n_players)
+            if (t := ProposeTrade(partner, g, r)) and self._legal_propose_trade(t)
         ]
         out += self._robber_actions(PlayKnight, knight=True)
         out.append(EndTurn())
@@ -807,6 +883,12 @@ class Game:
                 self._apply_monopoly(action)
             case MaritimeTrade():
                 self._apply_maritime(action)
+            case ProposeTrade():
+                self._apply_propose_trade(action)
+            case AcceptTrade():
+                self._apply_accept_trade(action)
+            case RejectTrade():
+                self._apply_reject_trade(action)
             case EndTurn():
                 self._apply_end_turn(action)
 
@@ -949,6 +1031,33 @@ class Game:
         ratio = self.port_ratio(p, a.give)
         self.players[p].resources[a.give] -= ratio
         self.players[p].resources[a.receive] += 1
+
+    def _clear_trade(self) -> None:
+        self.trade_partner = None
+        self.trade_give = None
+        self.trade_receive = None
+        self.phase = Phase.MAIN
+
+    def _apply_propose_trade(self, a: ProposeTrade) -> None:
+        self.trade_partner = a.partner
+        self.trade_give = a.give
+        self.trade_receive = a.receive
+        self.phase = Phase.TRADE_RESPONSE
+
+    def _apply_accept_trade(self, a: AcceptTrade) -> None:
+        p = self.current_player
+        partner = self.trade_partner
+        give = self.trade_give
+        receive = self.trade_receive
+        assert partner is not None and give is not None and receive is not None
+        self.players[p].resources[give] -= 1
+        self.players[partner].resources[give] += 1
+        self.players[partner].resources[receive] -= 1
+        self.players[p].resources[receive] += 1
+        self._clear_trade()
+
+    def _apply_reject_trade(self, a: RejectTrade) -> None:
+        self._clear_trade()
 
     def _apply_end_turn(self, a: EndTurn) -> None:
         self.dice_roll = 0

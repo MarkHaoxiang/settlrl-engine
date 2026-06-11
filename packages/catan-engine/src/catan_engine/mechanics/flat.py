@@ -60,7 +60,13 @@ from catan_engine.mechanics.setup import (
     _setup_road_avail,
     _setup_settlement_avail,
 )
-from catan_engine.mechanics.trade import _maritime_avail
+from catan_engine.mechanics.trade import (
+    _accept_trade_avail,
+    _maritime_avail,
+    _propose_trade_avail,
+    _reject_trade_avail,
+    pack_trade,
+)
 from catan_engine.mechanics.turn import _end_turn_avail
 
 __all__ = [
@@ -120,6 +126,12 @@ def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     for g in range(N_RESOURCES):
         for r in range(N_RESOURCES):
             add(ActionType.MARITIME_TRADE, g, r)
+    for g in range(N_RESOURCES):
+        for r in range(N_RESOURCES):
+            for partner in range(N_PLAYERS):
+                add(ActionType.PROPOSE_TRADE, pack_trade(g, r), partner)
+    add(ActionType.ACCEPT_TRADE)
+    add(ActionType.REJECT_TRADE)
     add(ActionType.END_TURN)
 
     return (
@@ -198,11 +210,11 @@ def flat_legality(
 # ===========================================================================
 # Switch-free flat legality sweep.
 #
-# ``action_available`` dispatches the 15 action types with ``jax.lax.switch``.
-# ``vmap``-ing it over the whole flat table (whose action type *varies* per
-# entry) forces XLA to evaluate *every* branch for *every* entry -- a ~15x
-# blow-up, worse once the expensive cores (Longest Road, placement scatters)
-# are counted. Because the flat table is *static* we instead call each action's
+# ``action_available`` dispatches the N_ACTION_TYPES action types with
+# ``jax.lax.switch``. ``vmap``-ing it over the whole flat table (whose action
+# type *varies* per entry) forces XLA to evaluate *every* branch for *every*
+# entry -- an ~18x blow-up, worse once the expensive cores (Longest Road,
+# placement scatters) are counted. Because the flat table is *static* we instead call each action's
 # legality core *directly* over its own slice of the table, board closed over,
 # and stitch the results back in table order: same mask, no switch.
 # ===========================================================================
@@ -233,6 +245,7 @@ _PAIR_AVAIL: tuple[tuple[PairAvail, jax.Array, jax.Array, jax.Array], ...] = tup
         (_knight_avail, _flat_positions(ActionType.PLAY_KNIGHT)),
         (_yop_avail, _flat_positions(ActionType.PLAY_YEAR_OF_PLENTY)),
         (_maritime_avail, _flat_positions(ActionType.MARITIME_TRADE)),
+        (_propose_trade_avail, _flat_positions(ActionType.PROPOSE_TRADE)),
     )
 )
 
@@ -243,6 +256,8 @@ _NONE_AVAIL: tuple[tuple[NoneAvail, int], ...] = tuple(
         (_roll_avail, ActionType.ROLL_DICE),
         (_buy_dev_avail, ActionType.BUY_DEVELOPMENT_CARD),
         (_road_building_avail, ActionType.PLAY_ROAD_BUILDING),
+        (_accept_trade_avail, ActionType.ACCEPT_TRADE),
+        (_reject_trade_avail, ActionType.REJECT_TRADE),
         (_end_turn_avail, ActionType.END_TURN),
     )
 )

@@ -45,6 +45,8 @@ _BASE_LABELS = {
     ActionType.END_TURN: "End turn",
     ActionType.BUY_DEVELOPMENT_CARD: "Buy dev card",
     ActionType.PLAY_ROAD_BUILDING: "Road building",
+    ActionType.ACCEPT_TRADE: "Accept trade",
+    ActionType.REJECT_TRADE: "Reject trade",
 }
 
 
@@ -104,6 +106,18 @@ def _decode(flat: int) -> ActionModel:
             label=f"Trade {give} → {receive}",
             give=give,
             receive=receive,
+        )
+
+    if at is ActionType.PROPOSE_TRADE:
+        n_res = len(_RESOURCE_NAMES)
+        give, receive = _RESOURCE_NAMES[idx // n_res], _RESOURCE_NAMES[idx % n_res]
+        return ActionModel(
+            flat=flat,
+            type=type_name,
+            label=f"Offer P{target + 1} {give} → {receive}",
+            give=give,
+            receive=receive,
+            partner=target,
         )
 
     return ActionModel(flat=flat, type=type_name, label=_BASE_LABELS.get(at, type_name))

@@ -66,6 +66,7 @@ class Phase(Enum):
     DISCARD = "discard"  # players with >7 cards discard half (after a 7)
     MOVE_ROBBER = "move_robber"  # current player moves robber and steals
     MAIN = "main"  # build / trade / play dev card / end turn
+    TRADE_RESPONSE = "trade_response"  # the proposed-to player accepts or rejects
     GAME_OVER = "game_over"  # a player has reached VICTORY_POINTS_TO_WIN
 
 

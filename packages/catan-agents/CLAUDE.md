@@ -58,8 +58,9 @@ agents run at 2–4 players with beliefs of varying sharpness.
 - `greedy.py` — scripted policy: a static per-row tier score plus small
   observation bonuses. Invariant: tier gaps (≥ 100) exceed every bonus range
   (pips ≤ 15, held ≤ 19), so bonuses only reorder within a tier; types
-  sharing a tier are phase-disjoint. Deliberately simple: no resource
-  targeting, never trades, ignores whose production the robber blocks.
+  sharing a tier are phase-disjoint or both dominated (the trade types sit
+  below END_TURN). Deliberately simple: no resource targeting, never trades
+  (and rejects every proposal), ignores whose production the robber blocks.
 - `evaluate.py` — fused driver over the engine's `rollout(actor=...)` seam:
   every seat's vmapped agent picks in every lane each step inside the scan and
   the acting seat's pick is kept — n_seats policy evals per step, fine for

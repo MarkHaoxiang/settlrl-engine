@@ -38,6 +38,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from catan_engine.board import Board
+from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, KeyScalar
 from catan_engine.board.tile import Tile
 from catan_engine.env import N_FLAT, ActionType, BatchedCatanEnv, flat_to_action
@@ -161,6 +162,10 @@ def _describe(move: Move) -> dict[str, Any]:
     elif at is ActionType.MARITIME_TRADE:
         out["give"] = _RESOURCE_NAMES[idx]
         out["receive"] = _RESOURCE_NAMES[target]
+    elif at is ActionType.PROPOSE_TRADE:
+        out["give"] = _RESOURCE_NAMES[idx // N_RESOURCES]
+        out["receive"] = _RESOURCE_NAMES[idx % N_RESOURCES]
+        out["partner"] = target
     elif at is ActionType.ROLL_DICE and move.dice is not None:
         out["dice"] = move.dice
     return out

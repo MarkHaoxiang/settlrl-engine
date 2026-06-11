@@ -4,7 +4,8 @@ Two layers: the functional ``step`` / ``available`` over the action dispatch,
 and ``BatchedCatanEnv``, which adapts the `AEC model
 <https://pettingzoo.farama.org/api/aec/>`_ to ``batch_size`` parallel games --
 the batch axis is independent games, the acting agent in lane ``b`` is that
-game's ``current_player`` (the next owing discarder during DISCARD), and the
+game's ``current_player`` (the next owing discarder during DISCARD; the
+proposed-to partner during TRADE_RESPONSE), and the
 per-agent AEC dicts become batched arrays (see the attribute docstrings).
 Terminated lanes auto-reset by default. Spaces are the lightweight
 ``Discrete`` / ``Box`` descriptors below -- no gymnasium dependency.
@@ -178,6 +179,9 @@ class Observation(TypedDict):
     current_player: UInt8[Array, "*batch"]
     dice_roll: UInt8[Array, "*batch"]
     has_rolled: UInt8[Array, "*batch"]
+    trade_partner: UInt8[Array, "*batch"]
+    trade_give: UInt8[Array, "*batch"]
+    trade_receive: UInt8[Array, "*batch"]
     # private (observer)
     self: Int[Array, "*batch"]
     self_resources: UInt8[Array, "*batch resources"]
@@ -528,6 +532,9 @@ class BatchedCatanEnv:
             "current_player": Discrete(self.n_players),
             "dice_roll": Discrete(13),
             "has_rolled": Discrete(2),
+            "trade_partner": Discrete(256),  # player, or NO_INDEX (255)
+            "trade_give": Discrete(N_RESOURCES),
+            "trade_receive": Discrete(N_RESOURCES),
             "self": Discrete(self.n_players),
             "self_resources": Box((N_RESOURCES,), "uint8", 0, BANK_INITIAL),
             "self_dev_hand": Box((N_DEV_CARD_TYPES,), "uint8", 0, 25),
@@ -673,6 +680,9 @@ def observe_for(layout: BoardLayout, state: BoardState, sel: jax.Array) -> Obser
         "current_player": state.current_player,
         "dice_roll": state.dice_roll,
         "has_rolled": state.has_rolled,
+        "trade_partner": state.trade_partner,
+        "trade_give": state.trade_give,
+        "trade_receive": state.trade_receive,
         # private (observer)
         "self": sel,
         "self_resources": self_res,

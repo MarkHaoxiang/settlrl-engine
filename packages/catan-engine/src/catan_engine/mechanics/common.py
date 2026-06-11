@@ -144,8 +144,15 @@ def player_total_vp(state: BoardState, player: jax.Array) -> jax.Array:
 
 
 def agent_selection_single(state: BoardState) -> jax.Array:
-    """Acting player for one game: the discarder during DISCARD, else current."""
+    """Acting player for one game: the discarder during DISCARD, the proposed-to
+    partner during TRADE_RESPONSE, else current."""
     owes = state.pending_discard > 0
     discarder = jnp.argmax(owes).astype(jnp.int32)
     in_discard = state.phase == jnp.uint8(GamePhase.DISCARD)
-    return jnp.where(in_discard, discarder, state.current_player.astype(jnp.int32))
+    in_response = state.phase == jnp.uint8(GamePhase.TRADE_RESPONSE)
+    partner = jnp.clip(state.trade_partner.astype(jnp.int32), 0, state.n_players - 1)
+    return jnp.where(
+        in_discard,
+        discarder,
+        jnp.where(in_response, partner, state.current_player.astype(jnp.int32)),
+    )

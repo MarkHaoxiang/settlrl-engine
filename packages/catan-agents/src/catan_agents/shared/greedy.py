@@ -24,9 +24,10 @@ _ROW_IDX = _ROW_PARAMS.idx
 _ROW_TARGET = _ROW_PARAMS.target
 
 # Priority tier per action type. Tiers are spaced so no per-target bonus (max
-# 15 pips) can cross between them; types sharing a tier never co-occur legally
-# (they belong to disjoint phases). MARITIME_TRADE sits below END_TURN, so the
-# greedy player never trades.
+# 15 pips) can cross between them; types sharing a tier are never both the
+# argmax (disjoint phases, or — MARITIME_TRADE / PROPOSE_TRADE — both strictly
+# dominated by END_TURN in MAIN, so the greedy player never trades). As the
+# proposed-to partner it always rejects (REJECT_TRADE > ACCEPT_TRADE).
 _TIER: dict[ActionType, float] = {
     ActionType.BUILD_CITY: 900.0,
     ActionType.BUILD_SETTLEMENT: 800.0,
@@ -41,8 +42,11 @@ _TIER: dict[ActionType, float] = {
     ActionType.SETUP_ROAD: 200.0,
     ActionType.DISCARD: 200.0,
     ActionType.MOVE_ROBBER: 200.0,
+    ActionType.REJECT_TRADE: 200.0,
     ActionType.END_TURN: 100.0,
+    ActionType.ACCEPT_TRADE: 100.0,
     ActionType.MARITIME_TRADE: 0.0,
+    ActionType.PROPOSE_TRADE: 0.0,
 }
 _BASE = jnp.asarray([_TIER[ActionType(t)] for t in range(N_ACTION_TYPES)])[_ROW_TYPE]
 
@@ -62,7 +66,8 @@ def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatActio
     """Highest-priority legal action, ties broken uniformly at random.
 
     Priorities: city > settlement > dev card > road > play dev > everything
-    forced (roll/setup road/discard/robber) > end turn; never trades. Within a
+    forced (roll/setup road/discard/robber) > end turn; never trades, and
+    rejects every trade proposed to it. Within a
     tier, settlement/city targets are scored by adjacent-tile pips, the robber
     goes to the highest-pip tile (preferring a steal), and the discard gives up
     the most-held resource.

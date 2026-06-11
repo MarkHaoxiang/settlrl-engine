@@ -79,10 +79,11 @@ class GamePhase(IntEnum):
     DISCARD = 3  # players with >7 cards discard half (after a 7)
     MOVE_ROBBER = 4  # current player moves robber and steals
     MAIN = 5  # build / trade / play dev card / end turn
+    TRADE_RESPONSE = 6  # the proposed-to player accepts or rejects a trade
     # Reserved/unused: the engine never assigns this phase. Game-over is detected
     # out-of-band by the victory-point total (>= VICTORY_POINTS_TO_WIN) in
     # env/batched.py, not by a phase transition.
-    GAME_OVER = 6
+    GAME_OVER = 7
 
     def __str__(self) -> str:
         return (
@@ -92,6 +93,7 @@ class GamePhase(IntEnum):
             "DISCARD",
             "MOVE_ROBBER",
             "MAIN",
+            "TRADE_RESPONSE",
             "GAME_OVER",
         )[self]
 
@@ -132,6 +134,9 @@ class BoardState(NamedTuple):
     dev_bought: DevCardDeckArray  # bought this turn (unplayable)
     free_roads: GameScalarArray  # free roads owed (Road Building)
     pending_discard: PlayerDiscardArray  # cards still owed after a 7
+    trade_partner: GameScalarArray  # proposed-to player, or NO_INDEX
+    trade_give: GameScalarArray  # resource the proposer gives (1 card)
+    trade_receive: GameScalarArray  # resource the proposer asks for (1 card)
 
     # -- Awards -------------------------------------------------------------
     longest_road_owner: GameScalarArray  # player or NO_INDEX
@@ -193,6 +198,9 @@ def make_board_state(
         dev_bought=jnp.zeros((B, N_DEV_CARD_TYPES), dtype=jnp.uint8),
         free_roads=jnp.zeros((B,), dtype=jnp.uint8),
         pending_discard=jnp.zeros((B, P), dtype=jnp.uint8),
+        trade_partner=none,
+        trade_give=jnp.zeros((B,), dtype=jnp.uint8),
+        trade_receive=jnp.zeros((B,), dtype=jnp.uint8),
         longest_road_owner=none,
         largest_army_owner=none,
         longest_road_len=jnp.zeros((B,), dtype=jnp.uint8),

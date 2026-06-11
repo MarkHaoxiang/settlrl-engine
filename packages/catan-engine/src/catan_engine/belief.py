@@ -122,6 +122,9 @@ class PublicState(NamedTuple):
     dev_played: U8Scalar
     free_roads: U8Scalar
     pending_discard: PlayerU8Vec
+    trade_partner: U8Scalar
+    trade_give: U8Scalar
+    trade_receive: U8Scalar
     longest_road_owner: U8Scalar
     largest_army_owner: U8Scalar
     longest_road_len: U8Scalar

@@ -67,11 +67,20 @@ def test_two_player_beliefs_are_exact() -> None:
 
 def test_third_party_steals_create_uncertainty() -> None:
     # The converse: with 4 players, random play eventually produces a steal
-    # some observer didn't take part in, and their bounds must open up.
+    # some observer didn't take part in, and their bounds must open up. The
+    # slack is checked per step (not at the end): bounds legitimately
+    # re-tighten as public totals pin emptied hands back down.
     env = BatchedCatanEnv(batch_size=4, seed=3, n_players=4, track_beliefs=True)
-    _rollout(env, 200)
-    slack = env.beliefs.res_hi.astype(jnp.int32) - env.beliefs.res_lo.astype(jnp.int32)
-    assert int(slack.sum()) > 0
+    key = jax.random.key(42)
+    max_slack = 0
+    for _ in range(200):
+        key, k = jax.random.split(key)
+        env.step(*env.random_actions(k))
+        slack = env.beliefs.res_hi.astype(jnp.int32) - env.beliefs.res_lo.astype(
+            jnp.int32
+        )
+        max_slack = max(max_slack, int(slack.sum()))
+    assert max_slack > 0
 
 
 _HIDDEN_FIELDS = {"player_resources", "dev_hand", "dev_deck", "dev_bought", "key"}
