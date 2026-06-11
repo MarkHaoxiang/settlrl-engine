@@ -605,7 +605,12 @@ class Game:
         )
 
     def _legal_build_road(self, a: BuildRoad) -> bool:
-        if self.phase is not Phase.MAIN or not self.has_rolled:
+        # Road Building may be played before the roll, so free roads are also
+        # placeable in ROLL phase (rolling stays legal: free roads may be
+        # deferred, which avoids a stall when no edge is placeable).
+        in_main = self.phase is Phase.MAIN and self.has_rolled
+        pre_roll_free = self.phase is Phase.ROLL and self.free_roads > 0
+        if not (in_main or pre_roll_free):
             return False
         if not 0 <= a.edge < board.N_EDGES:
             return False
@@ -651,26 +656,26 @@ class Game:
         )
 
     def _legal_knight(self, a: PlayKnight) -> bool:
-        if self.phase not in (Phase.ROLL, Phase.MAIN) or self.dev_played_this_turn:
+        if not self._dev_play_window():
             return False
         if not self._playable(self.current_player, DevCard.KNIGHT):
             return False
         return self._legal_robber_move(a.tile, a.victim, self.current_player)
 
+    def _dev_play_window(self) -> bool:
+        """ROLL (before rolling) or MAIN, no dev card played yet: the
+        rulebook's "any time during your turn" window for the one dev card."""
+        return self.phase in (Phase.ROLL, Phase.MAIN) and not self.dev_played_this_turn
+
     def _legal_road_building(self, a: PlayRoadBuilding) -> bool:
-        return (
-            self.phase is Phase.MAIN
-            and self.has_rolled
-            and not self.dev_played_this_turn
-            and self._playable(self.current_player, DevCard.ROAD_BUILDING)
+        return self._dev_play_window() and self._playable(
+            self.current_player, DevCard.ROAD_BUILDING
         )
 
     def _legal_year_of_plenty(self, a: PlayYearOfPlenty) -> bool:
-        if self.phase is not Phase.MAIN or not self.has_rolled:
+        if not self._dev_play_window():
             return False
-        if self.dev_played_this_turn or not self._playable(
-            self.current_player, DevCard.YEAR_OF_PLENTY
-        ):
+        if not self._playable(self.current_player, DevCard.YEAR_OF_PLENTY):
             return False
         # Both cards must be available in the bank.
         if a.first == a.second:
@@ -678,11 +683,8 @@ class Game:
         return self.bank(a.first) >= 1 and self.bank(a.second) >= 1
 
     def _legal_monopoly(self, a: PlayMonopoly) -> bool:
-        return (
-            self.phase is Phase.MAIN
-            and self.has_rolled
-            and not self.dev_played_this_turn
-            and self._playable(self.current_player, DevCard.MONOPOLY)
+        return self._dev_play_window() and self._playable(
+            self.current_player, DevCard.MONOPOLY
         )
 
     def _legal_maritime(self, a: MaritimeTrade) -> bool:
@@ -761,7 +763,13 @@ class Game:
             return out
         if self.phase is Phase.ROLL:
             out.append(Roll())
-            out += self._robber_actions(PlayKnight, knight=True)
+            # Road Building's free roads may be placed before rolling.
+            out += [
+                BuildRoad(e)
+                for e in range(board.N_EDGES)
+                if self._legal_build_road(BuildRoad(e))
+            ]
+            out += self._dev_plays()
             return out
         # MAIN
         out += [
@@ -781,17 +789,6 @@ class Game:
         ]
         if self._legal_buy_dev(BuyDevelopmentCard()):
             out.append(BuyDevelopmentCard())
-        if self._legal_road_building(PlayRoadBuilding()):
-            out.append(PlayRoadBuilding())
-        out += [
-            a
-            for first in RESOURCES
-            for second in RESOURCES
-            if (a := PlayYearOfPlenty(first, second)) and self._legal_year_of_plenty(a)
-        ]
-        out += [
-            PlayMonopoly(r) for r in RESOURCES if self._legal_monopoly(PlayMonopoly(r))
-        ]
         out += [
             MaritimeTrade(g, r)
             for g in RESOURCES
@@ -805,8 +802,25 @@ class Game:
             for partner in range(self.n_players)
             if (t := ProposeTrade(partner, g, r)) and self._legal_propose_trade(t)
         ]
-        out += self._robber_actions(PlayKnight, knight=True)
+        out += self._dev_plays()
         out.append(EndTurn())
+        return out
+
+    def _dev_plays(self) -> list[Action]:
+        """Legal development-card plays (any time during the player's turn)."""
+        out: list[Action] = []
+        if self._legal_road_building(PlayRoadBuilding()):
+            out.append(PlayRoadBuilding())
+        out += [
+            a
+            for first in RESOURCES
+            for second in RESOURCES
+            if (a := PlayYearOfPlenty(first, second)) and self._legal_year_of_plenty(a)
+        ]
+        out += [
+            PlayMonopoly(r) for r in RESOURCES if self._legal_monopoly(PlayMonopoly(r))
+        ]
+        out += self._robber_actions(PlayKnight, knight=True)
         return out
 
     def _legal_discards(self) -> list[Action]:
@@ -831,8 +845,7 @@ class Game:
         knight: bool = False,
     ) -> list[Action]:
         if knight and not (
-            self.phase in (Phase.ROLL, Phase.MAIN)
-            and not self.dev_played_this_turn
+            self._dev_play_window()
             and self._playable(self.current_player, DevCard.KNIGHT)
         ):
             return []

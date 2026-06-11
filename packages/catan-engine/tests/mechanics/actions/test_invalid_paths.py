@@ -125,9 +125,13 @@ def test_invalid_wrong_phase(
     build: Callable[[], tuple[Board, object]],
     field: str,
 ) -> None:
-    """A MAIN-phase-only action attempted in ROLL is INVALID and a no-op."""
+    """A turn action attempted during MOVE_ROBBER is INVALID and a no-op.
+
+    (ROLL is no longer universally wrong: development cards may be played,
+    and Road Building's free roads placed, before the roll.)
+    """
     board, params = build()
-    board = set_phase(board, GamePhase.ROLL)
+    board = set_phase(board, GamePhase.MOVE_ROBBER)
     before = np.asarray(getattr(board[1], field))
     state, result = action(board, params)
     assert int(result[0]) == ActionResult.INVALID.value

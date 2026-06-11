@@ -44,6 +44,13 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   `is_legal` accepts any owing player; `legal_actions()` enumerates only the
   lowest-indexed owing player, matching the engine's fixed order so the
   differential driver exercises identical action streams.
+- **Development cards play any time during the turn** (`_dev_play_window`):
+  knight *and* the progress cards are legal in ROLL (pre-roll) as well as
+  MAIN, per the rulebook's "you can play the card at any time". One
+  liberality: Road Building's free roads are placeable immediately (even
+  pre-roll) but may also be *deferred* past the roll — the rulebook says
+  place immediately, but forcing that could stall a game whose owner has no
+  placeable edge, so rolling stays legal while free roads are owed.
 - **Domestic trade is one card each way**
   (`ProposeTrade(partner, give, receive)` → `AcceptTrade` / `RejectTrade`,
   through `Phase.TRADE_RESPONSE`): a deliberate restriction of the rulebook's

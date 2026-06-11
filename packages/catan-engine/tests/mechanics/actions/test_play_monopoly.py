@@ -4,8 +4,16 @@ from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-from catan_engine.board import Board, give, make_board, to_main
+from catan_engine.board import (
+    Board,
+    give,
+    give_dev_card,
+    make_board,
+    set_phase,
+    to_main,
+)
 from catan_engine.board.dev_cards import DevCard
+from catan_engine.board.state import GamePhase
 from catan_engine.mechanics.action import ActionResult
 from catan_engine.mechanics.development import play_monopoly_step
 from expecttest import assert_expected_inline
@@ -140,3 +148,14 @@ def test_invalid_out_of_range(monopoly_board: Board) -> None:
     state, result = play_monopoly_step(monopoly_board, jnp.array([-1]))
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
+
+
+def test_playable_before_the_roll() -> None:
+    # Rulebook: the one dev card may be played any time during the turn.
+    board = set_phase(make_board(seed=0), GamePhase.ROLL)
+    board = give_dev_card(board, 0, DevCard.MONOPOLY)
+    board = give(board, 1, [3, 0, 0, 0, 0])
+    state, result = play_monopoly_step(board, jnp.array([0]))
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.player_resources[0, 0, 0]) == 3
+    assert int(state.phase[0]) == GamePhase.ROLL  # the roll is still owed

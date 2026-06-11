@@ -24,7 +24,6 @@ from catan_engine.board.resources import N_RESOURCES, bank_stock
 from catan_engine.board.state import (
     BoardState,
     BoolScalar,
-    GamePhase,
     IntScalar,
     KeyScalar,
     to_u8,
@@ -40,8 +39,8 @@ from catan_engine.mechanics.common import (
     ResultCode,
     TwoIndexParams,
     can_afford,
+    dev_play_window,
     main_after_roll,
-    main_no_dev_played,
     pay,
     roads_left,
 )
@@ -158,10 +157,10 @@ def _monopoly_avail(
     layout: BoardLayout, state: BoardState, resource: IntScalar
 ) -> BoolScalar:
     player = state.current_player.astype(jnp.int32)
-    main = main_no_dev_played(state)
+    window = dev_play_window(state)
     in_range = (resource >= 0) & (resource < N_RESOURCES)
     has_card = playable_dev(state, player, DevCard.MONOPOLY)
-    return main & in_range & has_card
+    return window & in_range & has_card
 
 
 def _monopoly_apply(
@@ -216,7 +215,7 @@ def _yop_avail(
     player = state.current_player.astype(jnp.int32)
     ca = jnp.clip(resource_a, 0, N_RESOURCES - 1)
     cb = jnp.clip(resource_b, 0, N_RESOURCES - 1)
-    main = main_no_dev_played(state)
+    window = dev_play_window(state)
     has_card = playable_dev(state, player, DevCard.YEAR_OF_PLENTY)
     a_ok = (resource_a >= 0) & (resource_a < N_RESOURCES)
     b_ok = (resource_b >= 0) & (resource_b < N_RESOURCES)
@@ -224,7 +223,7 @@ def _yop_avail(
     need_a = 1 + same.astype(jnp.int32)
     bank_a = bank_stock(state.player_resources, ca) >= need_a
     bank_b = same | (bank_stock(state.player_resources, cb) >= 1)
-    return main & has_card & a_ok & b_ok & bank_a & bank_b
+    return window & has_card & a_ok & b_ok & bank_a & bank_b
 
 
 def _yop_apply(
@@ -280,9 +279,9 @@ def _road_building_avail(
     layout: BoardLayout, state: BoardState, params: None
 ) -> BoolScalar:
     player = state.current_player.astype(jnp.int32)
-    main = main_no_dev_played(state)
+    window = dev_play_window(state)
     has_card = playable_dev(state, player, DevCard.ROAD_BUILDING)
-    return main & has_card
+    return window & has_card
 
 
 def _road_building_apply(
@@ -335,13 +334,12 @@ def _knight_avail(
     tile, victim = params
     player = state.current_player.astype(jnp.int32)
     t = jnp.clip(tile, 0, N_TILES - 1)
-    phase_ok = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
-    not_played = state.dev_played == 0
+    window = dev_play_window(state)
     has_card = playable_dev(state, player, DevCard.KNIGHT)
     tile_in_range = (tile >= 0) & (tile < N_TILES)
     tile_moves = tile != state.robber
     valid_victim = robber.valid_robber_victim(state, t, player, victim)
-    return phase_ok & not_played & has_card & tile_in_range & tile_moves & valid_victim
+    return window & has_card & tile_in_range & tile_moves & valid_victim
 
 
 def _knight_apply(

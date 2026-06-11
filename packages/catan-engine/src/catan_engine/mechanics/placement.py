@@ -23,6 +23,7 @@ from catan_engine.board.state import (
     BoardState,
     BoolScalar,
     EdgeRoadVec,
+    GamePhase,
     IntScalar,
     VertexOwnerVec,
     to_u8,
@@ -125,12 +126,15 @@ def _build_road_avail(
     in_range = (edge >= 0) & (edge < N_EDGES)
     e = jnp.clip(edge, 0, N_EDGES - 1)
     player = state.current_player.astype(jnp.int32)
-    main = main_after_roll(state)
     has_road = roads_left(state.edge_road, player) > 0
     placeable = road_placeable(state.edge_road, state.vertex_owner, player, e)
     free = state.free_roads > 0
     afford = can_afford(state.player_resources[player], ROAD_COST_ARR)
-    return in_range & main & has_road & placeable & (free | afford)
+    # Road Building may be played before the roll, so its free roads are also
+    # placeable in ROLL phase (rolling stays legal: free roads may be deferred,
+    # which avoids a stall when no edge is placeable).
+    phase_ok = main_after_roll(state) | ((state.phase == GamePhase.ROLL) & free)
+    return in_range & phase_ok & has_road & placeable & (free | afford)
 
 
 def _build_road_apply(

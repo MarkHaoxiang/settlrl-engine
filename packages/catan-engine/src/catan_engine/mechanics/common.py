@@ -79,9 +79,11 @@ def main_after_roll(state: BoardState) -> jax.Array:
     return (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
 
 
-def main_no_dev_played(state: BoardState) -> jax.Array:
-    """MAIN phase with no development card played yet this turn."""
-    return (state.phase == GamePhase.MAIN) & (state.dev_played == 0)
+def dev_play_window(state: BoardState) -> jax.Array:
+    """ROLL (before rolling) or MAIN, with no development card played yet:
+    the rulebook's "any time during your turn" window for the one dev card."""
+    in_turn = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
+    return in_turn & (state.dev_played == 0)
 
 
 # ===========================================================================
