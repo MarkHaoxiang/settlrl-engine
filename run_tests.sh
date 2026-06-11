@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full test suite (catan-engine + catan-agents + catan-render).
+# Run the full test suite (catan-engine + catan-agents + catan-learn + catan-render).
 # Pass extra args to pytest: ./run_tests.sh -v, ./run_tests.sh -k test_print_board
 # To accept / update expecttest snapshots: EXPECTTEST_ACCEPT=1 ./run_tests.sh
 #
@@ -14,4 +14,5 @@ run() { "$@" || [ $? -eq 5 ]; }
 
 run uv run --package catan-engine pytest packages/catan-engine/tests/ "$@"
 run uv run --package catan-agents pytest packages/catan-agents/tests/ "$@"
+run uv run --package catan-learn pytest packages/catan-learn/tests/ "$@"
 run uv run --package catan-render pytest packages/catan-render/tests/ "$@"

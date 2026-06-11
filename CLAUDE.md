@@ -17,6 +17,15 @@ Keep docs concise. User-facing docs (READMEs) should describe what something doe
 
 Comments should be concise. Doc comments (docstrings) describe only the contract to callers — behavior not evident from the signature; no implementation detail, design motivation, or perf notes (those belong in the per-package `CLAUDE.md`, or are simply omitted).
 
+## Parallel development
+
+The main checkout belongs to the user — his editor saves land there
+mid-session. For any multi-step change, work in your own worktree
+(`./wt.sh <branch>`, see the README) and land it on `main` via PR once CI is
+green. The GPU is the one shared resource between worktrees: at most one
+bench/eval session uses it at a time; everything else runs
+`JAX_PLATFORMS=cpu`.
+
 ## Checks
 
 Pre-commit hooks (ruff check/format, mypy over every package, the engine test
