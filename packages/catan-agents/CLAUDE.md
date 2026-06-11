@@ -81,7 +81,8 @@ exploit.
   (632/640 same picks, 49.5% n=200 self-match); at 4p the every-mover-flip
   rule negates the searcher's own next turn ((-1)^3 per round) and measured
   *below chance* vs 3× lookahead (20%, n=80) — the side frame took the same
-  seeds to 32.3% (n=161, chance 25%).
+  seeds to 32.3% (n=161, chance 25%; 36.1% pooled n=241) and reads 62.2% vs
+  2× lookahead at 3p (n=90, chance 33%).
   Deviations from mctx defaults, each fixing a measured ply-2 bias: the
   root prior is the one-step value sweep (uniform priors made Gumbel's 16
   candidates a random subset of 560 — 6% vs lookahead); interior priors are
