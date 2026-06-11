@@ -106,6 +106,16 @@ exploit.
   Tuning gotchas: diagnose decision-level rather than by ~20-game matches
   (SE ±11%), and at absolute Q scale a large σ flip usually means an
   in-tree terminal that the 1-ply regret referee misprices as a loss.
+  June 11 parameter sweep (each vs defaults, n=200+): the defaults are the
+  local optimum — sims 64 *loses* (44.5%; depth still can't pay through
+  chance fusion, 16 ≈ 32), considered peaks at 16 (8: 42.5%, 32: 47%),
+  prior_scale 5 loses (41%), value_scale 12/38 tie or lose to 20. Width (16
+  trees) wins self-play 54.5% (n=400) but doesn't widen the lookahead gap at
+  2p and is even at 4p (36.3% vs 36.1% pooled, n≈240/side) — so it stays at
+  4×1. Depth's unlock would be explicit dice chance nodes;
+  `mctx.stochastic_muzero_policy` is PUCT-based (no Gumbel/absolute-Q),
+  an architecture change, not a knob. 4p evals: seed-batch variance at n=80
+  is huge (30.9% vs 43.8% same config) — matched seeds or n ≥ 240.
 
 ## cli.py
 

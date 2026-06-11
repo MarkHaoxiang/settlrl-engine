@@ -18,7 +18,7 @@ Both kinds work at any player count. `POLICIES` maps every shipped agent by name
 
 The search agents act on a sampled world consistent with everything the seat knows: stochastic outcomes are their own samples (not the environment's), opponents' hidden cards are dealt from the player's honest belief — they never act on information the seat could not know. With two players the belief pins the opponent's resources exactly, so only dev-card identities are ever sampled.
 
-Two-player strength (200+ game seat-swapped matches): `mcts` > `lookahead` > `greedy` > `random` — mcts beats lookahead 57%, lookahead beats greedy 90%, greedy beats random 85%. The ladder holds at four players (seat-rotated, chance 25%): one mcts wins 32% of games against three lookaheads; one lookahead wins 77% against three greedies.
+Two-player strength (200+ game seat-swapped matches): `mcts` > `lookahead` > `greedy` > `random` — mcts beats lookahead 57%, lookahead beats greedy 90%, greedy beats random 85%. The ladder holds at four players (seat-rotated, chance 25%): one mcts wins 36% of games against three lookaheads; one lookahead wins 77% against three greedies.
 
 ## Value functions
 
