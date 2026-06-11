@@ -1,27 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { hexToPixel, cubeToPixel, hexCorners, type Cube, type CubeEdge, type Hex } from "../lib/hex";
-import type { Board } from "../lib/boardData";
+import { PLAYER_COLORS, type Board } from "../lib/boardData";
 import { HIGHLIGHT } from "../lib/ui";
 import HexTile from "./HexTile";
 import Road from "./Road";
-import Building from "./Building";
+import Building, { housePath } from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
 import PlayerPanel from "./PlayerPanel";
 
-// Legal click targets to overlay on the board (for the Play view). When present,
-// the matching elements are highlighted and clickable; the handler receives the
-// clicked target so the caller can map it back to an engine action.
-export interface BoardInteraction {
-  vertices: Cube[];
-  edges: CubeEdge[];
-  tiles: Hex[];
-  onVertex?: (vertex: Cube) => void;
-  onEdge?: (edge: CubeEdge) => void;
-  onTile?: (tile: Hex) => void;
+// A popover anchor in this component's container coordinates (top-centre of
+// the clicked element, valid for the pan/zoom at click time).
+export interface BoardTargetPoint {
+  x: number;
+  y: number;
 }
 
-const HIGHLIGHT_STROKE = "#C99A2E";
+// Legal placement targets to ghost onto the board (for the Play view): the
+// acting player's buildable spots drawn as faint pieces in their colour, plus
+// highlighted robber tiles. Handlers receive the clicked target and its anchor
+// point so the caller can pop a chooser there.
+export interface BoardInteraction {
+  // Whose colour the ghost previews borrow.
+  player: number;
+  vertices: { cube: Cube; kind: "settlement" | "city" }[];
+  edges: CubeEdge[];
+  tiles: Hex[];
+  onVertex?: (vertex: Cube, at: BoardTargetPoint) => void;
+  onEdge?: (edge: CubeEdge, at: BoardTargetPoint) => void;
+  onTile?: (tile: Hex, at: BoardTargetPoint) => void;
+}
 
 const HEX_SIZE = 72;
 const PADDING = 90;
@@ -143,6 +151,14 @@ export default function BoardView({ board, interaction }: Props) {
       el.removeEventListener("touchend", onTouchEnd);
     };
   }, []);
+
+  // Anchor for the caller's popover: top-centre of the clicked SVG element,
+  // converted to this container's coordinate space.
+  const anchorOf = (el: SVGGraphicsElement): BoardTargetPoint => {
+    const c = containerRef.current!.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2 - c.x, y: r.y - c.y };
+  };
 
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
 
@@ -272,73 +288,85 @@ export default function BoardView({ board, interaction }: Props) {
             );
           })}
 
-          {/* Interaction overlay: legal click targets (Play view) sit on top */}
+          {/* Interaction overlay: ghost previews of legal placements sit on top */}
           {interaction && (
             <g>
-              {/* Legal tiles (robber / knight): a translucent hex with a ring */}
+              {/* Legal robber tiles: a translucent hex with a ring */}
               {interaction.tiles.map((tile, i) => {
                 const { x, y } = hexToPixel(tile, HEX_SIZE);
                 const pts = hexCorners(x + offsetX, y + offsetY, HEX_SIZE * 0.94)
                   .map(([px, py]) => `${px},${py}`)
                   .join(" ");
                 return (
-                  <polygon
+                  <g
                     key={`itile-${i}`}
-                    points={pts}
-                    fill={HIGHLIGHT}
-                    fillOpacity={0.22}
-                    stroke={HIGHLIGHT}
-                    strokeWidth={3}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => interaction.onTile?.(tile)}
-                  />
+                    className="board-ghost"
+                    onClick={(e) => interaction.onTile?.(tile, anchorOf(e.currentTarget))}
+                  >
+                    <polygon
+                      className="ghost"
+                      points={pts}
+                      fill={HIGHLIGHT}
+                      fillOpacity={0.3}
+                      stroke={HIGHLIGHT}
+                      strokeWidth={3}
+                    />
+                  </g>
                 );
               })}
 
-              {/* Legal edges (roads): a thick clickable line */}
+              {/* Road ghosts on legal edges (with a fat transparent hit line) */}
               {interaction.edges.map((edge, i) => {
                 const a = cubeToPixel(edge.a, HEX_SIZE);
                 const b = cubeToPixel(edge.b, HEX_SIZE);
+                const line = {
+                  x1: a.x + offsetX,
+                  y1: a.y + offsetY,
+                  x2: b.x + offsetX,
+                  y2: b.y + offsetY,
+                };
                 return (
-                  <line
+                  <g
                     key={`iedge-${i}`}
-                    x1={a.x + offsetX}
-                    y1={a.y + offsetY}
-                    x2={b.x + offsetX}
-                    y2={b.y + offsetY}
-                    stroke={HIGHLIGHT}
-                    strokeOpacity={0.75}
-                    strokeWidth={HEX_SIZE * 0.16}
-                    strokeLinecap="round"
-                    style={{ cursor: "pointer" }}
-                    onClick={() => interaction.onEdge?.(edge)}
-                  />
+                    className="board-ghost"
+                    onClick={(e) => interaction.onEdge?.(edge, anchorOf(e.currentTarget))}
+                  >
+                    <line
+                      className="ghost"
+                      {...line}
+                      stroke={PLAYER_COLORS[interaction.player]}
+                      strokeWidth={HEX_SIZE * 0.14}
+                      strokeDasharray="8 5"
+                      strokeLinecap="round"
+                    />
+                    <line {...line} stroke="transparent" strokeWidth={HEX_SIZE * 0.3} strokeLinecap="round" />
+                  </g>
                 );
               })}
 
-              {/* Legal vertices (settlements / cities): a pulsing dot */}
-              {interaction.vertices.map((vertex, i) => {
-                const { x, y } = cubeToPixel(vertex, HEX_SIZE);
+              {/* Building ghosts on legal vertices: a faint settlement on empty
+                  corners, a larger dashed outline over an upgradable settlement */}
+              {interaction.vertices.map(({ cube, kind }, i) => {
+                const { x, y } = cubeToPixel(cube, HEX_SIZE);
+                const s = HEX_SIZE * 0.3 * (kind === "city" ? 1.5 : 1);
                 return (
-                  <circle
+                  <g
                     key={`ivert-${i}`}
-                    cx={x + offsetX}
-                    cy={y + offsetY}
-                    r={HEX_SIZE * 0.22}
-                    fill={HIGHLIGHT}
-                    fillOpacity={0.55}
-                    stroke={HIGHLIGHT_STROKE}
-                    strokeWidth={2}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => interaction.onVertex?.(vertex)}
+                    className="board-ghost"
+                    onClick={(e) => interaction.onVertex?.(cube, anchorOf(e.currentTarget))}
                   >
-                    <animate
-                      attributeName="r"
-                      values={`${HEX_SIZE * 0.18};${HEX_SIZE * 0.26};${HEX_SIZE * 0.18}`}
-                      dur="1.4s"
-                      repeatCount="indefinite"
+                    <path
+                      className="ghost"
+                      d={housePath(x + offsetX, y + offsetY, s)}
+                      fill={PLAYER_COLORS[interaction.player]}
+                      fillOpacity={0.5}
+                      stroke={HIGHLIGHT}
+                      strokeWidth={2}
+                      strokeDasharray="5 3"
+                      strokeLinejoin="round"
                     />
-                  </circle>
+                    <circle cx={x + offsetX} cy={y + offsetY} r={HEX_SIZE * 0.3} fill="transparent" />
+                  </g>
                 );
               })}
             </g>

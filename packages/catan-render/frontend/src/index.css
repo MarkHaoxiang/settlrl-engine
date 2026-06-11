@@ -16,6 +16,20 @@
   animation: pop-in 0.35s ease-out;
 }
 
+/* Ghost previews of legal placements (BoardView): faint until hovered. */
+.board-ghost {
+  cursor: pointer;
+}
+
+.board-ghost .ghost {
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+
+.board-ghost:hover .ghost {
+  opacity: 0.95;
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -27,8 +41,8 @@
 
 body {
   margin: 0;
-  /* Much darker than the ocean blues, so the board reads as a lit table. */
-  background: radial-gradient(ellipse at 50% 35%, #15293d 0%, #090f17 75%);
+  /* A sunlit tabletop: warm and light, so the ocean-blue board pops. */
+  background: radial-gradient(ellipse at 50% 35%, #f3e8cd 0%, #d9c7a0 75%);
   display: flex;
   justify-content: center;
   align-items: center;

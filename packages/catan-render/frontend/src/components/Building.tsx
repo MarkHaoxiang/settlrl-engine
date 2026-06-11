@@ -10,7 +10,8 @@ interface Props {
 
 // A simple house silhouette (square body + triangular roof), centred at (cx, cy)
 // and scaled by `size`. Cities are drawn larger to read as upgraded settlements.
-function housePath(cx: number, cy: number, size: number): string {
+// Exported for BoardView's ghost previews of legal placements.
+export function housePath(cx: number, cy: number, size: number): string {
   const w = size;
   const h = size;
   const left = cx - w / 2;

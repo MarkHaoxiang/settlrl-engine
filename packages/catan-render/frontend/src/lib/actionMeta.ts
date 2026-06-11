@@ -2,6 +2,17 @@
 // buttons with the label as tooltip) and the help page (which documents what
 // each icon does).
 
+import type { ResourceKind } from "./boardData";
+
+// Build prices (the rulebook's Building Costs card), one entry per card paid;
+// shown beside build buttons as confirmation context.
+export const BUILD_COSTS: Record<string, ResourceKind[]> = {
+  build_road: ["brick", "wood"],
+  build_settlement: ["brick", "wood", "sheep", "wheat"],
+  build_city: ["ore", "ore", "ore", "wheat", "wheat"],
+  buy_development_card: ["ore", "sheep", "wheat"],
+};
+
 export interface ActionMeta {
   icon: string;
   label: string;
