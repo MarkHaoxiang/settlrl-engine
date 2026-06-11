@@ -171,8 +171,10 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
     catan-agents policies consume. A test pins `observation_space()` and
     `infos` to their key sets (mypy ties `observe()` to the TypedDict).
   - **Public flat-action seam** consumed by catan-agents: `N_FLAT`,
-    `flat_to_action`, `BatchedCatanEnv.flat_mask()`, and `flat_available(board)`
-    (the pure-function sweep MCTS uses for in-tree masks).
+    `flat_to_action`, `BatchedCatanEnv.flat_mask()`, `flat_available(board)`
+    (the pure-function sweep MCTS uses for in-tree masks), and `random_flat`
+    (the single-game type-first random sampler shared by `random_actions`,
+    `record_game`'s default chooser, and catan-agents' `random_policy`).
   - Optional belief tracking (`track_beliefs=True`): a batched `BeliefState`
     advanced inside the same fused step dispatch by diffing the pre/post
     states (a tracked step costs ~+32 us, not a second dispatch's ~+150 us);

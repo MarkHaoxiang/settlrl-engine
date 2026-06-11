@@ -70,7 +70,6 @@ from catan_engine.mechanics.common import (
     player_total_vp,
 )
 from catan_engine.mechanics.flat import (
-    FLAT_ATYPE,
     INDEX_MASKS,
     N_FLAT,
     FlatMaskArray,
@@ -79,6 +78,7 @@ from catan_engine.mechanics.flat import (
     flat_available_for,
     flat_legality,
     flat_to_action,
+    random_flat,
     type_mask_from_flat,
 )
 
@@ -101,6 +101,7 @@ __all__ = [
     "flat_available",
     "flat_to_action",
     "observe_for",
+    "random_flat",
     "step",
 ]
 
@@ -237,24 +238,9 @@ def _fresh_board(
 def _random_actions_core(
     avail_flat: FlatMaskArray, key: KeyScalar
 ) -> tuple[ActionTypeArray, ActionParams]:
-    """Sample a random legal action per lane: a uniform legal action *type*,
-    then a uniform legal move of that type.
-
-    Two-stage rather than flat-uniform so bulk-enumerated types don't crowd
-    out single-row ones (the ~100 trade-proposal rows would make almost every
-    MAIN move an offer, stretching random games several-fold). ``avail_flat``
-    is the ``(B, N_FLAT)`` flat-legality sweep; each stage scores its legal
-    entries with uniform noise and takes the per-lane argmax (illegal scored
-    -1, so only picked if the lane has no legal move).
-    """
-    k_type, k_row = jax.random.split(key)
-    type_legal = type_mask_from_flat(avail_flat)  # (B, N_ACTION_TYPES)
-    t_noise = jax.random.uniform(k_type, type_legal.shape)
-    t = jnp.argmax(jnp.where(type_legal, t_noise, -1.0), axis=1)  # (B,)
-    row_legal = avail_flat & (FLAT_ATYPE[None, :] == t[:, None])
-    noise = jax.random.uniform(k_row, avail_flat.shape)
-    chosen = jnp.argmax(jnp.where(row_legal, noise, -1.0), axis=1)
-    return flat_to_action(chosen)
+    """One :func:`random_flat` draw per lane (``key`` split per lane), decoded."""
+    keys = jax.random.split(key, avail_flat.shape[0])
+    return flat_to_action(jax.vmap(random_flat)(keys, avail_flat))
 
 
 _random_actions_b: Callable[
@@ -594,8 +580,8 @@ class BatchedCatanEnv:
         return fn(self._layout, self._state)
 
     def random_actions(self, key: KeyScalar) -> tuple[ActionTypeArray, ActionParams]:
-        """A random *legal* action per lane (the random-rollout driver): a
-        uniform legal action type, then a uniform legal move of that type.
+        """A random *legal* action per lane (the random-rollout driver): one
+        :func:`random_flat` type-first draw per lane.
 
         A lane with no legal action yields an INVALID action and simply stalls
         until its next auto-reset. ``key`` is a JAX PRNG key, split per lane.

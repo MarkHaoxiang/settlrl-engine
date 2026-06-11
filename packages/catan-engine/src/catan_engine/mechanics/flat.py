@@ -25,7 +25,7 @@ from catan_engine.board.layout import (
     BoardLayout,
 )
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
-from catan_engine.board.state import BoardState
+from catan_engine.board.state import BoardState, IntScalar, KeyScalar
 from catan_engine.mechanics.action import (
     N_ACTION_TYPES,
     ActionParams,
@@ -82,6 +82,7 @@ __all__ = [
     "flat_available_for",
     "flat_legality",
     "flat_to_action",
+    "random_flat",
     "type_mask_from_flat",
 ]
 
@@ -162,6 +163,26 @@ def flat_to_action(
 ) -> tuple[Int[Array, "*shape"], ActionParams]:
     """Decode flat action indices (any shape) into ``(action_type, ActionParams)``."""
     return FLAT_ATYPE[flat], ActionParams(idx=FLAT_IDX[flat], target=FLAT_TARGET[flat])
+
+
+def random_flat(key: KeyScalar, mask: FlatMaskVec) -> IntScalar:
+    """A random legal flat action: a uniform legal action *type*, then a
+    uniform legal row of that type (one game; batch by vmapping).
+
+    Two-stage rather than flat-uniform so bulk-enumerated types don't crowd
+    out single-row ones (the ~100 trade-proposal rows would make almost every
+    MAIN move an offer, stretching random games several-fold). With no legal
+    move the returned index is arbitrary (the engine rejects it as INVALID).
+    The one sampler behind ``BatchedCatanEnv.random_actions``,
+    ``record_game``'s default chooser, and catan-agents' ``random_policy``.
+    """
+    k_type, k_row = jax.random.split(key)
+    type_legal = jnp.zeros((N_ACTION_TYPES,), jnp.bool_).at[FLAT_ATYPE].max(mask)
+    t = jnp.argmax(
+        jnp.where(type_legal, jax.random.uniform(k_type, (N_ACTION_TYPES,)), -1.0)
+    )
+    noise = jax.random.uniform(k_row, (N_FLAT,))
+    return jnp.argmax(jnp.where(mask & (t == FLAT_ATYPE), noise, -1.0))
 
 
 # ===========================================================================

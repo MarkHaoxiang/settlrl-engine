@@ -41,7 +41,13 @@ from catan_engine.board import Board
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import VICTORY_POINTS_TO_WIN, KeyScalar
 from catan_engine.board.tile import Tile
-from catan_engine.env import N_FLAT, ActionType, BatchedCatanEnv, flat_to_action
+from catan_engine.env import (
+    N_FLAT,
+    ActionType,
+    BatchedCatanEnv,
+    flat_to_action,
+    random_flat,
+)
 
 __all__ = [
     "GameRecord",
@@ -208,14 +214,8 @@ Act = Callable[[KeyScalar, BatchedCatanEnv], int]
 
 
 def _uniform_random(key: KeyScalar, env: BatchedCatanEnv) -> int:
-    """A uniform legal action type, then a uniform legal move of that type
-    (the same type-first sampling as ``BatchedCatanEnv.random_actions``)."""
-    k_type, k_row = jax.random.split(key)
-    legal = np.flatnonzero(np.asarray(env.flat_mask()[0]))
-    types = np.unique(_ATYPE[legal])
-    t = types[jax.random.randint(k_type, (), 0, types.size)]
-    rows = legal[_ATYPE[legal] == t]
-    return int(rows[jax.random.randint(k_row, (), 0, rows.size)])
+    """One type-first :func:`random_flat` draw over the acting player's moves."""
+    return int(random_flat(key, env.flat_mask()[0]))
 
 
 def record_game(
@@ -229,10 +229,10 @@ def record_game(
 ) -> GameRecord:
     """Play one game to completion and return its record.
 
-    ``act`` chooses each move (default: random type-first legal play, like
-    ``BatchedCatanEnv.random_actions``); a returned illegal action raises
-    ``ValueError``, and a game not finishing within ``max_moves`` raises
-    ``RuntimeError``.
+    ``act`` chooses each move (default: random type-first legal play,
+    :func:`catan_engine.mechanics.flat.random_flat`); a returned illegal
+    action raises ``ValueError``, and a game not finishing within
+    ``max_moves`` raises ``RuntimeError``.
     """
     record = GameRecord(
         seed=seed, n_players=n_players, number_placement=number_placement
