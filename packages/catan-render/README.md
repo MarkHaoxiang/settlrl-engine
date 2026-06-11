@@ -5,7 +5,8 @@ Web-based renderer for catan-engine. FastAPI serves board state over a JSON API;
 A menu lets you choose between two modes, each at its own URL:
 
 - **Play** (`/play`) — a live, playable game. Each seat is configured per game as a human
-  sharing the screen (hotseat) or a bot (a `catan-agents` policy, e.g. random or greedy);
+  sharing the screen (hotseat) or a bot (a `catan-agents` policy, e.g. random or greedy —
+  search bots expose their build parameters, like `mcts`'s simulation budget, behind the seat's gear button);
   with no human seats the game plays itself as a spectated bot match. Input is hybrid:
   click highlighted vertices / edges / tiles on the board for placements and the robber, use
   the bottom control-bar icon buttons for the other moves (hover for names), and pick from a
@@ -94,8 +95,8 @@ uv run pytest packages/catan-render/tests
 | `POST /api/replay/from-game` | Load the live game (as played so far) for replay |
 | `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board): board + the moves played up to that point. `404` until a replay is loaded |
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
-| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports |
-| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral", "seats": ["human" \| <bot kind>, ...] }` (one entry per seat; default: you + 3 random bots) |
+| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports and its configurable parameters (`{counts, params: {name: {type, default}}}`) |
+| `POST /api/game/reset` | Start a fresh game `{ "seed": <int>, "n_players": 2 \| 4, "number_placement": "random" \| "spiral", "seats": [...] }` — each seat `"human"`, a bot kind, or a configured bot `{ "kind", "params" }` with knob overrides from `GET /api/bots` (one entry per seat; default: you + 3 random bots) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
 Each legal move in `GET /api/game` is a decoded action descriptor carrying its `flat` index

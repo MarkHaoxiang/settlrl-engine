@@ -9,13 +9,19 @@ itself, and that a full game can be driven to a terminal state with a winner.
 import numpy as np
 import pytest
 from catan_engine.record import GameRecord, replay
-from catan_render.bots import supported_counts
+from catan_render.bots import bot_catalog
 from catan_render.session import HUMAN, GameSession
 
 # Bot kinds usable at each seat count the renderer offers.
-_FOUR_PLAYER_KINDS = sorted(k for k, c in supported_counts().items() if 4 in c)
+_FOUR_PLAYER_KINDS = sorted(
+    k
+    for k, spec in bot_catalog().items()
+    if 4 in spec["counts"]  # type: ignore[operator]
+)
 _TWO_ONLY_KINDS = sorted(
-    k for k, c in supported_counts().items() if 2 in c and 4 not in c
+    k
+    for k, spec in bot_catalog().items()
+    if 2 in spec["counts"] and 4 not in spec["counts"]  # type: ignore[operator]
 )
 
 
@@ -229,7 +235,7 @@ def test_record_exports_a_replayable_game() -> None:
     sess._run_bots()  # all-bot game plays itself out
     rec = sess.record()
     assert rec.winner == sess.status().winner
-    assert rec.meta == {"seats": ["random", "random"]}
+    assert rec.meta == {"seats": ["random", "random"], "seat_params": [{}, {}]}
     assert len(rec.moves) > 10  # the full trace, not the capped log
     # The JSON roundtrips and the engine replays it without complaint.
     rec2 = GameRecord.from_json(rec.to_json())

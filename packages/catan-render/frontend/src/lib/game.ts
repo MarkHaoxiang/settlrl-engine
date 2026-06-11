@@ -113,12 +113,22 @@ export type NumberPlacement = "random" | "spiral";
 export type SeatKind = string;
 export const HUMAN: SeatKind = "human";
 
+// A configurable scalar build parameter of a bot kind, and its value.
+export type BotParamValue = number | boolean;
+
+// A seat assignment: its controller plus any bot knob overrides
+// (params only ever holds values the user changed from the defaults).
+export interface SeatConfig {
+  kind: SeatKind;
+  params?: Record<string, BotParamValue>;
+}
+
 export interface NewGameConfig {
   seed: number;
   nPlayers: PlayerCount;
   numberPlacement: NumberPlacement;
   // One entry per seat; no seat has to be human (an all-bot game spectates).
-  seats: SeatKind[];
+  seats: SeatConfig[];
 }
 
 export async function postReset(config: NewGameConfig): Promise<GameSnapshot> {
@@ -129,14 +139,27 @@ export async function postReset(config: NewGameConfig): Promise<GameSnapshot> {
         seed: config.seed,
         n_players: config.nPlayers,
         number_placement: config.numberPlacement,
-        seats: config.seats,
+        // Plain kind strings unless a seat carries knob overrides.
+        seats: config.seats.map((s) =>
+          s.params && Object.keys(s.params).length > 0 ? { kind: s.kind, params: s.params } : s.kind
+        ),
       }),
     })
   );
 }
 
-// The bot kinds the server offers for seats, each with the player counts it
-// supports.
-export async function fetchBots(): Promise<Record<string, number[]>> {
-  return api<Record<string, number[]>>("/api/bots");
+// One knob of a bot kind, as described by GET /api/bots.
+export interface BotParamSpec {
+  type: "int" | "float" | "bool";
+  default: BotParamValue;
+}
+
+// A bot kind's catalog entry: the player counts it supports and its knobs.
+export interface BotSpec {
+  counts: number[];
+  params: Record<string, BotParamSpec>;
+}
+
+export async function fetchBots(): Promise<Record<string, BotSpec>> {
+  return api<Record<string, BotSpec>>("/api/bots");
 }

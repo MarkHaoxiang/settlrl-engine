@@ -15,7 +15,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from .actions import decode_actions
-from .bots import supported_counts
+from .bots import bot_catalog
 from .convert import board_to_model
 from .models import BoardModel, BotMoveModel, GameModel, ReplayStateModel
 from .replay import ReplaySession
@@ -192,10 +192,10 @@ def get_replay_record() -> Response:
 
 
 @app.get("/api/bots")
-def get_bots() -> dict[str, list[int]]:
+def get_bots() -> dict[str, dict[str, object]]:
     """Bot kinds available for seats (catan-agents names), each with the
-    player counts it supports."""
-    return supported_counts()
+    player counts it supports and its configurable build parameters."""
+    return bot_catalog()
 
 
 class _ChatRequest(BaseModel):
@@ -219,16 +219,23 @@ def post_chat(req: _ChatRequest) -> GameModel:
         return _game_model()
 
 
+class _SeatSpec(BaseModel):
+    """A configured bot seat: its kind plus knob overrides from the catalog."""
+
+    kind: str
+    params: dict[str, float | int | bool] = {}
+
+
 class _ResetRequest(BaseModel):
     seed: int = 0
     # Seats in the new game. The engine supports 2-4; the renderer offers 2
     # and 4 for now.
     n_players: Literal[2, 4] = 4
     number_placement: Literal["random", "spiral"] = "random"
-    # What controls each seat: "human" (hotseat) or a bot kind from
-    # GET /api/bots; no seat has to be human. None seats a human on seat 0
-    # and "random" bots elsewhere.
-    seats: list[str] | None = None
+    # What controls each seat: "human" (hotseat), a bot kind from
+    # GET /api/bots, or a configured bot {"kind", "params"}; no seat has to
+    # be human. None seats a human on seat 0 and "random" bots elsewhere.
+    seats: list[str | _SeatSpec] | None = None
 
 
 @app.post("/api/game/reset")
@@ -239,7 +246,9 @@ def post_reset(req: _ResetRequest) -> GameModel:
                 req.seed,
                 n_players=req.n_players,
                 number_placement=req.number_placement,
-                seats=req.seats,
+                seats=[s if isinstance(s, str) else s.model_dump() for s in req.seats]
+                if req.seats is not None
+                else None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

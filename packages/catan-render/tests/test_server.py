@@ -126,13 +126,48 @@ def test_get_bots_lists_policies() -> None:
     assert resp.status_code == 200
     bots = resp.json()
     assert "random" in bots and "human" not in bots
-    # Each kind maps to the player counts it supports.
-    assert set(bots["random"]) >= {2, 4}
+    # Each kind carries the player counts it supports and its knobs.
+    assert set(bots["random"]["counts"]) >= {2, 4}
+    assert bots["random"]["params"] == {}
+    # mcts is a configurable family; knobs carry a type and a default.
+    sims = bots["mcts"]["params"]["num_simulations"]
+    assert sims["type"] == "int" and sims["default"] > 0
+
+
+def test_reset_with_configured_seat() -> None:
+    resp = client.post(
+        "/api/game/reset",
+        json={
+            "seed": 7,
+            "n_players": 2,
+            "seats": [
+                "human",
+                {"kind": "mcts", "params": {"num_simulations": 8, "num_worlds": 1}},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"]["seats"] == ["human", "mcts"]
+
+
+def test_reset_rejects_unknown_bot_param() -> None:
+    resp = client.post(
+        "/api/game/reset",
+        json={
+            "seed": 0,
+            "n_players": 2,
+            "seats": ["human", {"kind": "mcts", "params": {"depth": 3}}],
+        },
+    )
+    assert resp.status_code == 422
+    assert "depth" in resp.json()["detail"]
 
 
 def test_reset_rejects_seat_kind_unsupported_at_count() -> None:
     bots = client.get("/api/bots").json()
-    two_only = [k for k, counts in bots.items() if 2 in counts and 4 not in counts]
+    two_only = [
+        k for k, spec in bots.items() if 2 in spec["counts"] and 4 not in spec["counts"]
+    ]
     if not two_only:
         pytest.skip("no two-player-only bot kinds")
     resp = client.post(

@@ -9,7 +9,7 @@ a replayable ``GameRecord`` export.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import jax
@@ -20,8 +20,12 @@ from catan_engine.env.aec import CatanAECEnv
 from catan_engine.record import GameRecord, Move
 
 from .actions import decode_actions
-from .bots import POLICIES, BeliefSpec, bot_act
+from .bots import POLICIES, BeliefSpec, Knob, bot_act, coerce_params
 from .models import GameStatusModel, LogEntryModel
+
+# A seat assignment: "human", a bot kind, or a configured bot
+# {"kind": name, "params": {knob: value}}.
+SeatLike = str | Mapping[str, object]
 
 # Seat kind for a human-controlled seat; every other kind is a POLICIES name.
 HUMAN = "human"
@@ -52,7 +56,7 @@ class GameSession:
         self,
         seed: int = 0,
         n_players: int = 4,
-        seats: Sequence[str] | None = None,
+        seats: Sequence[SeatLike] | None = None,
     ) -> None:
         self.n_players = n_players
         self.reset(seed, seats=seats)
@@ -62,14 +66,15 @@ class GameSession:
         seed: int = 0,
         n_players: int | None = None,
         number_placement: Literal["random", "spiral"] = "random",
-        seats: Sequence[str] | None = None,
+        seats: Sequence[SeatLike] | None = None,
     ) -> None:
         """Start a fresh game.
 
         ``n_players`` changes the seat count (None keeps it); ``seats`` assigns
         every seat (None means a human on seat 0 and ``"random"`` bots
-        elsewhere) and must have ``n_players`` entries, each ``"human"`` or a
-        policy name.
+        elsewhere) and must have ``n_players`` entries, each ``"human"``, a
+        policy name, or ``{"kind": name, "params": {...}}`` with knob
+        overrides from the bot catalog.
         """
         if n_players is not None:
             self.n_players = n_players
@@ -77,12 +82,29 @@ class GameSession:
             seats = [HUMAN] + ["random"] * (self.n_players - 1)
         if len(seats) != self.n_players:
             raise ValueError(f"expected {self.n_players} seats, got {len(seats)}")
-        unknown = sorted(set(seats) - {HUMAN} - set(POLICIES))
-        if unknown:
-            raise ValueError(f"unknown seat kind(s): {', '.join(unknown)}")
+        kinds: list[str] = []
+        all_params: list[dict[str, Knob]] = []
+        for entry in seats:
+            if isinstance(entry, str):
+                kind, raw = entry, {}
+            else:
+                kind = str(entry.get("kind", ""))
+                raw_params = entry.get("params") or {}
+                if not isinstance(raw_params, Mapping):
+                    raise ValueError(f"seat params must be a mapping: {raw_params!r}")
+                raw = dict(raw_params)
+            kinds.append(kind)
+            if kind == HUMAN:
+                if raw:
+                    raise ValueError("a human seat takes no params")
+                all_params.append({})
+            elif kind not in POLICIES:
+                raise ValueError(f"unknown seat kind: {kind!r}")
+            else:
+                all_params.append(coerce_params(kind, raw))
         unsupported = sorted(
             kind
-            for kind in set(seats) - {HUMAN}
+            for kind in set(kinds) - {HUMAN}
             if self.n_players not in POLICIES[kind].n_players
         )
         if unsupported:
@@ -90,7 +112,8 @@ class GameSession:
                 f"seat kind(s) not available in a {self.n_players}-player game: "
                 f"{', '.join(unsupported)}"
             )
-        self.seats: list[str] = list(seats)
+        self.seats: list[str] = kinds
+        self.seat_params: list[dict[str, Knob]] = all_params
         self.seed = seed
         self.number_placement: Literal["random", "spiral"] = number_placement
         self.env = CatanAECEnv(
@@ -152,7 +175,7 @@ class GameSession:
         if self.seats[seat] == HUMAN or self.legal_flat().size == 0:
             return None
         self._key, k = jax.random.split(self._key)
-        flat = bot_act(self.seats[seat], k, self.env._env, seat)
+        flat = bot_act(self.seats[seat], self.seat_params[seat], k, self.env._env, seat)
         self.env.step(flat)
         self._log_move(seat, flat)
         return flat
@@ -182,7 +205,7 @@ class GameSession:
             number_placement=self.number_placement,
             moves=tuple(self._moves),
             winner=self.winner(),
-            meta={"seats": self.seats},
+            meta={"seats": self.seats, "seat_params": self.seat_params},
         )
 
     def _push_log(
