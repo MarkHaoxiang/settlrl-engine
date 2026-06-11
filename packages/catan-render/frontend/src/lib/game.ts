@@ -103,12 +103,28 @@ export interface SeatConfig {
   params?: Record<string, BotParamValue>;
 }
 
+// Which human seats the creator claims: every one (hotseat, sharing this
+// screen) or just the first (online — the others join via the invite link).
+export type ClaimMode = "all" | "first";
+
 export interface NewGameConfig {
   seed: number;
   nPlayers: PlayerCount;
   numberPlacement: NumberPlacement;
   // One entry per seat; no seat has to be human (an all-bot game spectates).
   seats: SeatConfig[];
+  claim: ClaimMode;
+}
+
+// The host key gating game creation on protected deployments; entered once
+// in the new-game dialog and persisted.
+const CREATE_KEY = "catan-create-key";
+
+export const savedCreateKey = (): string => localStorage.getItem(CREATE_KEY) ?? "";
+
+export function saveCreateKey(key: string): void {
+  if (key) localStorage.setItem(CREATE_KEY, key);
+  else localStorage.removeItem(CREATE_KEY);
 }
 
 // A freshly created game: its id plus the creator's seat tokens (every human
@@ -120,6 +136,7 @@ export interface CreatedGame {
 }
 
 export async function createGame(config: NewGameConfig): Promise<CreatedGame> {
+  const key = savedCreateKey();
   return api<CreatedGame>("/api/games", {
     method: "POST",
     body: JSON.stringify({
@@ -130,8 +147,9 @@ export async function createGame(config: NewGameConfig): Promise<CreatedGame> {
       seats: config.seats.map((s) =>
         s.params && Object.keys(s.params).length > 0 ? { kind: s.kind, params: s.params } : s.kind
       ),
-      claim: "all",
+      claim: config.claim,
     }),
+    headers: key ? { "X-Create-Key": key } : {},
   });
 }
 

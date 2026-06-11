@@ -49,28 +49,69 @@ def test_create_claims_all_human_seats_by_default(client: TestClient) -> None:
     assert body["seats_claimed"] == [0]
 
 
+def test_create_claim_first_takes_one_seat_and_leaves_the_rest(
+    client: TestClient,
+) -> None:
+    game, tokens = _create(
+        client, seats=["human", "human", "random", "random"], claim="first"
+    )
+    assert sorted(tokens) == ["0"]
+    assert client.post(f"/api/games/{game}/join", json={}).json()["seat"] == 1
+
+
+def test_create_key_gates_creation_when_set() -> None:
+    client = TestClient(create_app(GameRegistry(), create_key="sesame"))
+    assert client.post("/api/games", json={"seed": 0}).status_code == 403
+    assert (
+        client.post(
+            "/api/games", json={"seed": 0}, headers={"X-Create-Key": "wrong"}
+        ).status_code
+        == 403
+    )
+    resp = client.post(
+        "/api/games", json={"seed": 0}, headers={"X-Create-Key": "sesame"}
+    )
+    assert resp.status_code == 200
+    # Only creation is gated; viewing and joining never need the key.
+    assert client.get(f"/api/games/{resp.json()['id']}").status_code == 200
+
+
+def test_full_registry_of_active_games_returns_503() -> None:
+    client = TestClient(create_app(GameRegistry(max_games=1)))
+    assert client.post("/api/games", json={"seed": 0}).status_code == 200
+    assert client.post("/api/games", json={"seed": 0}).status_code == 503
+
+
 def test_unknown_game_404s(client: TestClient) -> None:
     assert client.get("/api/games/nope").status_code == 404
     assert client.post("/api/games/nope/action", json={"flat": 0}).status_code == 404
 
 
 def test_action_requires_the_acting_seats_token(client: TestClient) -> None:
-    game, tokens = _create(client, seats=["human", "human", "random", "random"], claim="none")
+    game, _ = _create(
+        client, seats=["human", "human", "random", "random"], claim="none"
+    )
     a = client.post(f"/api/games/{game}/join", json={"seat": 0}).json()
     b = client.post(f"/api/games/{game}/join", json={"seat": 1}).json()
-    flat = client.get(f"/api/games/{game}", headers={"X-Seat-Tokens": a["token"]}).json()[
-        "actions"
-    ][0]["flat"]
+    flat = client.get(
+        f"/api/games/{game}", headers={"X-Seat-Tokens": a["token"]}
+    ).json()["actions"][0]["flat"]
     # No token, and the wrong seat's token: refused before legality.
-    assert client.post(f"/api/games/{game}/action", json={"flat": flat}).status_code == 403
+    assert (
+        client.post(f"/api/games/{game}/action", json={"flat": flat}).status_code == 403
+    )
     assert (
         client.post(
-            f"/api/games/{game}/action", json={"flat": flat}, headers={"X-Seat-Tokens": b["token"]}
+            f"/api/games/{game}/action",
+            json={"flat": flat},
+            headers={"X-Seat-Tokens": b["token"]},
         ).status_code
         == 403
     )
     resp = client.post(
-        f"/api/games/{game}/action", json={"flat": flat}, headers={"X-Seat-Tokens": a["token"]}
+        f"/api/games/{game}/action",
+        json={"flat": flat},
+        headers={"X-Seat-Tokens": a["token"]},
     )
     assert resp.status_code == 200
 
@@ -79,32 +120,49 @@ def test_illegal_action_returns_409(client: TestClient) -> None:
     game, tokens = _create(client)
     legal = {
         a["flat"]
-        for a in client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"]
+        for a in client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()[
+            "actions"
+        ]
     }
     illegal = next(f for f in range(1000) if f not in legal)
-    resp = client.post(f"/api/games/{game}/action", json={"flat": illegal}, headers=_hdr(tokens))
+    resp = client.post(
+        f"/api/games/{game}/action", json={"flat": illegal}, headers=_hdr(tokens)
+    )
     assert resp.status_code == 409
 
 
 def test_join_conflicts_are_409(client: TestClient) -> None:
-    game, tokens = _create(client, seats=["human", "human", "random", "random"], claim="none")
+    game, tokens = _create(
+        client, seats=["human", "human", "random", "random"], claim="none"
+    )
     assert tokens == {}
     assert client.post(f"/api/games/{game}/join", json={}).json()["seat"] == 0
     assert client.post(f"/api/games/{game}/join", json={"seat": 1}).status_code == 200
     assert client.post(f"/api/games/{game}/join", json={}).status_code == 409  # full
-    assert client.post(f"/api/games/{game}/join", json={"seat": 2}).status_code == 409  # bot
+    assert (
+        client.post(f"/api/games/{game}/join", json={"seat": 2}).status_code == 409
+    )  # bot
 
 
 def test_create_rejects_bad_requests(client: TestClient) -> None:
     for bad in (1, 3, 5):
-        assert client.post("/api/games", json={"seed": 0, "n_players": bad}).status_code == 422
+        assert (
+            client.post("/api/games", json={"seed": 0, "n_players": bad}).status_code
+            == 422
+        )
     assert (
         client.post(
-            "/api/games", json={"seed": 0, "seats": ["human", "clever", "random", "random"]}
+            "/api/games",
+            json={"seed": 0, "seats": ["human", "clever", "random", "random"]},
         ).status_code
         == 422
     )
-    assert client.post("/api/games", json={"seed": 0, "seats": ["human", "random"]}).status_code == 422
+    assert (
+        client.post(
+            "/api/games", json={"seed": 0, "seats": ["human", "random"]}
+        ).status_code
+        == 422
+    )
 
 
 def test_create_same_seed_reproduces_the_board(client: TestClient) -> None:
@@ -125,7 +183,9 @@ def test_bot_endpoint_steps_one_move_and_reports_it(client: TestClient) -> None:
 
 def test_concurrent_duplicate_actions_apply_once(client: TestClient) -> None:
     game, tokens = _create(client)
-    flat = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"][0]["flat"]
+    flat = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"][0][
+        "flat"
+    ]
     codes: list[int] = []
 
     def post() -> None:
@@ -148,15 +208,27 @@ def test_concurrent_duplicate_actions_apply_once(client: TestClient) -> None:
 def test_chat_requires_seat_ownership(client: TestClient) -> None:
     game, tokens = _create(client)
     body = client.post(
-        f"/api/games/{game}/chat", json={"text": "hi", "player": 0}, headers=_hdr(tokens)
+        f"/api/games/{game}/chat",
+        json={"text": "hi", "player": 0},
+        headers=_hdr(tokens),
     ).json()
     assert body["log"][-1]["kind"] == "chat" and body["log"][-1]["player"] == 0
     # Unowned seat: refused. Spectator (no seat given): allowed.
     assert (
-        client.post(f"/api/games/{game}/chat", json={"text": "hi", "player": 1}).status_code == 403
+        client.post(
+            f"/api/games/{game}/chat", json={"text": "hi", "player": 1}
+        ).status_code
+        == 403
     )
-    assert client.post(f"/api/games/{game}/chat", json={"text": "gl"}).json()["log"][-1]["player"] is None
-    assert client.post(f"/api/games/{game}/chat", json={"text": "   "}).status_code == 422
+    assert (
+        client.post(f"/api/games/{game}/chat", json={"text": "gl"}).json()["log"][-1][
+            "player"
+        ]
+        is None
+    )
+    assert (
+        client.post(f"/api/games/{game}/chat", json={"text": "   "}).status_code == 422
+    )
 
 
 def _finish(registry: GameRegistry, game: str) -> None:

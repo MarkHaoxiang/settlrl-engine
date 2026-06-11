@@ -4,8 +4,9 @@ A ``GameHandle`` owns one :class:`GameSession`, its lock (FastAPI runs sync
 endpoints in a threadpool, and a session is not thread-safe), and the seat
 claims: joining a human seat issues an opaque token, and every privileged
 request proves seat ownership by presenting tokens. The registry caps the
-number of live games by evicting the least-recently-used finished-or-idle
-game.
+number of live games by evicting finished or long-idle ones; a running game
+that has been touched recently is never evicted, so a full registry of active
+games refuses creation instead.
 """
 
 from __future__ import annotations
@@ -19,6 +20,14 @@ from .session import HUMAN, GameSession
 # Games are addressed by short ids; tokens prove seat ownership.
 _ID_BYTES = 4
 _TOKEN_BYTES = 16
+
+# An unfinished game untouched for this long counts as abandoned and may be
+# evicted to make room.
+_IDLE_TTL_S = 3600.0
+
+
+class RegistryFullError(Exception):
+    """Every slot holds a recently-active running game; creation must wait."""
 
 
 class GameHandle:
@@ -66,8 +75,9 @@ class GameHandle:
 class GameRegistry:
     """Id-addressed live games. All methods are thread-safe.
 
-    ``max_games`` caps memory: past it, the least-recently-touched game is
-    evicted (finished ones first).
+    ``max_games`` caps memory: past it, the least-recently-touched finished or
+    abandoned game is evicted; ``create`` raises :class:`RegistryFullError`
+    when nothing is evictable.
     """
 
     def __init__(self, max_games: int = 32) -> None:
@@ -94,9 +104,16 @@ class GameRegistry:
 
     def _evict(self) -> None:
         while len(self._games) >= self._max:
-            # Finished games go first, then the least recently touched.
-            victim = min(
-                self._games.values(),
-                key=lambda h: (not h.session.terminal(), h.touched),
-            )
+            # Finished games go first, then the least recently touched — but a
+            # running game someone touched recently is never evicted from
+            # under its players.
+            cutoff = time.monotonic() - _IDLE_TTL_S
+            evictable = [
+                h
+                for h in self._games.values()
+                if h.session.terminal() or h.touched < cutoff
+            ]
+            if not evictable:
+                raise RegistryFullError("all games are active; try again later")
+            victim = min(evictable, key=lambda h: (not h.session.terminal(), h.touched))
             del self._games[victim.id]

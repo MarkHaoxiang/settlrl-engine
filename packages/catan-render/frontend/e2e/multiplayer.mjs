@@ -53,8 +53,8 @@ const C = await page();
 await C.goto(`${BASE}/play/${id}`);
 await C.waitForTimeout(1200);
 
-const seatsOf = (p) =>
-  p.evaluate((gid) => Object.keys(JSON.parse(localStorage.getItem("catan-seats") ?? "{}")[gid] ?? {}), id);
+const seatsOf = (p, gid = id) =>
+  p.evaluate((g) => Object.keys(JSON.parse(localStorage.getItem("catan-seats") ?? "{}")[g] ?? {}), gid);
 check("first joiner claims seat 0", String(await seatsOf(B)) === "0");
 check("second joiner claims seat 1", String(await seatsOf(C)) === "1");
 check("acting seat sees markers", (await B.locator(".board-ghost").count()) > 0);
@@ -93,6 +93,23 @@ check(
   "full game spectates",
   (await D.evaluate(() => document.body.innerText)).includes("Spectating")
 );
+
+// --- online seating through the dialog ---------------------------------------
+// Two human seats + the "online" choice: the creator gets only seat 0, the
+// invite link hands out seat 1.
+const E = await page();
+await E.goto(`${BASE}/play`);
+await E.waitForTimeout(800);
+await E.getByRole("button", { name: "human", exact: true }).nth(1).click();
+await E.getByRole("button", { name: "online", exact: true }).click();
+await E.getByRole("button", { name: "Start", exact: true }).click();
+await E.waitForTimeout(1500);
+const onlineId = E.url().split("/play/")[1];
+check("online create claims only the first seat", String(await seatsOf(E, onlineId)) === "0");
+const F = await page();
+await F.goto(`${BASE}/play/${onlineId}`);
+await F.waitForTimeout(1200);
+check("invitee claims the second seat", String(await seatsOf(F, onlineId)) === "1");
 
 await browser.close();
 if (failures > 0) {

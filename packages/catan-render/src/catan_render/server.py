@@ -6,6 +6,7 @@ apps with their own registries instead of sharing module state.
 """
 
 import json
+import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -23,7 +24,7 @@ from starlette.types import Scope
 
 from .actions import decode_actions
 from .bots import bot_catalog
-from .games import GameHandle, GameRegistry
+from .games import GameHandle, GameRegistry, RegistryFullError
 from .models import BotMoveModel, GameModel, ReplayStateModel
 from .replay import ReplaySession
 from .session import GameSession, IllegalActionError
@@ -53,6 +54,7 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
+CreateKey = Annotated[str | None, Header(alias="X-Create-Key")]
 
 
 def _tokens(header: str | None) -> list[str]:
@@ -85,8 +87,9 @@ class _CreateRequest(BaseModel):
     # human on seat 0 and "random" bots elsewhere.
     seats: list[str | _SeatSpec] | None = None
     # Human seats the creator claims immediately: every one ("all", the
-    # hotseat default), or none (others join via POST /join).
-    claim: Literal["all", "none"] = "all"
+    # hotseat default), just the first ("first", online play — others join
+    # via POST /join), or none.
+    claim: Literal["all", "first", "none"] = "all"
 
 
 class _CreatedModel(BaseModel):
@@ -118,8 +121,15 @@ class _ChatRequest(BaseModel):
     player: int | None = None
 
 
-def create_app(games: GameRegistry | None = None) -> FastAPI:
-    """Build the app around its own registry (tests pass theirs in)."""
+def create_app(
+    games: GameRegistry | None = None, create_key: str | None = None
+) -> FastAPI:
+    """Build the app around its own registry (tests pass theirs in).
+
+    ``create_key`` gates game creation: when set, ``POST /api/games`` requires
+    a matching ``X-Create-Key`` header. Public deployments set it so strangers
+    can't spam games and exhaust the registry.
+    """
     registry = games if games is not None else GameRegistry()
     replays = _ReplaySlot()
     app = FastAPI(title="Catan Render", lifespan=_lifespan)
@@ -131,7 +141,13 @@ def create_app(games: GameRegistry | None = None) -> FastAPI:
         return handle
 
     @app.post("/api/games")
-    def post_create(req: _CreateRequest) -> _CreatedModel:
+    def post_create(
+        req: _CreateRequest, x_create_key: CreateKey = None
+    ) -> _CreatedModel:
+        if create_key is not None and x_create_key != create_key:
+            raise HTTPException(
+                status_code=403, detail="creation requires the host key"
+            )
         seats = (
             [s if isinstance(s, str) else s.model_dump() for s in req.seats]
             if req.seats is not None
@@ -142,12 +158,15 @@ def create_app(games: GameRegistry | None = None) -> FastAPI:
             session.reset(req.seed, number_placement=req.number_placement, seats=seats)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        handle = registry.create(session)
-        tokens = (
-            dict(handle.claim(seat) for seat in handle.human_seats())
-            if req.claim == "all"
-            else {}
+        try:
+            handle = registry.create(session)
+        except RegistryFullError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        humans = handle.human_seats()
+        claiming = (
+            humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
+        tokens = dict(handle.claim(seat) for seat in claiming)
         return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
@@ -317,4 +336,4 @@ class _SPAStaticFiles(StaticFiles):
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 # The uvicorn entry point (catan_render.server:app).
-app = create_app()
+app = create_app(create_key=os.environ.get("CATAN_RENDER_CREATE_KEY"))

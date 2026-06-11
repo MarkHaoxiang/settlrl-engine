@@ -659,7 +659,7 @@ export interface components {
              * @default all
              * @enum {string}
              */
-            claim: "all" | "none";
+            claim: "all" | "first" | "none";
         };
         /**
          * _CreatedModel
@@ -716,7 +716,9 @@ export interface operations {
     post_create_api_games_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Create-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

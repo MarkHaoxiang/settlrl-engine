@@ -3,7 +3,7 @@
 from typing import cast
 
 import pytest
-from catan_render.games import GameHandle, GameRegistry
+from catan_render.games import GameHandle, GameRegistry, RegistryFullError
 from catan_render.session import GameSession
 
 
@@ -19,7 +19,10 @@ class _FakeSession:
 
 
 def _session(seats: list[str] | None = None, terminal: bool = False) -> GameSession:
-    return cast(GameSession, _FakeSession(seats or ["human", "human", "random", "random"], terminal))
+    return cast(
+        GameSession,
+        _FakeSession(seats or ["human", "human", "random", "random"], terminal),
+    )
 
 
 def test_claim_defaults_to_first_free_human_seat() -> None:
@@ -60,7 +63,7 @@ def test_registry_creates_unique_ids_and_resolves_them() -> None:
     assert registry.get("nope") is None
 
 
-def test_eviction_prefers_finished_then_least_recently_touched() -> None:
+def test_eviction_prefers_finished_then_abandoned() -> None:
     registry = GameRegistry(max_games=2)
     running = registry.create(_session())
     finished = registry.create(_session(terminal=True))
@@ -68,9 +71,15 @@ def test_eviction_prefers_finished_then_least_recently_touched() -> None:
     assert registry.get(finished.id) is None
     assert registry.get(running.id) is running
 
-    # Both running now: the least recently touched goes.
-    other = registry.create(_session())  # at cap again
+    # A running game idle past the TTL counts as abandoned and goes next.
     running.touched = 0.0
-    assert other is not None
     registry.create(_session())
     assert registry.get(running.id) is None
+
+
+def test_full_registry_of_active_games_refuses_creation() -> None:
+    registry = GameRegistry(max_games=1)
+    active = registry.create(_session())
+    with pytest.raises(RegistryFullError):
+        registry.create(_session())
+    assert registry.get(active.id) is active

@@ -9,15 +9,33 @@
    "post": {
     "summary": "Post Create",
     "operationId": "post_create_api_games_post",
+    "parameters": [
+     {
+      "name": "X-Create-Key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Create-Key"
+      }
+     }
+    ],
     "requestBody": {
+     "required": true,
      "content": {
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/_CreateRequest"
        }
       }
-     },
-     "required": true
+     }
     },
     "responses": {
      "200": {
@@ -1532,6 +1550,7 @@
       "type": "string",
       "enum": [
        "all",
+       "first",
        "none"
       ],
       "title": "Claim",

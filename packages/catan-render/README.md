@@ -28,8 +28,9 @@ A menu lets you choose between two modes, each at its own URL:
   humans can post messages. A help page (`/help`, the **?** button top-left) documents the
   controls and icons. On entry — and from the
   **New game** button — a dialog configures the next game: player count (2 or 4), what controls
-  each seat, number-token placement (random or spiral), and an optional seed;
-  cancelling keeps the game in progress.
+  each seat, seating with several humans (hotseat on this screen, or online — you take the first
+  seat and the others join through the invite link), number-token placement (random or spiral),
+  an optional seed, and the host key on protected servers; cancelling keeps the game in progress.
 - **Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the
   JSON from `GET /api/game/record`) or the live game as played so far, then scrub anywhere
   with the slider, step move by move, or press play; the log panel fills in as the game
@@ -83,6 +84,34 @@ uv run catan-render
 
 Open http://localhost:8000.
 
+## Hosting
+
+The server is configured by environment variables: `HOST` (default `0.0.0.0`),
+`PORT` (default `8000`), `RELOAD` (default `1`; set `0` in production — the
+reloader is a dev file-watcher), and `CATAN_RENDER_CREATE_KEY` (when set, only
+requests carrying it as `X-Create-Key` may create games — the dialog's "Host
+key" field; players joining or playing never need it). Run **one process,
+one worker**: live games are held in memory, so extra workers would split
+them. Restarts lose live games. The registry holds up to 32 games, evicting
+finished or hour-idle ones to make room.
+
+The repo-root `Dockerfile` builds a self-contained image (frontend compiled
+in, CPU JAX):
+
+```bash
+docker build -t catan-render .
+docker run -p 8000:8000 -e CATAN_RENDER_CREATE_KEY=<secret> catan-render
+```
+
+Seat tokens are bearer secrets, so put TLS in front for anything beyond a
+LAN — e.g. Caddy, which manages certificates itself:
+
+```
+games.example.com {
+    reverse_proxy localhost:8000
+}
+```
+
 ## Tests
 
 The renderer builds its board coordinate tables directly from the engine's
@@ -119,7 +148,7 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "none" }` — returns the game id and the creator's seat tokens |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none" }` — returns the game id and the creator's seat tokens. Requires the `X-Create-Key` header when the server sets `CATAN_RENDER_CREATE_KEY`; `503` when every slot holds an active game |
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |

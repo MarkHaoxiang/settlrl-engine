@@ -63,6 +63,10 @@ export default function PlayView() {
   // Deep-linked with no claim: take the first free human seat, else spectate.
   useEffect(() => {
     if (!gameId || joinFailed || joining.current || Object.keys(tokens).length > 0) return;
+    // The tokens state is stale in the render right after navigating from
+    // start(); read storage directly so a creator's own fresh claims never
+    // trigger a join (which would grab an invitee's seat).
+    if (Object.keys(tokensFor(gameId)).length > 0) return;
     joining.current = true;
     joinGame(gameId).then(
       (j) => {
@@ -94,8 +98,9 @@ export default function PlayView() {
   // without a game, and reopened by the New game button).
   const [configuring, setConfiguring] = useState(!gameId);
 
-  // Creating a game claims every human seat (hotseat); invitees re-claim
-  // theirs via the invite link (auto-join above).
+  // Creating a game claims human seats per the dialog's seating choice
+  // (hotseat: all of them; online: just the first) — the rest are claimed
+  // through the invite link (auto-join above).
   const start = async (config: NewGameConfig) => {
     setConfiguring(false);
     try {

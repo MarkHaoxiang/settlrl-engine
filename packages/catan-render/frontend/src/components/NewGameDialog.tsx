@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import {
   fetchBots,
   HUMAN,
+  savedCreateKey,
+  saveCreateKey,
   type BotParamValue,
   type BotSpec,
   type NewGameConfig,
@@ -110,6 +112,10 @@ export default function NewGameDialog({
   const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
   const [numberPlacement, setNumberPlacement] = useState<NumberPlacement>("random");
   const [seed, setSeed] = useState("");
+  // With several human seats: all on this screen, or just yours (the others
+  // join through the invite link).
+  const [seating, setSeating] = useState<"hotseat" | "online">("hotseat");
+  const [hostKey, setHostKey] = useState(savedCreateKey());
   // One controller per possible seat; only the first nPlayers are used.
   const [seats, setSeats] = useState<SeatConfig[]>([
     { kind: HUMAN },
@@ -143,13 +149,18 @@ export default function NewGameDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const start = () =>
+  const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
+
+  const start = () => {
+    saveCreateKey(hostKey.trim());
     onStart({
       seed: seed === "" ? Math.floor(Math.random() * 65536) : Number(seed),
       nPlayers,
       numberPlacement,
       seats: seats.slice(0, nPlayers),
+      claim: humanSeats >= 2 && seating === "online" ? "first" : "all",
     });
+  };
 
   return (
     <div
@@ -213,6 +224,19 @@ export default function NewGameDialog({
             </div>
           );
         })}
+        {humanSeats >= 2 && (
+          <Toggle
+            label="Seating"
+            options={["hotseat", "online"] as const}
+            value={seating}
+            onChange={setSeating}
+            trailing={
+              <span style={{ fontSize: 11, opacity: 0.5 }}>
+                {seating === "online" ? "others join via the invite link" : "all on this screen"}
+              </span>
+            }
+          />
+        )}
         <Toggle
           label="Numbers"
           options={["random", "spiral"] as const}
@@ -226,6 +250,18 @@ export default function NewGameDialog({
             placeholder="random"
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
+            style={{ ...buttonStyle, cursor: "text", width: 100, padding: "5px 10px", fontSize: 12 }}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={labelStyle} title="Required on protected servers to create games">
+            Host key
+          </span>
+          <input
+            type="text"
+            placeholder="none"
+            value={hostKey}
+            onChange={(e) => setHostKey(e.target.value)}
             style={{ ...buttonStyle, cursor: "text", width: 100, padding: "5px 10px", fontSize: 12 }}
           />
         </div>
