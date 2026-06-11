@@ -82,6 +82,8 @@ def make_heuristic(
     w_knight: float = 0.5,
     w_diverse: float = 0.6,
     w_port: float = 0.0,
+    w_wheat_ore: float = 0.25,
+    w_race: float = 0.8,
 ) -> ValueFunction:
     """Build a weighted heuristic value function (see :func:`heuristic_value`).
 
@@ -90,9 +92,10 @@ def make_heuristic(
     (robber-aware, city double), distinct resource types produced, hand
     diversity (sqrt per type) with a discard-risk penalty per card over seven,
     held dev cards, expansion (pips of the best settlement spot buildable right
-    now, and own roads), completeness of the closest affordable build, and
-    knights played toward Largest Army. The value is the player's strength
-    minus the best opponent's.
+    now, and own roads), completeness of the closest affordable build, knights
+    played toward Largest Army, a wheat/ore production premium, and a
+    superlinear closing-urgency term above six VP. The value is the player's
+    strength minus the best opponent's.
     """
 
     def strength(
@@ -159,10 +162,18 @@ def make_heuristic(
 
         knights = jnp.minimum(state.knights_played[p].astype(jnp.float32), 3.0)
 
-        # Ports: trading power from own buildings on port vertices (a 2:1 port
-        # is worth more when its resource is produced; 3:1 counts once).
+        # Ports: a 2:1 port is worth the production it can convert; a 3:1
+        # port a fraction of all production.
+        port_alloc = layout.port_allocation.astype(jnp.int32)
         on_port = (state.vertex_owner[PORT_V] == p + 1).any(axis=1)  # (P_ports,)
-        ports = on_port.sum().astype(jnp.float32)
+        has_2to1 = (
+            jnp.zeros((5,), bool).at[port_alloc % 5].max(on_port & (port_alloc < 5))
+        )
+        has_3to1 = jnp.any(on_port & (port_alloc == 5))
+        ports = (has_2to1 * per_res).sum() + 0.3 * has_3to1 * production
+
+        # Closing urgency: VPs matter superlinearly near the win.
+        race = jnp.maximum(vp + dev_vp - 6.0, 0.0) ** 2
 
         return (
             w_vp * (vp + dev_vp)
@@ -176,6 +187,8 @@ def make_heuristic(
             + w_prog * progress
             + w_knight * knights
             + w_port * ports
+            + w_wheat_ore * (per_res[1] + per_res[4])
+            + w_race * race
         )
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:

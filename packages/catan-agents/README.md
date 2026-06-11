@@ -22,7 +22,7 @@ Two-player strength (200+ game seat-swapped matches): `mcts` > `lookahead` > `gr
 
 ## Value functions
 
-A `ValueFunction` scores a board for one player (higher is better). `heuristic_value` is the shipped hand-written one: victory points, pip-weighted production and its diversity across resources, expansion (roads and reachable settlement spots), progress toward the next build, hand quality with a discard-risk penalty, dev cards, and Largest Army progress — all relative to the strongest opponent. `make_heuristic(**weights)` builds a variant with your own weights; `lookahead` and `mcts` accept any value function via `make_greedy(value)` / `make_mcts(value)`.
+A `ValueFunction` scores a board for one player (higher is better). `heuristic_value` is the shipped hand-written one: victory points (weighted up superlinearly near the win), pip-weighted production (wheat and ore at a premium) and its diversity across resources, expansion (roads and reachable settlement spots), progress toward the next build, hand quality with a discard-risk penalty, dev cards, and Largest Army progress — all relative to the strongest opponent. `make_heuristic(**weights)` builds a variant with your own weights; `lookahead` and `mcts` accept any value function via `make_greedy(value)` / `make_mcts(value)`.
 
 ## Evaluation
 

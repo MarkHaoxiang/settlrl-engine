@@ -35,7 +35,15 @@ agents run at 2–4 players with beliefs of varying sharpness.
   took lookahead-vs-greedy from 34% to 86.5% (without the
   best-buildable-spot term, lookahead never expanded); the hand-diversity
   term is worth ~55% head-to-head over without; `w_spot` 1.0 vs 0.5 and a
-  port-count term measured neutral.
+  port-count term measured neutral. June 11 overnight sweep: the wheat/ore
+  production premium (`w_wheat_ore=0.25`; 0.4 overshoots, 44.5% vs 0.25) plus
+  the closing-urgency term (`w_race=0.8`; 1.2 measured equal) beat the prior
+  weights 57.3% (n=600) on the lookahead rung and 57.5% (n=200) on the mcts
+  rung, no greedy regression (90.5%); a production-matched 2:1-port synergy
+  term measured negative (47.3%) and stays at `w_port=0`. Value-as-win-prob
+  calibration (183k self-play positions): P(win) = σ(0.053·v), phase-stable —
+  but the calibrated `value_scale≈38` *lost* to the sharper hand-picked 20 in
+  mcts (44.5%, n=200): honest calibration is not the best search temperature.
 - `greedy.py` — scripted policy: a static per-row tier score plus small
   observation bonuses. Invariant: tier gaps (≥ 100) exceed every bonus range
   (pips ≤ 15, held ≤ 19), so bonuses only reorder within a tier; types
