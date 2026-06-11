@@ -1,0 +1,53 @@
+"""Per-seat snapshot views: what one requester is allowed to see.
+
+The redaction boundary for hidden information lives here, and only here:
+routes never touch a session's state except through :func:`game_model`. The
+same view will back any future push channel (websockets serialise the same
+per-seat snapshot).
+"""
+
+from .actions import decode_actions
+from .convert import board_to_model
+from .games import GameHandle
+from .models import BotMoveModel, GameModel
+
+
+def game_model(
+    handle: GameHandle, owned: set[int], bot_move: BotMoveModel | None = None
+) -> GameModel:
+    """The snapshot as one requester sees it (caller holds the game's lock).
+
+    ``owned`` is the requester's proven seats: it decides ``your_turn``, which
+    legal actions ship, whose hands stay unredacted, and the belief observer.
+    Spectators (no seats) get the public view: counts, board, log — no hands.
+    """
+    session = handle.session
+    status = session.status()
+    status.your_turn = (not status.terminal) and status.acting_player in owned
+    actions = (
+        decode_actions([int(f) for f in session.legal_flat()])
+        if status.your_turn
+        else []
+    )
+    observer = (
+        status.acting_player
+        if status.acting_player in owned
+        else min(owned)
+        if owned
+        else None
+    )
+    board = board_to_model(session.board)
+    for player in board.players:
+        if player.player not in owned:
+            player.resources = None
+            player.dev_card_types = None
+    return GameModel(
+        id=handle.id,
+        board=board,
+        status=status,
+        actions=actions,
+        bot_move=bot_move,
+        log=session.log(),
+        belief=session.belief(observer) if observer is not None else None,
+        seats_claimed=sorted(handle.claims),
+    )

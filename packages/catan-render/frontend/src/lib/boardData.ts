@@ -1,6 +1,7 @@
 // Board types + palette, and the adapter from the server's wire format
 // (BoardModel, snake_case) to the frontend's camelCase Board.
 
+import type { components } from "./api-schema";
 import type { Cube, CubeEdge, Hex } from "./hex";
 
 export type Terrain = "wheat" | "sheep" | "wood" | "ore" | "brick" | "desert";
@@ -101,26 +102,9 @@ export const RESOURCE_LABELS: Record<ResourceKind, string> = {
 export const DEV_CARD_BACK = { fill: "#5B4B8A", stroke: "#3C3160" };
 export const HAND_CARD_BACK = { fill: "#C9A66B", stroke: "#7A5C33" };
 
-// -- wire format (models.py BoardModel) ----------------------------------------
+// -- wire format (generated from the server's BoardModel) ----------------------
 
-interface PlayerWire {
-  player: number;
-  resource_cards: number;
-  dev_cards: number;
-  victory_points: number;
-  resources: Record<ResourceKind, number> | null;
-  dev_card_types: Record<DevCardKind, number> | null;
-}
-
-export interface BoardWire {
-  tiles: { q: number; r: number; terrain: Terrain; number: number | null }[];
-  buildings: Building[];
-  roads: RoadSeg[];
-  ports: PortData[];
-  players: PlayerWire[];
-  robber: Hex | null;
-  bank: { resources: Record<ResourceKind, number>; dev_cards: number } | null;
-}
+export type BoardWire = components["schemas"]["BoardModel"];
 
 export function adaptBoard(wire: BoardWire): Board {
   return {
@@ -137,8 +121,8 @@ export function adaptBoard(wire: BoardWire): Board {
       resourceCards: p.resource_cards,
       devCards: p.dev_cards,
       victoryPoints: p.victory_points,
-      resources: p.resources,
-      devCardTypes: p.dev_card_types,
+      resources: p.resources ?? null,
+      devCardTypes: p.dev_card_types ?? null,
     })),
     robber: wire.robber ?? undefined,
     bank: wire.bank

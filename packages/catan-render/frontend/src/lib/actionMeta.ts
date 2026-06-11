@@ -42,7 +42,7 @@ export const ACTION_META: Record<string, ActionMeta> = {
 export const actionMeta = (type: string): ActionMeta =>
   ACTION_META[type] ?? { icon: "❔", label: type };
 
-const stealText = (victim: number | null) =>
+const stealText = (victim: number | null | undefined) =>
   victim != null && victim >= 0 ? ` — steal from ${playerName(victim)}` : "";
 
 // What a board-popover button offers, phrased as the move it confirms.

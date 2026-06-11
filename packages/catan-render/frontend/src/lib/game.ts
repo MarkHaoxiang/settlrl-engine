@@ -6,106 +6,33 @@
 // actions, unredacted hands, and belief all follow the seats you can prove.
 
 import { api } from "./api";
-import { adaptBoard, type Board, type BoardWire, type ResourceKind } from "./boardData";
-import type { Cube, CubeEdge, Hex } from "./hex";
+import type { components } from "./api-schema";
+import { adaptBoard, type Board } from "./boardData";
 import type { SeatTokens } from "./seats";
+
+type Schemas = components["schemas"];
 
 const seatHeaders = (tokens: SeatTokens): Record<string, string> => {
   const values = Object.values(tokens);
   return values.length ? { "X-Seat-Tokens": values.join(",") } : {};
 };
 
-export interface GameAction {
-  flat: number;
-  type: string;
-  label: string;
-  // Placement target (at most one group is set, depending on `type`).
-  vertex: Cube | null;
-  edge: CubeEdge | null;
-  tile: Hex | null;
-  victim: number | null;
-  // Resource choices: monopoly / year-of-plenty / maritime trade, and the
-  // domestic trade proposal (give/receive plus the proposed-to partner).
-  resource: string | null;
-  resources: string[] | null;
-  give: string | null;
-  receive: string | null;
-  partner: number | null;
-}
+// One legal move: the flat engine index plus whatever geometry / resource
+// choice it targets (generated from the server's ActionModel).
+export type GameAction = Schemas["ActionModel"];
 
-// The pending 1:1 domestic trade awaiting the partner's answer.
-export interface TradeOffer {
-  proposer: number;
-  partner: number;
-  give: ResourceKind;
-  receive: ResourceKind;
-}
+export type TradeOffer = Schemas["TradeOfferModel"];
+export type GameStatus = Schemas["GameStatusModel"];
+export type BotMove = Schemas["BotMoveModel"];
+export type LogEntry = Schemas["LogEntryModel"];
+export type PlayerBelief = Schemas["PlayerBeliefModel"];
+export type Belief = Schemas["BeliefModel"];
 
-export interface GameStatus {
-  phase: string;
-  current_player: number;
-  acting_player: number;
-  dice_roll: number;
-  has_rolled: boolean;
-  your_turn: boolean;
-  terminal: boolean;
-  winner: number | null;
-  // What controls each seat: "human" or a bot kind (see fetchBots).
-  seats: string[];
-  trade: TradeOffer | null;
-}
+type GameWire = Schemas["GameModel"];
 
-// A bot move just played by the server (set on bot-step snapshots).
-export interface BotMove {
-  player: number;
-  action: GameAction;
-}
-
-// One line of the server-side game log: a played move, a chat message, or the
-// win. `player` is the seat it belongs to (null: a spectator's chat message);
-// moves carry an action_type the client maps to an icon.
-export interface LogEntry {
-  id: number;
-  kind: "move" | "chat" | "win";
-  player: number | null;
-  action_type: string | null;
-  text: string;
-}
-
-// Card counting from the hand-panel seat's perspective (engine belief
-// tracker: all publicly derivable). The observer's own row is omitted;
-// lo == hi where the count is known exactly.
-export interface PlayerBelief {
-  player: number;
-  res_lo: Record<ResourceKind, number>;
-  res_hi: Record<ResourceKind, number>;
-}
-
-export interface Belief {
-  observer: number;
-  players: PlayerBelief[];
-}
-
-export interface GameSnapshot {
-  id: string;
+// The wire snapshot with its board adapted to frontend coordinates.
+export interface GameSnapshot extends Omit<GameWire, "board"> {
   board: Board;
-  status: GameStatus;
-  actions: GameAction[];
-  bot_move: BotMove | null;
-  log: LogEntry[];
-  belief: Belief | null;
-  seats_claimed: number[];
-}
-
-interface GameWire {
-  id: string;
-  board: BoardWire;
-  status: GameStatus;
-  actions: GameAction[];
-  bot_move: BotMove | null;
-  log: LogEntry[];
-  belief: Belief | null;
-  seats_claimed: number[];
 }
 
 const adaptGame = (wire: GameWire): GameSnapshot => ({

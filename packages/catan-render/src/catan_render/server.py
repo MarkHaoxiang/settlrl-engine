@@ -1,3 +1,10 @@
+"""The FastAPI app. Routes stay thin: resolve the game, check seat tokens,
+hold the per-game lock, map errors to status codes — game logic lives in
+``session``, seat claims in ``games``, and what a requester may see in
+``views``. ``create_app`` is the composition root, so tests build isolated
+apps with their own registries instead of sharing module state.
+"""
+
 import json
 import threading
 from collections.abc import AsyncIterator
@@ -16,11 +23,11 @@ from starlette.types import Scope
 
 from .actions import decode_actions
 from .bots import bot_catalog
-from .convert import board_to_model
 from .games import GameHandle, GameRegistry
 from .models import BotMoveModel, GameModel, ReplayStateModel
 from .replay import ReplaySession
 from .session import GameSession, IllegalActionError
+from .views import game_model
 
 
 def _warm_jit_cache() -> None:
@@ -45,14 +52,6 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Catan Render", lifespan=_lifespan)
-
-# The live games, addressed by id. Claiming a human seat (create / join)
-# issues a token; privileged requests prove seat ownership by presenting
-# their tokens in the X-Seat-Tokens header (comma-separated — a hotseat
-# client holds one per local seat).
-_GAMES = GameRegistry()
-
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
 
 
@@ -60,52 +59,12 @@ def _tokens(header: str | None) -> list[str]:
     return [t.strip() for t in (header or "").split(",") if t.strip()]
 
 
-def _handle(game_id: str) -> GameHandle:
-    handle = _GAMES.get(game_id)
-    if handle is None:
-        raise HTTPException(status_code=404, detail="no such game")
-    return handle
+class _ReplaySlot:
+    """The loaded replay, if any (server-wide tooling; one at a time)."""
 
-
-def _game_model(
-    handle: GameHandle, owned: set[int], bot_move: BotMoveModel | None = None
-) -> GameModel:
-    """The snapshot as one requester sees it.
-
-    ``owned`` is the requester's proven seats: it decides ``your_turn``, which
-    legal actions ship, whose hands stay unredacted, and the belief observer.
-    Spectators (no seats) get the public view: counts, board, log — no hands.
-    """
-    session = handle.session
-    status = session.status()
-    status.your_turn = (not status.terminal) and status.acting_player in owned
-    actions = (
-        decode_actions([int(f) for f in session.legal_flat()])
-        if status.your_turn
-        else []
-    )
-    observer = (
-        status.acting_player
-        if status.acting_player in owned
-        else min(owned)
-        if owned
-        else None
-    )
-    board = board_to_model(session.board)
-    for player in board.players:
-        if player.player not in owned:
-            player.resources = None
-            player.dev_card_types = None
-    return GameModel(
-        id=handle.id,
-        board=board,
-        status=status,
-        actions=actions,
-        bot_move=bot_move,
-        log=session.log(),
-        belief=session.belief(observer) if observer is not None else None,
-        seats_claimed=sorted(handle.claims),
-    )
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.session: ReplaySession | None = None
 
 
 class _SeatSpec(BaseModel):
@@ -138,27 +97,6 @@ class _CreatedModel(BaseModel):
     tokens: dict[int, str]
 
 
-@app.post("/api/games")
-def post_create(req: _CreateRequest) -> _CreatedModel:
-    seats = (
-        [s if isinstance(s, str) else s.model_dump() for s in req.seats]
-        if req.seats is not None
-        else None
-    )
-    try:
-        session = GameSession(seed=req.seed, n_players=req.n_players)
-        session.reset(req.seed, number_placement=req.number_placement, seats=seats)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    handle = _GAMES.create(session)
-    tokens = (
-        dict(handle.claim(seat) for seat in handle.human_seats())
-        if req.claim == "all"
-        else {}
-    )
-    return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
-
-
 class _JoinRequest(BaseModel):
     # A specific human seat, or None for the first unclaimed one.
     seat: int | None = None
@@ -170,66 +108,8 @@ class _JoinedModel(BaseModel):
     token: str
 
 
-@app.post("/api/games/{game_id}/join")
-def post_join(game_id: str, req: _JoinRequest) -> _JoinedModel:
-    handle = _handle(game_id)
-    with handle.lock:
-        try:
-            seat, token = handle.claim(req.seat)
-        except LookupError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _JoinedModel(id=game_id, seat=seat, token=token)
-
-
-@app.get("/api/games/{game_id}")
-def get_game(game_id: str, x_seat_tokens: SeatTokens = None) -> GameModel:
-    handle = _handle(game_id)
-    with handle.lock:
-        return _game_model(handle, handle.owned_seats(_tokens(x_seat_tokens)))
-
-
 class _ActionRequest(BaseModel):
     flat: int
-
-
-@app.post("/api/games/{game_id}/action")
-def post_action(
-    game_id: str, req: _ActionRequest, x_seat_tokens: SeatTokens = None
-) -> GameModel:
-    """Apply the acting seat's move; the request must prove it owns that seat."""
-    handle = _handle(game_id)
-    with handle.lock:
-        owned = handle.owned_seats(_tokens(x_seat_tokens))
-        if handle.session.acting_seat() not in owned:
-            raise HTTPException(status_code=403, detail="not your seat")
-        try:
-            handle.session.apply(req.flat)
-        except IllegalActionError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _game_model(handle, owned)
-
-
-@app.post("/api/games/{game_id}/bot")
-def post_bot_step(game_id: str, x_seat_tokens: SeatTokens = None) -> GameModel:
-    """Play one due bot move; the snapshot plus what was played (``bot_move``).
-
-    ``bot_move`` is null when no bot move is due (a human seat is acting or the
-    game is over) -- clients poll this until ``status.your_turn``.
-    """
-    handle = _handle(game_id)
-    with handle.lock:
-        seat = handle.session.acting_seat()
-        flat = handle.session.bot_step()
-        move = (
-            None
-            if flat is None
-            else BotMoveModel(player=seat, action=decode_actions([flat])[0])
-        )
-        return _game_model(
-            handle, handle.owned_seats(_tokens(x_seat_tokens)), bot_move=move
-        )
 
 
 class _ChatRequest(BaseModel):
@@ -238,109 +118,181 @@ class _ChatRequest(BaseModel):
     player: int | None = None
 
 
-@app.post("/api/games/{game_id}/chat")
-def post_chat(
-    game_id: str, req: _ChatRequest, x_seat_tokens: SeatTokens = None
-) -> GameModel:
-    """Append a chat message to the game log."""
-    text = req.text.strip()
-    if not text or len(text) > 500:
-        raise HTTPException(
-            status_code=422, detail="chat text must be 1-500 characters"
+def create_app(games: GameRegistry | None = None) -> FastAPI:
+    """Build the app around its own registry (tests pass theirs in)."""
+    registry = games if games is not None else GameRegistry()
+    replays = _ReplaySlot()
+    app = FastAPI(title="Catan Render", lifespan=_lifespan)
+
+    def handle_of(game_id: str) -> GameHandle:
+        handle = registry.get(game_id)
+        if handle is None:
+            raise HTTPException(status_code=404, detail="no such game")
+        return handle
+
+    @app.post("/api/games")
+    def post_create(req: _CreateRequest) -> _CreatedModel:
+        seats = (
+            [s if isinstance(s, str) else s.model_dump() for s in req.seats]
+            if req.seats is not None
+            else None
         )
-    handle = _handle(game_id)
-    with handle.lock:
-        owned = handle.owned_seats(_tokens(x_seat_tokens))
-        if req.player is not None and req.player not in owned:
-            raise HTTPException(status_code=403, detail="not your seat")
-        handle.session.add_chat(req.player, text)
-        return _game_model(handle, owned)
-
-
-@app.get("/api/games/{game_id}/record")
-def get_record(game_id: str) -> Response:
-    """The finished game as ``catan_engine.record`` JSON -- a self-contained,
-    replayable transcript. 409 while the game is running: replaying a record
-    reconstructs hidden hands, so live games don't export."""
-    handle = _handle(game_id)
-    with handle.lock:
-        if not handle.session.terminal():
-            raise HTTPException(status_code=409, detail="game still running")
-        body = handle.session.record().to_json()
-    return Response(content=body, media_type="application/json")
-
-
-# The loaded replay, if any (server-wide tooling; one at a time).
-_REPLAY: ReplaySession | None = None
-_REPLAY_LOCK = threading.Lock()
-
-
-def _load_replay(record: GameRecord) -> ReplayStateModel:
-    """Replay ``record`` into a fresh session and return its opening state."""
-    global _REPLAY
-    try:
-        session = ReplaySession(record)
-    except (ReplayError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    with _REPLAY_LOCK:
-        _REPLAY = session
-        return session.state(0)
-
-
-@app.post("/api/replay")
-def post_replay(doc: dict[str, object]) -> ReplayStateModel:
-    """Load a game record (the ``catan_engine.record`` JSON document) for
-    replay; returns the opening state. ``422`` if the record is malformed or
-    fails replay validation."""
-    try:
-        record = GameRecord.from_json(json.dumps(doc))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=f"bad record: {exc}") from exc
-    return _load_replay(record)
-
-
-@app.post("/api/games/{game_id}/replay")
-def post_replay_from_game(game_id: str) -> ReplayStateModel:
-    """Load a finished game for replay (409 while it is still running:
-    replaying reconstructs hidden hands)."""
-    handle = _handle(game_id)
-    with handle.lock:
-        if not handle.session.terminal():
-            raise HTTPException(status_code=409, detail="game still running")
-        record = handle.session.record()
-    return _load_replay(record)
-
-
-@app.get("/api/replay/state")
-def get_replay_state(move: int = 0) -> ReplayStateModel:
-    """The loaded replay after ``move`` moves (0 = the opening board).
-
-    ``404`` when no replay is loaded; ``422`` when ``move`` is out of range.
-    """
-    with _REPLAY_LOCK:
-        if _REPLAY is None:
-            raise HTTPException(status_code=404, detail="no replay loaded")
         try:
-            return _REPLAY.state(move)
-        except IndexError as exc:
+            session = GameSession(seed=req.seed, n_players=req.n_players)
+            session.reset(req.seed, number_placement=req.number_placement, seats=seats)
+        except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        handle = registry.create(session)
+        tokens = (
+            dict(handle.claim(seat) for seat in handle.human_seats())
+            if req.claim == "all"
+            else {}
+        )
+        return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
 
+    @app.post("/api/games/{game_id}/join")
+    def post_join(game_id: str, req: _JoinRequest) -> _JoinedModel:
+        handle = handle_of(game_id)
+        with handle.lock:
+            try:
+                seat, token = handle.claim(req.seat)
+            except (LookupError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _JoinedModel(id=game_id, seat=seat, token=token)
 
-@app.get("/api/replay/record")
-def get_replay_record() -> Response:
-    """The loaded replay's record JSON (e.g. to save it to a file)."""
-    with _REPLAY_LOCK:
-        if _REPLAY is None:
-            raise HTTPException(status_code=404, detail="no replay loaded")
-        body = _REPLAY.record.to_json()
-    return Response(content=body, media_type="application/json")
+    @app.get("/api/games/{game_id}")
+    def get_game(game_id: str, x_seat_tokens: SeatTokens = None) -> GameModel:
+        handle = handle_of(game_id)
+        with handle.lock:
+            return game_model(handle, handle.owned_seats(_tokens(x_seat_tokens)))
 
+    @app.post("/api/games/{game_id}/action")
+    def post_action(
+        game_id: str, req: _ActionRequest, x_seat_tokens: SeatTokens = None
+    ) -> GameModel:
+        """Apply the acting seat's move; the request must prove that seat."""
+        handle = handle_of(game_id)
+        with handle.lock:
+            owned = handle.owned_seats(_tokens(x_seat_tokens))
+            if handle.session.acting_seat() not in owned:
+                raise HTTPException(status_code=403, detail="not your seat")
+            try:
+                handle.session.apply(req.flat)
+            except IllegalActionError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            return game_model(handle, owned)
 
-@app.get("/api/bots")
-def get_bots() -> dict[str, dict[str, object]]:
-    """Bot kinds available for seats (catan-agents names), each with the
-    player counts it supports and its configurable build parameters."""
-    return bot_catalog()
+    @app.post("/api/games/{game_id}/bot")
+    def post_bot_step(game_id: str, x_seat_tokens: SeatTokens = None) -> GameModel:
+        """Play one due bot move; the snapshot plus what was played
+        (``bot_move``, null when no bot move was due)."""
+        handle = handle_of(game_id)
+        with handle.lock:
+            seat = handle.session.acting_seat()
+            flat = handle.session.bot_step()
+            move = (
+                None
+                if flat is None
+                else BotMoveModel(player=seat, action=decode_actions([flat])[0])
+            )
+            return game_model(
+                handle, handle.owned_seats(_tokens(x_seat_tokens)), bot_move=move
+            )
+
+    @app.post("/api/games/{game_id}/chat")
+    def post_chat(
+        game_id: str, req: _ChatRequest, x_seat_tokens: SeatTokens = None
+    ) -> GameModel:
+        """Append a chat message to the game log."""
+        text = req.text.strip()
+        if not text or len(text) > 500:
+            raise HTTPException(
+                status_code=422, detail="chat text must be 1-500 characters"
+            )
+        handle = handle_of(game_id)
+        with handle.lock:
+            owned = handle.owned_seats(_tokens(x_seat_tokens))
+            if req.player is not None and req.player not in owned:
+                raise HTTPException(status_code=403, detail="not your seat")
+            handle.session.add_chat(req.player, text)
+            return game_model(handle, owned)
+
+    @app.get("/api/games/{game_id}/record")
+    def get_record(game_id: str) -> Response:
+        """The finished game as ``catan_engine.record`` JSON -- a
+        self-contained, replayable transcript. 409 while running: replaying a
+        record reconstructs hidden hands, so live games don't export."""
+        handle = handle_of(game_id)
+        with handle.lock:
+            if not handle.session.terminal():
+                raise HTTPException(status_code=409, detail="game still running")
+            body = handle.session.record().to_json()
+        return Response(content=body, media_type="application/json")
+
+    def load_replay(record: GameRecord) -> ReplayStateModel:
+        try:
+            session = ReplaySession(record)
+        except (ReplayError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        with replays.lock:
+            replays.session = session
+            return session.state(0)
+
+    @app.post("/api/games/{game_id}/replay")
+    def post_replay_from_game(game_id: str) -> ReplayStateModel:
+        """Load a finished game for replay (409 while it is still running:
+        replaying reconstructs hidden hands)."""
+        handle = handle_of(game_id)
+        with handle.lock:
+            if not handle.session.terminal():
+                raise HTTPException(status_code=409, detail="game still running")
+            record = handle.session.record()
+        return load_replay(record)
+
+    @app.post("/api/replay")
+    def post_replay(doc: dict[str, object]) -> ReplayStateModel:
+        """Load a game record (the ``catan_engine.record`` JSON document) for
+        replay; returns the opening state. ``422`` if the record is malformed
+        or fails replay validation."""
+        try:
+            record = GameRecord.from_json(json.dumps(doc))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"bad record: {exc}") from exc
+        return load_replay(record)
+
+    @app.get("/api/replay/state")
+    def get_replay_state(move: int = 0) -> ReplayStateModel:
+        """The loaded replay after ``move`` moves (0 = the opening board).
+
+        ``404`` when no replay is loaded; ``422`` when ``move`` is out of
+        range.
+        """
+        with replays.lock:
+            if replays.session is None:
+                raise HTTPException(status_code=404, detail="no replay loaded")
+            try:
+                return replays.session.state(move)
+            except IndexError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/replay/record")
+    def get_replay_record() -> Response:
+        """The loaded replay's record JSON (e.g. to save it to a file)."""
+        with replays.lock:
+            if replays.session is None:
+                raise HTTPException(status_code=404, detail="no replay loaded")
+            body = replays.session.record.to_json()
+        return Response(content=body, media_type="application/json")
+
+    @app.get("/api/bots")
+    def get_bots() -> dict[str, dict[str, object]]:
+        """Bot kinds available for seats (catan-agents names), each with the
+        player counts it supports and its configurable build parameters."""
+        return bot_catalog()
+
+    if _dist.exists():
+        app.mount("/", _SPAStaticFiles(directory=_dist, html=True), name="static")
+    return app
 
 
 class _SPAStaticFiles(StaticFiles):
@@ -363,5 +315,6 @@ class _SPAStaticFiles(StaticFiles):
 
 # Serve built frontend when it exists (src/catan_render/server.py -> package root)
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
-if _dist.exists():
-    app.mount("/", _SPAStaticFiles(directory=_dist, html=True), name="static")
+
+# The uvicorn entry point (catan_render.server:app).
+app = create_app()

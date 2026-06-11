@@ -89,12 +89,30 @@ The renderer builds its board coordinate tables directly from the engine's
 authoritative geometry lookups, and derives resource / dev-card orderings from
 the engine enums, so those can't drift. It still mirrors the AEC flat action
 table; the test suite pins that decode against the engine's own lookups, checks
-the enum-derived orderings, and exercises the conversion and HTTP layers — if the
-engine reindexes the board, reorders an enum, or changes the action table, these
-tests fail.
+the enum-derived orderings, and exercises the conversion layer — if the engine
+reindexes the board, reorders an enum, or changes the action table, these tests
+fail.
+
+The server tests follow its layering: `test_games.py` covers the registry and
+seat claims without the engine, `test_views.py` covers the per-seat snapshots —
+including a sweep asserting that no observer's view ever leaks another hand —
+and `test_server.py` covers only what routes own (auth, status codes, locking),
+each test building its own app via `create_app`. The wire contract is pinned
+twice: pytest checks the committed `frontend/openapi.json` against the live
+schema, and the frontend's wire types are generated from it (`npm run gen-api`
+regenerates both whenever `models.py` changes).
 
 ```bash
 uv run pytest packages/catan-render/tests
+```
+
+A browser end-to-end suite drives the real app (create / join / spectate and
+per-seat redaction over the wire); it needs a running server with a built
+frontend and a system Chromium:
+
+```bash
+cd packages/catan-render/frontend
+BASE=http://localhost:8000 npm run e2e
 ```
 
 ## API
@@ -139,8 +157,10 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/catan-render/
 ├── src/catan_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
-│   ├── server.py        # FastAPI app: /api/games* + /api/replay* endpoints (per-seat views)
+│   ├── server.py        # create_app + thin routes: auth, locking, status codes
+│   ├── views.py         # Per-seat snapshots: the hidden-information boundary
 │   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
+│   ├── openapi.py       # Schema dump backing the generated frontend types
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
 │   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots.py          # catan-agents registry adapted to the single game (bot_act)
@@ -149,11 +169,14 @@ packages/catan-render/
 │   └── models.py        # Pydantic board / game / action models
 ├── tests/               # Pytest: renderer<->engine sync checks (geometry, actions, enums)
 └── frontend/
+    ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
+    ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
         ├── App.tsx          # Routes: menu, /play, /help, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError)
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard
+        ├── lib/api-schema.d.ts # Wire types generated from openapi.json (do not edit)
         ├── lib/game.ts       # Live-game API client (/api/game*)
         ├── lib/replay.ts     # Replay API client (/api/replay*)
         ├── lib/actionMeta.ts # Action display metadata: icons, labels, costs, confirm phrasing

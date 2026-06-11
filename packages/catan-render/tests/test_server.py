@@ -1,33 +1,34 @@
-"""FastAPI endpoint tests for the renderer server.
+"""Route-level tests for the FastAPI server.
 
-Drive the API with a ``TestClient``: creating games, claiming seats (tokens),
-per-seat snapshot views (your_turn / actions / hand redaction), applying a
-legal move, rejecting an illegal one (409) or an unproven seat (403), and the
-SPA 404-fallback that serves ``index.html`` for client-side routes. The SPA
-tests are skipped if the built frontend (``frontend/dist``) is absent.
+Each test builds its own app around its own registry (``create_app``), so
+nothing is shared between tests. These cover what the routes themselves own —
+auth and status codes, locking, request plumbing — plus the SPA fallback; the
+per-seat view contents live in ``test_views.py`` and registry logic in
+``test_games.py``.
 """
 
 import json
 import threading
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
-from catan_render import server
 from catan_render.games import GameRegistry
-from catan_render.server import app
+from catan_render.server import create_app
 from fastapi.testclient import TestClient
 
-client = TestClient(app)
+
+@pytest.fixture()
+def registry() -> GameRegistry:
+    return GameRegistry()
 
 
-@pytest.fixture(autouse=True)
-def _fresh_registry() -> None:
-    # Each test starts with an empty registry and no loaded replay, so tests
-    # stay independent of execution order.
-    server._GAMES = GameRegistry()
-    server._REPLAY = None
+@pytest.fixture()
+def client(registry: GameRegistry) -> Iterator[TestClient]:
+    yield TestClient(create_app(registry))
 
 
-def _create(**body: object) -> tuple[str, dict[str, str]]:
+def _create(client: TestClient, **body: object) -> tuple[str, dict[str, str]]:
     """Create a game; return its id and the creator's {seat: token} claims."""
     resp = client.post("/api/games", json={"seed": 0, **body})
     assert resp.status_code == 200, resp.text
@@ -39,54 +40,43 @@ def _hdr(tokens: dict[str, str]) -> dict[str, str]:
     return {"X-Seat-Tokens": ",".join(tokens.values())}
 
 
-def test_create_claims_all_human_seats_by_default() -> None:
-    game, tokens = _create()
+def test_create_claims_all_human_seats_by_default(client: TestClient) -> None:
+    game, tokens = _create(client)
     assert sorted(tokens) == ["0"]  # default seats: human + 3 random bots
     body = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()
     assert body["id"] == game
-    assert body["status"]["your_turn"]
-    assert len(body["actions"]) > 0
+    assert body["status"]["your_turn"] and len(body["actions"]) > 0
     assert body["seats_claimed"] == [0]
 
 
-def test_unknown_game_404s() -> None:
+def test_unknown_game_404s(client: TestClient) -> None:
     assert client.get("/api/games/nope").status_code == 404
     assert client.post("/api/games/nope/action", json={"flat": 0}).status_code == 404
 
 
-def test_spectator_view_is_redacted() -> None:
-    game, _ = _create()
-    body = client.get(f"/api/games/{game}").json()  # no tokens
-    assert not body["status"]["your_turn"]
-    assert body["actions"] == []
-    assert body["belief"] is None
-    assert all(p["resources"] is None for p in body["board"]["players"])
-    assert all(p["dev_card_types"] is None for p in body["board"]["players"])
-    # Public counts survive redaction.
-    assert all("resource_cards" in p for p in body["board"]["players"])
-
-
-def test_owned_seat_sees_own_hand_only() -> None:
-    game, tokens = _create()
-    body = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()
-    players = {p["player"]: p for p in body["board"]["players"]}
-    assert players[0]["resources"] is not None  # own seat
-    assert all(players[p]["resources"] is None for p in (1, 2, 3))
-    assert body["belief"] is not None and body["belief"]["observer"] == 0
-
-
-def test_legal_action_requires_the_acting_seat() -> None:
-    game, tokens = _create()
-    flat = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"][0]["flat"]
-    # Without tokens the move is refused before legality is even checked.
+def test_action_requires_the_acting_seats_token(client: TestClient) -> None:
+    game, tokens = _create(client, seats=["human", "human", "random", "random"], claim="none")
+    a = client.post(f"/api/games/{game}/join", json={"seat": 0}).json()
+    b = client.post(f"/api/games/{game}/join", json={"seat": 1}).json()
+    flat = client.get(f"/api/games/{game}", headers={"X-Seat-Tokens": a["token"]}).json()[
+        "actions"
+    ][0]["flat"]
+    # No token, and the wrong seat's token: refused before legality.
     assert client.post(f"/api/games/{game}/action", json={"flat": flat}).status_code == 403
-    resp = client.post(f"/api/games/{game}/action", json={"flat": flat}, headers=_hdr(tokens))
+    assert (
+        client.post(
+            f"/api/games/{game}/action", json={"flat": flat}, headers={"X-Seat-Tokens": b["token"]}
+        ).status_code
+        == 403
+    )
+    resp = client.post(
+        f"/api/games/{game}/action", json={"flat": flat}, headers={"X-Seat-Tokens": a["token"]}
+    )
     assert resp.status_code == 200
-    assert "board" in resp.json()
 
 
-def test_illegal_action_returns_409() -> None:
-    game, tokens = _create()
+def test_illegal_action_returns_409(client: TestClient) -> None:
+    game, tokens = _create(client)
     legal = {
         a["flat"]
         for a in client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"]
@@ -96,80 +86,45 @@ def test_illegal_action_returns_409() -> None:
     assert resp.status_code == 409
 
 
-def test_join_claims_remaining_human_seats() -> None:
-    game, tokens = _create(seats=["human", "human", "random", "random"], claim="none")
+def test_join_conflicts_are_409(client: TestClient) -> None:
+    game, tokens = _create(client, seats=["human", "human", "random", "random"], claim="none")
     assert tokens == {}
-    first = client.post(f"/api/games/{game}/join", json={}).json()
-    assert first["seat"] == 0
-    second = client.post(f"/api/games/{game}/join", json={"seat": 1}).json()
-    assert second["seat"] == 1 and second["token"] != first["token"]
-    # All human seats claimed now.
-    assert client.post(f"/api/games/{game}/join", json={}).status_code == 409
-    # A bot seat can never be claimed.
-    assert client.post(f"/api/games/{game}/join", json={"seat": 2}).status_code == 409
+    assert client.post(f"/api/games/{game}/join", json={}).json()["seat"] == 0
+    assert client.post(f"/api/games/{game}/join", json={"seat": 1}).status_code == 200
+    assert client.post(f"/api/games/{game}/join", json={}).status_code == 409  # full
+    assert client.post(f"/api/games/{game}/join", json={"seat": 2}).status_code == 409  # bot
 
 
-def test_two_humans_see_their_own_turns() -> None:
-    game, _ = _create(seats=["human", "human", "random", "random"], claim="none")
-    a = client.post(f"/api/games/{game}/join", json={"seat": 0}).json()
-    b = client.post(f"/api/games/{game}/join", json={"seat": 1}).json()
-    ha = {"X-Seat-Tokens": a["token"]}
-    hb = {"X-Seat-Tokens": b["token"]}
-    # Seat 0 acts first in setup; seat 1 must wait (and can't act for them).
-    view_a = client.get(f"/api/games/{game}", headers=ha).json()
-    assert view_a["status"]["your_turn"]
-    view_b = client.get(f"/api/games/{game}", headers=hb).json()
-    assert not view_b["status"]["your_turn"] and view_b["actions"] == []
-    flat = view_a["actions"][0]["flat"]
-    assert (
-        client.post(f"/api/games/{game}/action", json={"flat": flat}, headers=hb).status_code
-        == 403
-    )
-
-
-def test_create_two_players_and_spiral_is_deterministic() -> None:
-    game, tokens = _create(n_players=2, number_placement="spiral", seed=7)
-    body = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()
-    assert len(body["board"]["players"]) == 2
-    # Same seed + placement reproduces the same board in a fresh game.
-    again, _ = _create(n_players=2, number_placement="spiral", seed=7)
-    body2 = client.get(f"/api/games/{again}").json()
-    assert body2["board"]["tiles"] == body["board"]["tiles"]
-
-
-def test_create_rejects_unsupported_player_counts() -> None:
+def test_create_rejects_bad_requests(client: TestClient) -> None:
     for bad in (1, 3, 5):
-        resp = client.post("/api/games", json={"seed": 0, "n_players": bad})
-        assert resp.status_code == 422
-
-
-def test_create_rejects_bad_seats() -> None:
-    resp = client.post(
-        "/api/games", json={"seed": 0, "seats": ["human", "clever", "random", "random"]}
+        assert client.post("/api/games", json={"seed": 0, "n_players": bad}).status_code == 422
+    assert (
+        client.post(
+            "/api/games", json={"seed": 0, "seats": ["human", "clever", "random", "random"]}
+        ).status_code
+        == 422
     )
-    assert resp.status_code == 422
-    resp = client.post("/api/games", json={"seed": 0, "seats": ["human", "random"]})
-    assert resp.status_code == 422
+    assert client.post("/api/games", json={"seed": 0, "seats": ["human", "random"]}).status_code == 422
 
 
-def test_bot_endpoint_steps_one_move_and_reports_it() -> None:
-    game, _ = _create(seats=["random"] * 4)
+def test_create_same_seed_reproduces_the_board(client: TestClient) -> None:
+    game, _ = _create(client, n_players=2, number_placement="spiral", seed=7)
+    again, _ = _create(client, n_players=2, number_placement="spiral", seed=7)
+    a = client.get(f"/api/games/{game}").json()["board"]["tiles"]
+    b = client.get(f"/api/games/{again}").json()["board"]["tiles"]
+    assert a == b
+
+
+def test_bot_endpoint_steps_one_move_and_reports_it(client: TestClient) -> None:
+    game, _ = _create(client, seats=["random"] * 4)
     body = client.post(f"/api/games/{game}/bot").json()
     assert body["bot_move"] is not None
     assert body["bot_move"]["player"] == 0
     assert body["bot_move"]["action"]["type"] == "setup_settlement"
 
 
-def test_all_bot_game_is_spectated() -> None:
-    game, tokens = _create(seats=["random"] * 4)
-    assert tokens == {}
-    body = client.get(f"/api/games/{game}").json()
-    assert not body["status"]["your_turn"]
-    assert body["belief"] is None
-
-
-def test_concurrent_duplicate_actions_apply_once() -> None:
-    game, tokens = _create()
+def test_concurrent_duplicate_actions_apply_once(client: TestClient) -> None:
+    game, tokens = _create(client)
     flat = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"][0]["flat"]
     codes: list[int] = []
 
@@ -190,83 +145,58 @@ def test_concurrent_duplicate_actions_apply_once() -> None:
     assert sorted(codes) == [200, 409, 409, 409]
 
 
-def test_moves_are_logged() -> None:
-    game, tokens = _create()
-    flat = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"][0]["flat"]
-    body = client.post(
-        f"/api/games/{game}/action", json={"flat": flat}, headers=_hdr(tokens)
-    ).json()
-    moves = [e for e in body["log"] if e["kind"] == "move"]
-    assert moves and moves[-1]["player"] == 0
-
-
-def test_chat_requires_seat_ownership() -> None:
-    game, tokens = _create()
+def test_chat_requires_seat_ownership(client: TestClient) -> None:
+    game, tokens = _create(client)
     body = client.post(
         f"/api/games/{game}/chat", json={"text": "hi", "player": 0}, headers=_hdr(tokens)
     ).json()
     assert body["log"][-1]["kind"] == "chat" and body["log"][-1]["player"] == 0
-    # Unowned seat: refused. Spectator (no seat claimed): allowed.
+    # Unowned seat: refused. Spectator (no seat given): allowed.
     assert (
-        client.post(f"/api/games/{game}/chat", json={"text": "hi", "player": 1}).status_code
-        == 403
+        client.post(f"/api/games/{game}/chat", json={"text": "hi", "player": 1}).status_code == 403
     )
-    body = client.post(f"/api/games/{game}/chat", json={"text": "gl"}).json()
-    assert body["log"][-1]["player"] is None
-
-
-def test_chat_rejects_blank_text() -> None:
-    game, _ = _create()
+    assert client.post(f"/api/games/{game}/chat", json={"text": "gl"}).json()["log"][-1]["player"] is None
     assert client.post(f"/api/games/{game}/chat", json={"text": "   "}).status_code == 422
 
 
-def _finish(game: str) -> None:
+def _finish(registry: GameRegistry, game: str) -> None:
     """Drive an all-bot game to completion in-process (HTTP would be slow)."""
-    handle = server._GAMES.get(game)
+    handle = registry.get(game)
     assert handle is not None
     handle.session._run_bots()
     assert handle.session.terminal()
 
 
-def test_record_refused_while_running_then_exports() -> None:
-    game, _ = _create(seats=["random"] * 4)
+def test_record_and_replay_export_finished_games_only(
+    client: TestClient, registry: GameRegistry
+) -> None:
+    game, _ = _create(client, seats=["random"] * 4)
     # A live game's record would reconstruct hidden hands when replayed.
     assert client.get(f"/api/games/{game}/record").status_code == 409
-    _finish(game)
-    resp = client.get(f"/api/games/{game}/record")
-    assert resp.status_code == 200
-    doc = resp.json()
+    assert client.post(f"/api/games/{game}/replay").status_code == 409
+    _finish(registry, game)
+    doc = client.get(f"/api/games/{game}/record").json()
     assert doc["winner"] is not None and len(doc["moves"]) > 0
-
-
-def test_replay_from_game_and_scrub() -> None:
-    game, _ = _create(seats=["random"] * 4)
-    assert client.post(f"/api/games/{game}/replay").status_code == 409  # running
-    _finish(game)
     opening = client.post(f"/api/games/{game}/replay").json()
-    assert opening["move"] == 0 and opening["n_moves"] > 0
+    assert opening["move"] == 0 and opening["n_moves"] == len(doc["moves"])
     mid = client.get("/api/replay/state", params={"move": 5}).json()
     assert mid["move"] == 5
-    last = client.get("/api/replay/state", params={"move": opening["n_moves"]}).json()
-    assert last["winner"] is not None
     assert client.get("/api/replay/state", params={"move": 99999}).status_code == 422
 
 
-def test_replay_upload_roundtrip() -> None:
-    game, _ = _create(seats=["random"] * 4)
-    _finish(game)
-    handle = server._GAMES.get(game)
-    assert handle is not None
-    doc = json.loads(handle.session.record().to_json())
+def test_replay_upload_roundtrip(client: TestClient, registry: GameRegistry) -> None:
+    game, _ = _create(client, seats=["random"] * 4)
+    _finish(registry, game)
+    doc = client.get(f"/api/games/{game}/record").json()
     assert client.post("/api/replay", json=doc).status_code == 200
     assert client.get("/api/replay/record").status_code == 200
 
 
-def test_replay_state_404_until_loaded() -> None:
+def test_replay_state_404_until_loaded(client: TestClient) -> None:
     assert client.get("/api/replay/state").status_code == 404
 
 
-def test_replay_rejects_bad_records() -> None:
+def test_replay_rejects_bad_records(client: TestClient) -> None:
     assert client.post("/api/replay", json={"seed": 1}).status_code == 422
     assert (
         client.post(
@@ -283,24 +213,31 @@ def test_replay_rejects_bad_records() -> None:
     )
 
 
-def test_get_bots_lists_policies() -> None:
-    resp = client.get("/api/bots")
-    assert resp.status_code == 200
-    body = resp.json()
+def test_get_bots_lists_policies(client: TestClient) -> None:
+    body = client.get("/api/bots").json()
     assert "random" in body
     assert all("counts" in spec and "params" in spec for spec in body.values())
 
 
-_DIST = server._dist.exists()
+def test_openapi_schema_is_committed() -> None:
+    # The committed schema generates the frontend's wire types; regen with
+    # `npm run gen-api` in frontend/ whenever the models change.
+    committed = json.loads(
+        (Path(__file__).parent.parent / "frontend" / "openapi.json").read_text()
+    )
+    assert create_app().openapi() == committed, "schema drift: run `npm run gen-api`"
+
+
+_DIST = (Path(__file__).parent.parent / "frontend" / "dist").exists()
 
 
 @pytest.mark.skipif(not _DIST, reason="frontend/dist not built")
-def test_spa_fallback_serves_index_for_client_route() -> None:
+def test_spa_fallback_serves_index_for_client_route(client: TestClient) -> None:
     resp = client.get("/play")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
 
 
 @pytest.mark.skipif(not _DIST, reason="frontend/dist not built")
-def test_spa_fallback_404_for_missing_asset() -> None:
+def test_spa_fallback_404_for_missing_asset(client: TestClient) -> None:
     assert client.get("/assets/nope.js").status_code == 404

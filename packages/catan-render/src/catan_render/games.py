@@ -16,10 +16,6 @@ import time
 
 from .session import HUMAN, GameSession
 
-# Live games kept in memory; least-recently-touched games are evicted past
-# this (finished ones first).
-_MAX_GAMES = 32
-
 # Games are addressed by short ids; tokens prove seat ownership.
 _ID_BYTES = 4
 _TOKEN_BYTES = 16
@@ -68,10 +64,15 @@ class GameHandle:
 
 
 class GameRegistry:
-    """Id-addressed live games. All methods are thread-safe."""
+    """Id-addressed live games. All methods are thread-safe.
 
-    def __init__(self) -> None:
+    ``max_games`` caps memory: past it, the least-recently-touched game is
+    evicted (finished ones first).
+    """
+
+    def __init__(self, max_games: int = 32) -> None:
         self._games: dict[str, GameHandle] = {}
+        self._max = max_games
         self._lock = threading.Lock()
 
     def create(self, session: GameSession) -> GameHandle:
@@ -92,7 +93,7 @@ class GameRegistry:
             return handle
 
     def _evict(self) -> None:
-        while len(self._games) >= _MAX_GAMES:
+        while len(self._games) >= self._max:
             # Finished games go first, then the least recently touched.
             victim = min(
                 self._games.values(),
