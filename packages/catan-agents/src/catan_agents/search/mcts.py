@@ -3,26 +3,28 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, NamedTuple, cast
+import math
+from collections.abc import Callable
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
 import mctx
 from catan_engine.belief import BeliefView
-from catan_engine.board import Board
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import (
     VICTORY_POINTS_TO_WIN,
     BoardState,
     BoolScalar,
     IntScalar,
+    KeyArray,
     KeyScalar,
 )
 from catan_engine.env import N_FLAT, available, flat_available, flat_to_action
 from catan_engine.mechanics.action import ActionType, apply_action
 from catan_engine.mechanics.common import agent_selection_single, player_total_vp
 from catan_engine.mechanics.dice import distribute_resources
-from jaxtyping import Array, Bool, Float, Int
+from jaxtyping import Array, Bool, Float, Int, UInt8
 
 from catan_agents.shared.greedy import _BASE
 from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
@@ -50,6 +52,55 @@ _ROLL_P = jnp.asarray([1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1], dtype=jnp.float32) / 36
 _QTRANSFORM = functools.partial(
     mctx.qtransform_completed_by_mix_value, rescale_values=False
 )
+
+
+# Everything on BoardState except the PRNG key is uint8, so a state packs into
+# one row per game. mctx gathers/scatters every embedding leaf into its
+# (batch, nodes, ...) storage on each simulation; two leaves instead of ~25
+# keeps that launch-latency-bound traffic off the per-simulation clock.
+_U8_FIELDS = tuple(f for f in BoardState._fields if f != "key")
+
+
+class _Packed(NamedTuple):
+    """A ``BoardState`` flattened for mctx node storage."""
+
+    data: UInt8[Array, "batch packed"]
+    key: KeyArray
+
+
+def _codec(
+    template: BoardState,
+) -> tuple[Callable[[BoardState], _Packed], Callable[[_Packed], BoardState]]:
+    """Pack/unpack for batched states whose games are shaped like ``template``
+    (one game, no batch axis). Round-trips exactly; a non-uint8 ``BoardState``
+    field fails here loudly rather than packing lossily."""
+    shapes = [getattr(template, f).shape for f in _U8_FIELDS]
+    bad = [f for f in _U8_FIELDS if getattr(template, f).dtype != jnp.uint8]
+    if bad:
+        raise TypeError(f"non-uint8 BoardState fields cannot pack: {bad}")
+    sizes = [math.prod(s) for s in shapes]
+    offsets = [sum(sizes[:i]) for i in range(len(sizes))]
+
+    def pack(state: BoardState) -> _Packed:
+        b = state.phase.shape[0]
+        return _Packed(
+            jnp.concatenate(
+                [getattr(state, f).reshape(b, -1) for f in _U8_FIELDS], axis=1
+            ),
+            state.key,
+        )
+
+    def unpack(packed: _Packed) -> BoardState:
+        b = packed.data.shape[0]
+        return BoardState(
+            key=packed.key,
+            **{
+                f: packed.data[:, o : o + n].reshape(b, *shp)
+                for f, o, n, shp in zip(_U8_FIELDS, offsets, sizes, shapes, strict=True)
+            },
+        )
+
+    return pack, unpack
 
 
 def _terminal(state: BoardState) -> BoolScalar:
@@ -170,20 +221,29 @@ def make_mcts(
         mask: FlatMask,
     ) -> _Weights:
         """Improved-policy weights from one search of a single concrete world."""
+        # The layout never changes inside a search, so it lives in the closure
+        # (batch axis of 1, mctx's in-tree batch) instead of the embedding.
+        pack, unpack = _codec(state)
+        layout_b = jax.tree.map(lambda x: x[None], layout)
 
         # Every node's value is the searcher's, signed into the mover's side
         # of the two-sided frame (see _transition).
         def recurrent_fn(
-            params: None, rng: KeyScalar, action: Int[Array, "batch"], embedding: Board
-        ) -> tuple[mctx.RecurrentFnOutput, Board]:
-            layout, state = embedding
-            t = _transition(layout, state, action, player)
+            params: None,
+            rng: KeyScalar,
+            action: Int[Array, "batch"],
+            embedding: _Packed,
+        ) -> tuple[mctx.RecurrentFnOutput, _Packed]:
+            state = unpack(embedding)
+            t = _transition(layout_b, state, action, player)
             sign = jnp.where(t.next_mover == player, 1.0, -1.0)
-            v = jax.vmap(leaf_value, in_axes=(0, 0, None))(layout, t.next_state, player)
+            v = jax.vmap(leaf_value, in_axes=(0, 0, None))(
+                layout_b, t.next_state, player
+            )
             v = jnp.where(
                 t.roll_child,
                 jax.vmap(expected_roll_value, in_axes=(0, 0, None))(
-                    layout, state, player
+                    layout_b, state, player
                 ),
                 v,
             )
@@ -194,18 +254,17 @@ def make_mcts(
                 prior_logits=t.prior_logits,
                 value=v,
             )
-            return out, (layout, t.next_state)
+            return out, pack(t.next_state)
 
         # Heuristic root prior: the one-step value sweep over all legal moves.
         successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
             layout, state, _ROW_TYPE, _ROW_PARAMS, mask
         )
         root_vals = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
-        batched: Any = jax.tree.map(lambda x: x[None], (layout, state))
         root = mctx.RootFnOutput(  # type: ignore[call-arg]  # chex dataclass
             prior_logits=jnp.where(mask, root_vals / prior_scale, _ILLEGAL)[None],
             value=leaf_value(layout, state, player)[None],
-            embedding=batched,
+            embedding=pack(jax.tree.map(lambda x: x[None], state)),
         )
         out = mctx.gumbel_muzero_policy(
             params=None,

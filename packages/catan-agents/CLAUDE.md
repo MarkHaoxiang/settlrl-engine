@@ -130,6 +130,15 @@ draws (true chance nodes); the second is inherent to PIMC.
   `mctx.stochastic_muzero_policy` is PUCT-based (no Gumbel/absolute-Q),
   an architecture change, not a knob. 4p evals: seed-batch variance at n=80
   is huge (30.9% vs 43.8% same config) — matched seeds or n ≥ 240.
+  Perf (RTX 5090, B=1, 2p): a shipped move is ~15 ms ≈ 0.70 ms × sims; the
+  per-sim cost is mctx's descent/backup over the (nodes × 560) stats tables,
+  *not* the embedding or our recurrent_fn (engine step + leaf + roll-EV
+  measure 0.22 ms fused). Packing the embedding (`_codec`: BoardState → one
+  uint8 row + key, layout in the closure; bit-identical search, round-trip
+  pinned by `test_mcts_codec.py`) only cut the per-search fixed cost — tree
+  storage init — so it pays at small budgets (sims=8: −32%) and ~4% shipped.
+  Further wall-clock wants a narrower in-tree action axis (mctx surgery) or
+  more lanes per dispatch (B=64: 0.97 ms/move-lane).
 - `smcts.py` — experimental, deliberately **not** in `POLICIES`:
   stochastic-MuZero search (PUCT) with dice and dev draws as true chance
   nodes over the engine's forced-outcome seams (`ROLL_DICE idx=2..12`,
