@@ -62,21 +62,25 @@ class _Transition(NamedTuple):
 
     next_state: BoardState
     next_mover: jax.Array
-    reward: jax.Array  # +/-1 to the acting player on a winning transition
-    discount: jax.Array  # -1 mover switch, +1 same mover, 0 into terminals
+    reward: jax.Array  # +/-1 to the acting side on a winning transition
+    discount: jax.Array  # -1 crossing the searcher/opponents boundary, 0 into terminals
     prior_logits: jax.Array  # tier table over the child's legal moves
     roll_child: jax.Array  # lanes whose child should back up the roll expectation
     terminal: jax.Array
 
 
 def _transition(
-    layout: BoardLayout, state: BoardState, action: jax.Array
+    layout: BoardLayout, state: BoardState, action: jax.Array, player: jax.Array
 ) -> _Transition:
     """Apply one flat action per lane; value-free dynamics shared by all trees.
 
-    Reward is in the acting player's frame, the child's value belongs to its
-    own player-to-move, and the discount flips the frame whenever the mover
-    changes — exact zero-sum at 2 players, the *paranoid* reduction beyond.
+    Frames are two-sided — the searching ``player`` vs the rest of the table
+    (the *paranoid* reduction; exact zero-sum at 2 players, identical there to
+    flipping on every mover change). Reward is in the acting side's frame and
+    the discount flips only when the move crosses the side boundary, so all
+    opponents share one frame and the searcher's own later turns never come
+    back negated (at 3-4 players the every-mover-flip rule negates them on odd
+    cycles).
     """
     atype, aparams = flat_to_action(action)
     mover = jax.vmap(agent_selection_single)(state)
@@ -87,14 +91,15 @@ def _transition(
     now_terminal = jax.vmap(_terminal)(next_state)
     won = now_terminal & ~was_terminal
     next_mover = jax.vmap(agent_selection_single)(next_state)
+    mover_side = mover == player
+    next_side = next_mover == player
+    winner_side = jax.vmap(_winner)(next_state) == player
     return _Transition(
         next_state=next_state,
         next_mover=next_mover,
-        reward=jnp.where(
-            won, jnp.where(jax.vmap(_winner)(next_state) == mover, 1.0, -1.0), 0.0
-        ),
+        reward=jnp.where(won, jnp.where(winner_side == mover_side, 1.0, -1.0), 0.0),
         discount=jnp.where(
-            now_terminal, 0.0, jnp.where(next_mover == mover, 1.0, -1.0)
+            now_terminal, 0.0, jnp.where(next_side == mover_side, 1.0, -1.0)
         ),
         prior_logits=jnp.where(
             flat_available((layout, next_state)), _TIER_LOGITS, _ILLEGAL
@@ -143,23 +148,6 @@ def make_mcts(
         )(_ROLLS)
         return _ROLL_P @ vals
 
-    def recurrent_fn(
-        params: None, rng: jax.Array, action: jax.Array, embedding: Board
-    ) -> tuple[mctx.RecurrentFnOutput, Board]:
-        layout, state = embedding
-        t = _transition(layout, state, action)
-        v = jax.vmap(leaf_value)(layout, t.next_state, t.next_mover)
-        v = jnp.where(
-            t.roll_child,
-            jax.vmap(expected_roll_value)(layout, state, t.next_mover),
-            v,
-        )
-        v = jnp.where(t.terminal, 0.0, v)
-        out = mctx.RecurrentFnOutput(  # type: ignore[call-arg]  # chex dataclass
-            reward=t.reward, discount=t.discount, prior_logits=t.prior_logits, value=v
-        )
-        return out, (layout, t.next_state)
-
     # --- search: one tree over one concrete world ---
 
     def search_world(
@@ -170,6 +158,32 @@ def make_mcts(
         mask: FlatMask,
     ) -> jax.Array:
         """Improved-policy weights from one search of a single concrete world."""
+
+        # Every node's value is the searcher's, signed into the mover's side
+        # of the two-sided frame (see _transition).
+        def recurrent_fn(
+            params: None, rng: jax.Array, action: jax.Array, embedding: Board
+        ) -> tuple[mctx.RecurrentFnOutput, Board]:
+            layout, state = embedding
+            t = _transition(layout, state, action, player)
+            sign = jnp.where(t.next_mover == player, 1.0, -1.0)
+            v = jax.vmap(leaf_value, in_axes=(0, 0, None))(layout, t.next_state, player)
+            v = jnp.where(
+                t.roll_child,
+                jax.vmap(expected_roll_value, in_axes=(0, 0, None))(
+                    layout, state, player
+                ),
+                v,
+            )
+            v = jnp.where(t.terminal, 0.0, sign * v)
+            out = mctx.RecurrentFnOutput(  # type: ignore[call-arg]  # chex dataclass
+                reward=t.reward,
+                discount=t.discount,
+                prior_logits=t.prior_logits,
+                value=v,
+            )
+            return out, (layout, t.next_state)
+
         # Heuristic root prior: the one-step value sweep over all legal moves.
         successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
             layout, state, _ROW_TYPE, _ROW_PARAMS, mask

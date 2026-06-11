@@ -73,9 +73,15 @@ exploit.
   after `jit` the search runs (games × trees)-wide, trees = `num_worlds`
   (belief width) × `num_futures` (chance width: re-keyed replicas of one
   draw). Width is near-free vs `num_simulations` (a sequential scan): 16
-  trees cost +66% wall-clock, 8× sims cost ~8× (RTX 5090, B=32). The
-  discount flips the value frame on mover switch — exact zero-sum at 2p,
-  the *paranoid* reduction at 3–4 (scalar backups can't express max^n).
+  trees cost +66% wall-clock, 8× sims cost ~8× (RTX 5090, B=32). Frames are
+  two-sided (searcher vs the table): every node holds the searcher's value
+  signed into the mover's side and the discount flips only across the side
+  boundary — the true *paranoid* reduction (scalar backups can't express
+  max^n). At 2p this is provably identical to flipping on every mover change
+  (632/640 same picks, 49.5% n=200 self-match); at 4p the every-mover-flip
+  rule negates the searcher's own next turn ((-1)^3 per round) and measured
+  *below chance* vs 3× lookahead (20%, n=80) — the side frame took the same
+  seeds to 32.3% (n=161, chance 25%).
   Deviations from mctx defaults, each fixing a measured ply-2 bias: the
   root prior is the one-step value sweep (uniform priors made Gumbel's 16
   candidates a random subset of 560 — 6% vs lookahead); interior priors are
