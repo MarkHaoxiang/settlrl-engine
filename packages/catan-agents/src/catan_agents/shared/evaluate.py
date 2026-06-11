@@ -31,7 +31,7 @@ def _seat(agent: AgentSpec | Policy, n: int, i: int) -> Seat:
     spec = (
         agent
         if isinstance(agent, AgentSpec)
-        else AgentSpec(agent, "observation", frozenset((2, 3, 4)))
+        else AgentSpec(lambda: agent, "observation", frozenset((2, 3, 4)))
     )
     if n not in spec.n_players:
         raise ValueError(f"seat {i} does not support {n}-player games")

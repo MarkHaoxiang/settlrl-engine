@@ -11,7 +11,9 @@ player count; belief sharpness, not the API, varies with the seat count.
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal, Protocol, runtime_checkable
+import functools
+from collections.abc import Callable, Mapping
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import jax
 from catan_engine.belief import BeliefView
@@ -65,13 +67,38 @@ class BeliefPolicy(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class AgentSpec:
-    """A shipped agent: its decision function, input kind, and seat counts.
+    """A registry entry: a policy *family* plus the parameters to build it at.
 
-    ``observes`` says which protocol ``policy`` satisfies (``"observation"`` ->
-    :class:`Policy`, ``"belief"`` -> :class:`BeliefPolicy`); ``n_players``
-    holds the player counts the agent may be seated at.
+    ``make(**defaults)`` builds the shipped agent (cached as :attr:`policy`;
+    parameterless families pass an empty ``defaults``). ``for_testing`` holds
+    overrides applied on top of ``defaults`` for a cheaper member of the same
+    family (see :attr:`for_tests`). ``observes`` says which protocol the
+    family satisfies (``"observation"`` -> :class:`Policy`, ``"belief"`` ->
+    :class:`BeliefPolicy`); ``n_players`` holds the player counts the agent
+    may be seated at.
     """
 
-    policy: Policy | BeliefPolicy
+    make: Callable[..., Policy | BeliefPolicy]
     observes: Literal["observation", "belief"]
     n_players: frozenset[int]
+    defaults: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    for_testing: Mapping[str, Any] | None = None
+
+    @functools.cached_property
+    def policy(self) -> Policy | BeliefPolicy:
+        """The shipped agent: the family built at ``defaults``."""
+        return self.make(**self.defaults)
+
+    @property
+    def for_tests(self) -> AgentSpec:
+        """The same family at its cheap test parameters (itself when none).
+
+        The protocol properties (legality, determinism, completing games)
+        are parameter-independent, so tests exercise this member instead of
+        the full-size shipped one.
+        """
+        if self.for_testing is None:
+            return self
+        return dataclasses.replace(
+            self, defaults={**self.defaults, **self.for_testing}, for_testing=None
+        )

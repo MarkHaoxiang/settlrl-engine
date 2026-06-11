@@ -12,8 +12,12 @@ agents run at 2–4 players with beliefs of varying sharpness.
 
 ## shared/
 
-- `policy.py` — the seat protocols. Policies are masked-argmax style: with no
-  legal move the returned index is arbitrary and the engine rejects it as
+- `policy.py` — the seat protocols and `AgentSpec`: a policy *family*
+  (`make` + `defaults`, with `policy` the cached shipped build) plus optional
+  `for_testing` parameter overrides — `spec.for_tests` is the cheap family
+  member the protocol tests run (the tested properties are
+  parameter-independent). Policies are masked-argmax style: with no legal
+  move the returned index is arbitrary and the engine rejects it as
   `INVALID` (the lane stalls until auto-reset), matching
   `BatchedCatanEnv.random_actions`.
 - `sample.py` — `sample_world` fills every hidden field with a posterior
@@ -102,8 +106,9 @@ agents, consumed by both the protocol tests and catan-render's bot seam
 (which dispatches on `AgentSpec.observes` and filters seat counts).
 
 Tests are protocol-level only (`tests/test_policies.py`), parametrized over
-every agent in `POLICIES`: legality through self-play, seed reproducibility,
-and short rollouts that must complete games. No per-agent internal-logic
+every agent in `POLICIES` at its `for_testing` parameters: legality through
+self-play, seed reproducibility, and episode-budgeted rollouts that must
+complete games. No per-agent internal-logic
 tests — a new agent just registers in `POLICIES`. `sample_world` is
 infrastructure, not a policy, so it gets unit tests (`tests/test_sample.py`).
 `tests/conftest.py` installs the jaxtyping/beartype hook for all

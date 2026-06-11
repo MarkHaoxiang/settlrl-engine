@@ -28,12 +28,27 @@ from catan_agents.shared import (
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 
 POLICIES: dict[str, AgentSpec] = {
-    "random": AgentSpec(random_policy, "observation", _ANY_COUNT),
-    "greedy": AgentSpec(greedy_policy, "observation", _ANY_COUNT),
-    "lookahead": AgentSpec(lookahead_policy, "belief", _ANY_COUNT),
-    "mcts": AgentSpec(mcts_policy, "belief", _ANY_COUNT),
+    "random": AgentSpec(lambda: random_policy, "observation", _ANY_COUNT),
+    "greedy": AgentSpec(lambda: greedy_policy, "observation", _ANY_COUNT),
+    "lookahead": AgentSpec(
+        make_greedy, "belief", _ANY_COUNT, defaults={"value": heuristic_value}
+    ),
+    "mcts": AgentSpec(
+        make_mcts,
+        "belief",
+        _ANY_COUNT,
+        defaults={"value": heuristic_value},
+        # One world/future and a small Gumbel budget: a cheap member of the
+        # same family for the protocol tests.
+        for_testing={
+            "num_worlds": 1,
+            "num_futures": 1,
+            "num_simulations": 8,
+            "max_num_considered_actions": 8,
+        },
+    ),
 }
-"""Every shipped agent by name."""
+"""Every shipped agent by name (the family at its ``defaults``)."""
 
 __all__ = [
     "POLICIES",

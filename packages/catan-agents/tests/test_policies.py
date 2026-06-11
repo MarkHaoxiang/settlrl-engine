@@ -20,6 +20,10 @@ from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
 
 BATCH = 4
 
+# Each family at its for_testing parameters -- the protocol properties under
+# test are parameter-independent, so the cheap member suffices.
+SPECS = {name: spec.for_tests for name, spec in POLICIES.items()}
+
 
 def _acting_obs(env: BatchedCatanEnv) -> Observation:
     """Per-lane observation of that lane's acting player."""
@@ -70,7 +74,7 @@ def _self_play(spec: AgentSpec, seed: int, n_steps: int) -> tuple[jax.Array, jax
     return jnp.stack(masks), jnp.stack(actions)
 
 
-@pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
+@pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
 def test_picks_only_legal_actions(spec: AgentSpec) -> None:
     masks, actions = _self_play(spec, seed=0, n_steps=100)
     # Whenever a lane has any legal move, the pick must be one of them.
@@ -78,14 +82,14 @@ def test_picks_only_legal_actions(spec: AgentSpec) -> None:
     assert bool(jnp.all(~masks.any(axis=2) | legal))
 
 
-@pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
+@pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
 def test_same_seed_reproduces_rollout(spec: AgentSpec) -> None:
     _, first = _self_play(spec, seed=3, n_steps=40)
     _, second = _self_play(spec, seed=3, n_steps=40)
     assert bool(jnp.all(first == second))
 
 
-@pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
+@pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
 def test_self_play_rollouts_complete_games(spec: AgentSpec) -> None:
     # The episode budget stops as soon as two games finish (instead of a fixed
     # step count), which is what bounds the expensive search agents' runtime.
