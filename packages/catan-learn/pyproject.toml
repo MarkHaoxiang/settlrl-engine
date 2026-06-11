@@ -1,0 +1,33 @@
+[project]
+name = "catan-learn"
+version = "0.1.0"
+description = "Learned value and policy functions for catan-agents"
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "catan-agents",
+    "catan-engine",
+    "jax[cpu]>=0.4.0",
+    "jaxtyping>=0.3.10",
+    "numpy>=1.26",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+catan-agents = { workspace = true }
+catan-engine = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto"
+
+[tool.mypy]
+strict = true
+disallow_any_explicit = false
+disallow_any_generics = false

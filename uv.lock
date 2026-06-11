@@ -12,6 +12,7 @@ resolution-markers = [
 members = [
     "catan-agents",
     "catan-engine",
+    "catan-learn",
     "catan-reference",
     "catan-render",
 ]
@@ -170,6 +171,27 @@ requires-dist = [
     { name = "pettingzoo", marker = "extra == 'rl'", specifier = ">=1.24" },
 ]
 provides-extras = ["rl", "cuda"]
+
+[[package]]
+name = "catan-learn"
+version = "0.1.0"
+source = { editable = "packages/catan-learn" }
+dependencies = [
+    { name = "catan-agents" },
+    { name = "catan-engine" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "catan-agents", editable = "packages/catan-agents" },
+    { name = "catan-engine", editable = "packages/catan-engine" },
+    { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
+    { name = "jaxtyping", specifier = ">=0.3.10" },
+    { name = "numpy", specifier = ">=1.26" },
+]
 
 [[package]]
 name = "catan-reference"

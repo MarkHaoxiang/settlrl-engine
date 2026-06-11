@@ -1,0 +1,21 @@
+"""jaxtyping runtime checks for catan_learn + the shared XLA cache settings
+(same pattern as the other packages' conftests)."""
+
+import os
+import pathlib
+
+import jax
+from jaxtyping import install_import_hook
+
+# model.py / train.py are excluded: MLPParams' per-layer shapes are
+# heterogeneous, and jaxtyping unifies dim names across a variadic tuple, so
+# the annotation is per-layer documentation that cannot hold globally.
+install_import_hook(["catan_learn.features"], "beartype.beartype")
+
+if "JAX_PLATFORMS" not in os.environ and "PYTEST_XDIST_WORKER" in os.environ:
+    jax.config.update("jax_platforms", "cpu")  # type: ignore[no-untyped-call]
+
+if "JAX_COMPILATION_CACHE_DIR" not in os.environ:
+    jax.config.update(  # type: ignore[no-untyped-call]
+        "jax_compilation_cache_dir", str(pathlib.Path.home() / ".cache/jax-catan")
+    )

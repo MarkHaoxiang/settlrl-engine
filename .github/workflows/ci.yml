@@ -32,7 +32,9 @@ jobs:
           packages/catan-engine/src packages/catan-engine/tests
           packages/catan-agents/src packages/catan-agents/tests
           packages/catan-render/src packages/catan-reference/src
+          packages/catan-learn/src packages/catan-learn/tests/test_learn.py
       - run: uv run --package catan-engine pytest packages/catan-engine/tests
       - run: uv run --package catan-reference pytest packages/catan-reference
       - run: uv run --package catan-render pytest packages/catan-render
       - run: uv run --package catan-agents pytest packages/catan-agents/tests
+      - run: uv run --package catan-learn pytest packages/catan-learn/tests
