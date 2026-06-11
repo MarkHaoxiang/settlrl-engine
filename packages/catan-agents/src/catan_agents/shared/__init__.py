@@ -11,6 +11,7 @@ from catan_agents.shared.policy import (
     FlatMask,
     ObservationSpec,
     Policy,
+    PolicyPrior,
 )
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import (
@@ -29,6 +30,7 @@ __all__ = [
     "FlatMask",
     "ObservationSpec",
     "Policy",
+    "PolicyPrior",
     "Value",
     "ValueFunction",
     "evaluate",

@@ -45,7 +45,7 @@ from catan_agents.search.mcts import (
     _terminal,
     _winner,
 )
-from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
+from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import Value, ValueFunction, heuristic_value
 
@@ -129,6 +129,7 @@ def _resolve(
 def make_smcts(
     value: ValueFunction,
     *,
+    prior: PolicyPrior | None = None,
     num_worlds: int = 4,
     num_futures: int = 1,
     num_simulations: int = 64,
@@ -244,9 +245,15 @@ def make_smcts(
                 res.value_sign
                 * jax.vmap(leaf_value, in_axes=(0, 0, None))(layout, res.state, player),
             )
-            priors = jnp.where(
-                flat_available((layout, res.state)), _TIER_LOGITS, _ILLEGAL
-            )
+            legal = flat_available((layout, res.state))
+            if prior is None:
+                priors = jnp.where(legal, _TIER_LOGITS, _ILLEGAL)
+            else:
+                priors = jnp.where(
+                    legal,
+                    jax.vmap(prior, in_axes=(0, 0, None))(layout, res.state, player),
+                    _ILLEGAL,
+                )
             out = mctx.ChanceRecurrentFnOutput(  # type: ignore[call-arg]
                 action_logits=priors,
                 value=v,
@@ -255,13 +262,19 @@ def make_smcts(
             )
             return out, (layout, res.state)
 
-        successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
-            layout, state, _ROW_TYPE, _ROW_PARAMS, mask
-        )
-        root_vals = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+        if prior is None:
+            successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
+                layout, state, _ROW_TYPE, _ROW_PARAMS, mask
+            )
+            root_logits = (
+                jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+                / prior_scale
+            )
+        else:
+            root_logits = prior(layout, state, player)
         batched: Any = jax.tree.map(lambda x: x[None], (layout, state))
         root = mctx.RootFnOutput(  # type: ignore[call-arg]
-            prior_logits=jnp.where(mask, root_vals / prior_scale, _ILLEGAL)[None],
+            prior_logits=jnp.where(mask, root_logits, _ILLEGAL)[None],
             value=leaf_value(layout, state, player)[None],
             embedding=batched,
         )

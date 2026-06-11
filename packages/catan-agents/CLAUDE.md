@@ -20,8 +20,10 @@ agents run at 2–4 players with beliefs of varying sharpness.
   subclass is the tag (`ObservationSpec` / `BeliefSpec`), so consumers
   dispatch with `isinstance` and `spec.policy` is precisely typed — no casts.
   The generic cannot type `defaults` itself: `make(**mapping)` is uncheckable
-  (ParamSpec doesn't apply to dynamic unpacking). Policies are
-  masked-argmax style: with no legal
+  (ParamSpec doesn't apply to dynamic unpacking). `PolicyPrior` is the
+  learned-policy-head seam: `make_mcts` / `make_smcts` take one in place of
+  their built-in priors (root sweep + tier table), applying legality
+  masking themselves. Policies are masked-argmax style: with no legal
   move the returned index is arbitrary and the engine rejects it as
   `INVALID` (the lane stalls until auto-reset), matching
   `BatchedCatanEnv.random_actions`.

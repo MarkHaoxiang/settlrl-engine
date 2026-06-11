@@ -17,9 +17,9 @@ from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import IntScalar, KeyScalar
+from catan_engine.board.state import BoardState, IntScalar, KeyScalar
 from catan_engine.env import N_FLAT, Observation
-from jaxtyping import Array, Bool, Int
+from jaxtyping import Array, Bool, Float, Int
 
 FlatMask = Bool[Array, f"flat={N_FLAT}"]
 """Legality of every concrete flat action for the acting player (one game)."""
@@ -42,6 +42,21 @@ class Policy(Protocol):
     def __call__(
         self, key: KeyScalar, obs: Observation, mask: FlatMask
     ) -> FlatAction: ...
+
+
+@runtime_checkable
+class PolicyPrior(Protocol):
+    """Flat-action prior logits for one game's position, pure and ``jit`` /
+    ``vmap`` compatible.
+
+    Returns unmasked logits over the flat actions from ``player``'s point of
+    view; consumers apply legality masking. The seam for learned policy
+    heads: the search agents accept one in place of their built-in priors.
+    """
+
+    def __call__(
+        self, layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> Float[Array, f"flat={N_FLAT}"]: ...
 
 
 @runtime_checkable

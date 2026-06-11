@@ -27,7 +27,7 @@ from catan_engine.mechanics.dice import distribute_resources
 from jaxtyping import Array, Bool, Float, Int, UInt8
 
 from catan_agents.shared.greedy import _BASE
-from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
+from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import Value, ValueFunction, heuristic_value
 
@@ -175,6 +175,7 @@ def _transition(
 def make_mcts(
     value: ValueFunction,
     *,
+    prior: PolicyPrior | None = None,
     num_worlds: int = 4,
     num_futures: int = 1,
     num_simulations: int = 32,
@@ -188,9 +189,12 @@ def make_mcts(
     ``num_worlds`` :func:`~catan_agents.shared.sample.sample_world`
     determinizations of the view, ``num_futures`` chance re-keyings of each —
     and averages their improved-policy weights before the final masked
-    argmax. ``value`` drives both the root prior (one-step sweep, divided by
-    ``prior_scale``) and the leaf evaluation (``tanh(value / value_scale)``,
-    commensurate with the ±1 terminal reward).
+    argmax. ``value`` drives the leaf evaluation (``tanh(value /
+    value_scale)``, commensurate with the ±1 terminal reward) and, when
+    ``prior`` is None, the root prior too (one-step sweep divided by
+    ``prior_scale``; interior nodes use a static tier table). A ``prior``
+    supplies the root's and every interior node's logits instead
+    (legality-masked here) — the seam for learned policy heads.
     """
 
     # --- evaluation: everything below the engine step that needs `value` ---
@@ -248,21 +252,36 @@ def make_mcts(
                 v,
             )
             v = jnp.where(t.terminal, 0.0, sign * v)
+            logits = t.prior_logits
+            if prior is not None:
+                logits = jnp.where(
+                    t.prior_logits > _ILLEGAL,
+                    jax.vmap(prior, in_axes=(0, 0, None))(
+                        layout_b, t.next_state, player
+                    ),
+                    _ILLEGAL,
+                )
             out = mctx.RecurrentFnOutput(  # type: ignore[call-arg]  # chex dataclass
                 reward=t.reward,
                 discount=t.discount,
-                prior_logits=t.prior_logits,
+                prior_logits=logits,
                 value=v,
             )
             return out, pack(t.next_state)
 
-        # Heuristic root prior: the one-step value sweep over all legal moves.
-        successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
-            layout, state, _ROW_TYPE, _ROW_PARAMS, mask
-        )
-        root_vals = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+        if prior is None:
+            # Heuristic root prior: the one-step value sweep over legal moves.
+            successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
+                layout, state, _ROW_TYPE, _ROW_PARAMS, mask
+            )
+            root_logits = (
+                jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+                / prior_scale
+            )
+        else:
+            root_logits = prior(layout, state, player)
         root = mctx.RootFnOutput(  # type: ignore[call-arg]  # chex dataclass
-            prior_logits=jnp.where(mask, root_vals / prior_scale, _ILLEGAL)[None],
+            prior_logits=jnp.where(mask, root_logits, _ILLEGAL)[None],
             value=leaf_value(layout, state, player)[None],
             embedding=pack(jax.tree.map(lambda x: x[None], state)),
         )
