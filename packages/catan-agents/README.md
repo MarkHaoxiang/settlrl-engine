@@ -47,7 +47,17 @@ mcts vs greedy: 53-47 over 100 games (mcts 53.0%)
   seated first: mcts 28/50, greedy 25/50
 ```
 
-`--games`, `--batch-size`, and `--seed` adjust the run. Future tools (tournaments, ...) will hang off the same entry point as subcommands.
+`--games`, `--batch-size`, and `--seed` adjust the run.
+
+`catan-agents bench <a> <b>` is the experiment harness: each side is a registry name or a JSON spec configuring a family — builder knobs under `"params"`, heuristic weight overrides under `"value"`. Two-player runs swap seats; `--players 3|4` rotates agent `a` through every seat against a table of `b`:
+
+```
+$ catan-agents bench '{"kind": "mcts", "params": {"num_simulations": 64}}' lookahead --games 200
+a=113 b=87 n=200 rate=56.5% se=3.5% (chance 50.0%)
+  a seated at seat 0: 59/100, seat 1: 54/100
+```
+
+Future tools (tournaments, ...) will hang off the same entry point as subcommands.
 
 ## Layout
 

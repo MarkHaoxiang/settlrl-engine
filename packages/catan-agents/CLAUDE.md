@@ -162,8 +162,12 @@ draws (true chance nodes); the second is inherent to PIMC.
 ## cli.py
 
 `compare` is a seat-swapped head-to-head: two `n_episodes` evaluate runs
-(`seed`, `seed + 1`) with the agents' seats exchanged. Tournaments etc. slot
-in as new subparsers.
+(`seed`, `seed + 1`) with the agents' seats exchanged. `bench` is the
+experiment harness: agents are `build_spec` strings (a registry name, or
+JSON `{"kind", "params", "value"}` building a configured family member /
+reweighted heuristic), seat-swapped at 2 players and seat-rotated at 3-4
+(one evaluate per seating, `seed + position`); output includes the binomial
+SE and the per-seating split. Tournaments etc. slot in as new subparsers.
 
 ## Registry and tests
 
