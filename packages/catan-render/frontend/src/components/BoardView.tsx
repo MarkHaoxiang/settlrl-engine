@@ -1,5 +1,5 @@
 import { hexToPixel, cubeToPixel } from "../lib/hex";
-import type { Board } from "../lib/boardData";
+import type { Board, ResourceKind } from "../lib/boardData";
 import { useTableViewport } from "../lib/viewport";
 import { panelStyle } from "../lib/ui";
 import HexTile from "./HexTile";
@@ -32,10 +32,20 @@ export interface DiceState {
   onRoll?: () => void;
 }
 
+// Trade targets on the table: bank piles the viewer can trade for, and seats
+// they can propose to (clicking an opponent's hand pile opens the offer).
+export interface TradeTargets {
+  bank: Set<ResourceKind>;
+  partners: Set<number>;
+  onBank: (r: ResourceKind, at: BoardTargetPoint) => void;
+  onPartner: (p: number, at: BoardTargetPoint) => void;
+}
+
 interface Props {
   board: Board;
   interaction?: BoardInteraction;
   dice?: DiceState;
+  trade?: TradeTargets;
 }
 
 // The whole table seen from above: the ocean board in the middle (tiles,
@@ -43,7 +53,7 @@ interface Props {
 // seat's play area on its table edge, and the dice in a corner — one SVG
 // scene that pans, zooms, and spins together (lib/viewport.ts). It fills its
 // parent container, so a parent can overlay mode-specific controls on top.
-export default function BoardView({ board, interaction, dice }: Props) {
+export default function BoardView({ board, interaction, dice, trade }: Props) {
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
   const minX = Math.min(...pixels.map((p) => p.x));
   const maxX = Math.max(...pixels.map((p) => p.x));
@@ -112,7 +122,15 @@ export default function BoardView({ board, interaction, dice }: Props) {
 
             {/* The bank's card grid on the table, left of everyone */}
             {board.bank && (
-              <BankStacks bank={board.bank} cx={bankBand / 2} cy={height / 2} cardW={CARD_W} cardH={CARD_H} />
+              <BankStacks
+                bank={board.bank}
+                cx={bankBand / 2}
+                cy={height / 2}
+                cardW={CARD_W}
+                cardH={CARD_H}
+                tradable={trade?.bank}
+                onPick={trade && ((r, el) => trade.onBank(r, anchorOf(el)))}
+              />
             )}
 
             {/* The dice rest in the table's bottom-right corner */}
@@ -138,6 +156,8 @@ export default function BoardView({ board, interaction, dice }: Props) {
               cardW={CARD_W}
               cardH={CARD_H}
               hex={HEX_SIZE}
+              partners={trade?.partners}
+              onPartner={trade && ((p, el) => trade.onPartner(p, anchorOf(el)))}
             />
 
             {/* Ports sit in the ocean; drawn first so docks tuck under the coast */}

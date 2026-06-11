@@ -6,6 +6,7 @@ import {
   type Board,
   type Player,
 } from "../lib/boardData";
+import { HIGHLIGHT } from "../lib/ui";
 import CardPile from "./CardPile";
 import { housePath } from "./Building";
 
@@ -76,6 +77,7 @@ function Area({
   cardW,
   cardH,
   hex,
+  onHand,
 }: {
   player: Player;
   roadsLeft: number;
@@ -84,6 +86,9 @@ function Area({
   cardW: number;
   cardH: number;
   hex: number;
+  // Set while the viewer may propose this seat a trade: the hand pile
+  // highlights and takes the click (reported with the element for anchoring).
+  onHand?: (el: SVGGraphicsElement) => void;
 }) {
   const color = PLAYER_COLORS[player.player] ?? "#888";
   const stroke = PLAYER_STROKES[player.player] ?? "#444";
@@ -112,7 +117,24 @@ function Area({
 
   return (
     <g>
-      <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards" />
+      {onHand ? (
+        <g className="board-ghost" onClick={(e) => onHand(e.currentTarget)}>
+          <rect
+            className="ghost"
+            x={handX - cardW / 2 - 6}
+            y={-cardH / 2 - 6}
+            width={cardW + 12}
+            height={cardH + 12}
+            rx={10}
+            fill="none"
+            stroke={HIGHLIGHT}
+            strokeWidth={3}
+          />
+          <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards — click to offer a trade" />
+        </g>
+      ) : (
+        <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards" />
+      )}
       <FaceDownPile cx={devX} cy={0} w={cardW} h={cardH} count={player.devCards} back={DEV_CARD_BACK} owner={color} label="development cards" />
       <g>
         <title>{`unbuilt roads: ${roadsLeft}`}</title>
@@ -179,6 +201,8 @@ export default function PlayerAreas({
   cardW,
   cardH,
   hex,
+  partners,
+  onPartner,
 }: {
   board: Board;
   // The ocean rectangle; areas sit in the table band of width `band` around it.
@@ -190,6 +214,9 @@ export default function PlayerAreas({
   cardW: number;
   cardH: number;
   hex: number;
+  // Seats the viewer may propose a trade to, and the click handler.
+  partners?: Set<number>;
+  onPartner?: (p: number, el: SVGGraphicsElement) => void;
 }) {
   const edges = board.players.length === 2 ? EDGES_2 : EDGES_4;
   const centre = (edge: Edge): { x: number; y: number } => {
@@ -221,6 +248,7 @@ export default function PlayerAreas({
               cardW={cardW}
               cardH={cardH}
               hex={hex}
+              onHand={partners?.has(p.player) ? (el) => onPartner?.(p.player, el) : undefined}
             />
           </g>
         );

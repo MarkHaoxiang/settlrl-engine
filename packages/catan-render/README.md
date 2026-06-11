@@ -11,8 +11,10 @@ A menu lets you choose between two modes, each at its own URL:
   every placement you can currently make is marked on the board in your colour (hover to
   preview the piece) — click it and confirm in a popup there (which shows the build cost, or
   who to rob). The hand is live too: click a glowing development card to play it (resource
-  picks come from a popover) and resource cards to discard after a 7. A small bottom bar keeps
-  the turn-flow moves (buy a dev card, bank trade, end turn — the dice sit on the table by
+  picks come from a popover) and resource cards to discard after a 7. Trading happens on the
+  table as well: click the bank pile you want for the maritime exchanges, or an opponent's
+  hand pile to compose a 1:1 offer (they accept or reject on their turn). A small bottom bar
+  keeps the rest (buy a dev card, answer a trade, end turn — the dice sit on the table by
   the board's corner and take the click to roll); the top bar holds New
   game and a light/dark theme toggle. The scene is a top-down table (zoom, pan, and spin it — mouse, touch, or keyboard:
   arrows pan, +/− zoom, [ ] spin, 0 re-fits):

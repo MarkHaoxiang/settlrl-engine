@@ -14,6 +14,8 @@ const BOARD_HELP: [string, string][] = [
   ["build_city", "A larger dot on your settlement: click it to upgrade to a city."],
   ["build_road", "A dash on an edge: click it to build a road there."],
   ["move_robber", "A 7 was rolled: click a highlighted tile, then pick who to rob."],
+  ["maritime_trade", "Click the bank pile you want: trade at 4:1, or better via your ports."],
+  ["propose_trade", "Click an opponent's hand pile: pick what you give, then what you want."],
 ];
 const HAND_HELP: [string, string][] = [
   ["play_knight", "Click the card, then a tile for the robber (and who to rob)."],
@@ -24,7 +26,8 @@ const HAND_HELP: [string, string][] = [
 ];
 const BAR_HELP: [string, string][] = [
   ["buy_development_card", "Buy a development card."],
-  ["maritime_trade", "Trade with the bank (4:1, or better via your ports)."],
+  ["accept_trade", "Take a trade you've been offered."],
+  ["reject_trade", "Turn a trade down."],
   ["end_turn", "End your turn."],
 ];
 

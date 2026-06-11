@@ -4,7 +4,9 @@ import {
   TERRAIN_FILL,
   TERRAIN_STROKE,
   type Bank,
+  type ResourceKind,
 } from "../lib/boardData";
+import { HIGHLIGHT } from "../lib/ui";
 import CardPile from "./CardPile";
 import TerrainIcon from "./TerrainIcon";
 
@@ -18,6 +20,8 @@ export default function BankStacks({
   cy,
   cardW,
   cardH,
+  tradable,
+  onPick,
 }: {
   bank: Bank;
   // Grid centre.
@@ -25,6 +29,10 @@ export default function BankStacks({
   cy: number;
   cardW: number;
   cardH: number;
+  // Piles the viewer can currently trade for (bank rates); they highlight and
+  // take a click, reported with the clicked element for popover anchoring.
+  tradable?: Set<ResourceKind>;
+  onPick?: (r: ResourceKind, el: SVGGraphicsElement) => void;
 }) {
   const at = (i: number) => ({
     x: cx + ((i % 2) - 0.5) * (cardW + 18),
@@ -35,9 +43,10 @@ export default function BankStacks({
     <g>
       {RESOURCE_ORDER.map((r, i) => {
         const { x, y } = at(i);
-        return (
+        const clickable = tradable?.has(r) ?? false;
+        const pile = (
           <CardPile
-            key={r}
+            key={clickable ? undefined : r}
             cx={x}
             cy={y}
             w={cardW}
@@ -45,10 +54,27 @@ export default function BankStacks({
             count={bank.resources[r]}
             fill={TERRAIN_FILL[r]}
             stroke={TERRAIN_STROKE[r]}
-            label={`${r} left`}
+            label={clickable ? `${r} left — click to trade for one` : `${r} left`}
           >
             <TerrainIcon terrain={r} cx={x} cy={y - cardH * 0.16} scale={cardW * 0.016} opacity={0.85} />
           </CardPile>
+        );
+        if (!clickable) return pile;
+        return (
+          <g key={r} className="board-ghost" onClick={(e) => onPick?.(r, e.currentTarget)}>
+            <rect
+              className="ghost"
+              x={x - cardW / 2 - 6}
+              y={y - cardH / 2 - 6}
+              width={cardW + 12}
+              height={cardH + 12}
+              rx={10}
+              fill="none"
+              stroke={HIGHLIGHT}
+              strokeWidth={3}
+            />
+            {pile}
+          </g>
         );
       })}
       <CardPile

@@ -15,7 +15,7 @@ from typing import Literal
 import jax
 import numpy as np
 from catan_engine.board import Board
-from catan_engine.board.state import VICTORY_POINTS_TO_WIN, GamePhase
+from catan_engine.board.state import NO_INDEX, VICTORY_POINTS_TO_WIN, GamePhase
 from catan_engine.env.aec import CatanAECEnv
 from catan_engine.record import GameRecord, Move
 
@@ -28,6 +28,7 @@ from .models import (
     LogEntryModel,
     PlayerBeliefModel,
     ResourceCounts,
+    TradeOfferModel,
 )
 
 # A seat assignment: "human", a bot kind, or a configured bot
@@ -298,6 +299,17 @@ class GameSession:
         state = self.env._env._state
         terminal = self.terminal()
         acting = self.acting_seat()
+        partner = int(state.trade_partner[0])
+        trade = (
+            TradeOfferModel(
+                proposer=int(state.current_player[0]),
+                partner=partner,
+                give=_RESOURCE_NAMES[int(state.trade_give[0])],
+                receive=_RESOURCE_NAMES[int(state.trade_receive[0])],
+            )
+            if partner != NO_INDEX
+            else None
+        )
         return GameStatusModel(
             phase=GamePhase(int(state.phase[0])).name.lower(),
             current_player=int(state.current_player[0]),
@@ -308,4 +320,5 @@ class GameSession:
             terminal=terminal,
             winner=self.winner(),
             seats=self.seats,
+            trade=trade,
         )

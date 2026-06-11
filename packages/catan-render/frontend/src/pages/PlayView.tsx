@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import BoardView, { type BoardInteraction, type BoardTargetPoint } from "../components/BoardView";
+import BoardView, {
+  type BoardInteraction,
+  type BoardTargetPoint,
+  type TradeTargets,
+} from "../components/BoardView";
 import BoardPopover from "../components/BoardPopover";
 import ChatPanel from "../components/ChatPanel";
 import ChoicePopover from "../components/ChoicePopover";
 import Hand, { DEV_PLAY_TYPE } from "../components/Hand";
 import NewGameDialog from "../components/NewGameDialog";
+import TradePopover from "../components/TradePopover";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
@@ -22,15 +27,9 @@ const VERTEX_KIND: Record<string, "settlement" | "city"> = {
 };
 const EDGE_TYPES = new Set(["setup_road", "build_road"]);
 
-// Turn-flow actions that stay on the bottom bar (display order).
-const BAR_TYPES = [
-  "buy_development_card",
-  "maritime_trade",
-  "propose_trade",
-  "accept_trade",
-  "reject_trade",
-  "end_turn",
-];
+// Turn-flow actions that stay on the bottom bar (display order); trading
+// happens on the table (bank piles and opponents' hand piles take the click).
+const BAR_TYPES = ["buy_development_card", "accept_trade", "reject_trade", "end_turn"];
 
 const PHASE_LABEL: Record<string, string> = {
   setup_settlement: "Setup",
@@ -51,6 +50,8 @@ export default function PlayView() {
   const [choice, setChoice] = useState<GameAction[] | null>(null);
   // Knight targeting: set while the knight chip awaits its robber tile.
   const [knightArming, setKnightArming] = useState(false);
+  // The trade offer being composed, anchored at the partner's hand pile.
+  const [tradeWith, setTradeWith] = useState<{ partner: number; x: number; y: number } | null>(null);
   // Whether the new-game configuration dialog is open (shown on entry, and
   // reopened by the New game button).
   const [configuring, setConfiguring] = useState(true);
@@ -62,6 +63,7 @@ export default function PlayView() {
     setPopup(null);
     setChoice(null);
     setKnightArming(false);
+    setTradeWith(null);
   }, [snapshot]);
 
   // Esc closes the choosers / cancels knight targeting.
@@ -71,6 +73,7 @@ export default function PlayView() {
         setPopup(null);
         setChoice(null);
         setKnightArming(false);
+        setTradeWith(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -178,6 +181,21 @@ export default function PlayView() {
   // Rolling happens on the table: the dice glow and take the click.
   const rollAction = byType("roll_dice")[0];
 
+  // So does trading: bank piles open the maritime exchanges for that
+  // resource, opponents' hand piles open the 1:1 offer composer.
+  const maritime = byType("maritime_trade");
+  const proposals = byType("propose_trade");
+  const tradeTargets: TradeTargets | undefined =
+    maritime.length > 0 || proposals.length > 0
+      ? {
+          bank: new Set(maritime.map((a) => a.receive as ResourceKind)),
+          partners: new Set(proposals.map((a) => a.partner as number)),
+          onBank: (r, at) =>
+            setPopup({ actions: maritime.filter((a) => a.receive === r), x: at.x, y: at.y }),
+          onPartner: (p, at) => setTradeWith({ partner: p, x: at.x, y: at.y }),
+        }
+      : undefined;
+
   const barTitle = (type: string) => {
     const cost = BUILD_COSTS[type];
     return cost ? `${actionMeta(type).label} — costs ${cost.join(", ")}` : actionMeta(type).label;
@@ -198,7 +216,9 @@ export default function PlayView() {
               discard: `${turnLabel} — click resource cards to discard`,
               move_robber: `${turnLabel} — click a tile to move the robber`,
               roll: `${turnLabel} — click the dice to roll`,
-              trade_response: `${turnLabel} — accept or reject the trade`,
+              trade_response: status.trade
+                ? `${turnLabel} — ${playerName(status.trade.proposer)} offers ${status.trade.give} for your ${status.trade.receive}`
+                : `${turnLabel} — accept or reject the trade`,
             } as Record<string, string>
           )[status.phase] ?? turnLabel;
 
@@ -209,6 +229,7 @@ export default function PlayView() {
         <BoardView
           board={board}
           interaction={interaction}
+          trade={tradeTargets}
           dice={{
             sum: status.dice_roll,
             seed: snapshot.log.length,
@@ -220,6 +241,20 @@ export default function PlayView() {
             New game
           </button>
         </TopBar>
+
+        {tradeWith && (
+          <TradePopover
+            partner={tradeWith.partner}
+            actions={proposals.filter((a) => a.partner === tradeWith.partner)}
+            x={tradeWith.x}
+            y={tradeWith.y}
+            onPick={(flat) => {
+              setTradeWith(null);
+              act(flat);
+            }}
+            onClose={() => setTradeWith(null)}
+          />
+        )}
 
         {popup && (
           <BoardPopover

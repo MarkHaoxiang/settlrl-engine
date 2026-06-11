@@ -27,6 +27,14 @@ export interface GameAction {
   partner: number | null;
 }
 
+// The pending 1:1 domestic trade awaiting the partner's answer.
+export interface TradeOffer {
+  proposer: number;
+  partner: number;
+  give: ResourceKind;
+  receive: ResourceKind;
+}
+
 export interface GameStatus {
   phase: string;
   current_player: number;
@@ -38,6 +46,7 @@ export interface GameStatus {
   winner: number | null;
   // What controls each seat: "human" or a bot kind (see fetchBots).
   seats: string[];
+  trade: TradeOffer | null;
 }
 
 // A bot move just played by the server (set on bot-step snapshots).

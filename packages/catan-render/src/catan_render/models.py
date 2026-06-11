@@ -145,6 +145,15 @@ class ActionModel(BaseModel):
     partner: int | None = None
 
 
+class TradeOfferModel(BaseModel):
+    """The pending 1:1 domestic trade awaiting the partner's answer."""
+
+    proposer: int
+    partner: int
+    give: str
+    receive: str
+
+
 class GameStatusModel(BaseModel):
     """Turn-flow snapshot for the live game."""
 
@@ -158,6 +167,8 @@ class GameStatusModel(BaseModel):
     winner: int | None = None
     # What controls each seat: "human" or a bot kind (catan-agents policy name).
     seats: list[str] = []
+    # Set while a proposed trade awaits the partner (phase trade_response).
+    trade: TradeOfferModel | None = None
 
 
 class BotMoveModel(BaseModel):
