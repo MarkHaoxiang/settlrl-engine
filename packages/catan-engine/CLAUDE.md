@@ -162,9 +162,10 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
     `flat_to_action`, `BatchedCatanEnv.flat_mask()`, and `flat_available(board)`
     (the pure-function sweep MCTS uses for in-tree masks).
   - Optional belief tracking (`track_beliefs=True`): a batched `BeliefState`
-    advanced once per step by diffing the pre/post states; auto-reset lanes
-    restart from the empty-board belief, and a frozen lane's INVALID steps are
-    belief no-ops (zero diff).
+    advanced inside the same fused step dispatch by diffing the pre/post
+    states (a tracked step costs ~+32 us, not a second dispatch's ~+150 us);
+    auto-reset lanes restart from the empty-board belief, and a frozen lane's
+    INVALID steps are belief no-ops (zero diff).
 - `aec.py` — single-game PettingZoo wrapper over `BatchedCatanEnv(batch_size=1,
   auto_reset=False)`. Flat `Discrete` action space; legality exposed as
   `observation["action_mask"]`. Needs the optional `rl` extra;

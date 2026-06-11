@@ -257,36 +257,6 @@ _belief_view_b: Callable[[BoardState, BeliefState, int], BeliefView] = jax.jit(
 )
 
 
-def _belief_reset_lanes(
-    terminations: DoneArray, auto_reset: bool, batch_size: int
-) -> Bool[Array, "batch"]:
-    """Lanes whose belief restarts this step: the auto-reset-replaced ones.
-
-    Without auto-reset a done lane freezes (every further action is INVALID, a
-    belief no-op), so nothing restarts.
-    """
-    if auto_reset:
-        return terminations[:, 0]
-    return jnp.zeros((batch_size,), dtype=jnp.bool_)
-
-
-@functools.partial(jax.jit, static_argnames=("batch_size", "n_players"))
-def _belief_step_core(
-    belief: BeliefState,
-    before: BoardState,
-    after: BoardState,
-    action_type: ActionTypeArray,
-    params: ActionParams,
-    reset_lane: Bool[Array, "batch"],
-    batch_size: int,
-    n_players: int,
-) -> BeliefState:
-    """Advance the batched belief across one env step; reset replaced lanes."""
-    updated = _update_belief_v(belief, before, after, action_type, params)
-    fresh = make_belief(batch_size, n_players)
-    return _tree_where_lane(reset_lane, fresh, updated)
-
-
 # ---------------------------------------------------------------------------
 # Lightweight space descriptors (no gymnasium dependency).
 # ---------------------------------------------------------------------------
@@ -415,7 +385,6 @@ class BatchedCatanEnv:
         owed count reaches zero, then the phase advances to MOVE_ROBBER.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
-        before = self._state
         out = _env_step_core(
             self._layout,
             self._state,
@@ -423,6 +392,7 @@ class BatchedCatanEnv:
             params,
             self._avail,
             self._vps,
+            self._belief,
             self._key,
             self.batch_size,
             self.reward_mode,
@@ -434,17 +404,7 @@ class BatchedCatanEnv:
         self._reward, self._terminations = out.reward, out.terminations
         self._result, self._vps = out.result, out.vps
         self._avail, self._agent_sel, self._key = out.avail, out.agent_sel, out.key
-        if self._belief is not None:
-            self._belief = _belief_step_core(
-                self._belief,
-                before,
-                self._state,
-                at,
-                params,
-                _belief_reset_lanes(out.terminations, self.auto_reset, self.batch_size),
-                self.batch_size,
-                self.n_players,
-            )
+        self._belief = out.belief
 
     def last(
         self,
@@ -661,7 +621,6 @@ class BatchedCatanEnv:
             self.auto_reset,
             self.number_placement,
             self.n_players,
-            self.track_beliefs,
         )
         return cast(RewardArray, cum_reward)
 
@@ -794,6 +753,7 @@ class _StepOut(NamedTuple):
     vps: VPArray
     avail: FlatMaskArray
     agent_sel: AgentSelectionArray
+    belief: BeliefState | None
     key: KeyScalar
 
 
@@ -814,6 +774,7 @@ def _env_step_core(
     params: ActionParams,
     avail_flat: FlatMaskArray,
     vps_before: VPArray,
+    belief: BeliefState | None,
     key: KeyScalar,
     batch_size: int,
     reward_mode: str,
@@ -822,8 +783,9 @@ def _env_step_core(
     n_players: int,
 ) -> _StepOut:
     """One whole ``BatchedCatanEnv.step``: gate the chosen action with the
-    cached flat legality, apply it, score reward / termination, auto-reset
-    finished lanes, and refresh the VP / legality / acting-player caches.
+    cached flat legality, apply it, score reward / termination, advance the
+    belief (when tracked), auto-reset finished lanes, and refresh the VP /
+    legality / acting-player caches -- one fused dispatch.
 
     ``key`` is threaded: split for auto-reset, returned unchanged when
     ``auto_reset`` is False.
@@ -833,6 +795,16 @@ def _env_step_core(
 
     vps_after = _total_vp_v(applied)
     done_lane = jnp.any(vps_after >= VICTORY_POINTS_TO_WIN, axis=1)  # (B,)
+
+    if belief is not None:
+        # Diff the pre-reset transition (sound for every lane); auto-reset
+        # lanes then restart from the empty-board belief. Without auto-reset a
+        # done lane freezes (every further action INVALID, a belief no-op).
+        belief = _update_belief_v(belief, state, applied, action_type, params)
+        if auto_reset:
+            belief = _tree_where_lane(
+                done_lane, make_belief(batch_size, n_players), belief
+            )
 
     if reward_mode == "vp_delta":
         reward = (vps_after - vps_before).astype(jnp.float32)
@@ -863,6 +835,7 @@ def _env_step_core(
         vps=new_vps,
         avail=new_avail,
         agent_sel=agent_sel,
+        belief=belief,
         key=key,
     )
 
@@ -898,7 +871,6 @@ beliefs. Runs inside the rollout's ``lax.scan``, so it must be pure."""
         "auto_reset",
         "number_placement",
         "n_players",
-        "track_beliefs",
         "actor",
     ),
 )
@@ -918,7 +890,6 @@ def _rollout_core(
     auto_reset: bool,
     number_placement: Literal["random", "spiral"],
     n_players: int,
-    track_beliefs: bool,
 ) -> tuple[
     BoardLayout,
     BoardState,
@@ -933,10 +904,9 @@ def _rollout_core(
 
     Each iteration replays the per-step driver exactly -- split ``sample_key``,
     sample a legal action per lane (``_random_actions_b``), run
-    ``_env_step_core`` (and the belief update when ``track_beliefs``) -- so a
-    rollout matches the equivalent ``random_actions`` + ``step`` loop
-    trajectory for the same key. Returns the final carry plus the ``(B,
-    n_players)`` reward summed over the window.
+    ``_env_step_core`` -- so a rollout matches the equivalent
+    ``random_actions`` + ``step`` loop trajectory for the same key. Returns
+    the final carry plus the ``(B, n_players)`` reward summed over the window.
     """
     Carry = tuple[
         BoardLayout,
@@ -964,6 +934,7 @@ def _rollout_core(
             params,
             avail,
             vps,
+            belief,
             env_key,
             batch_size,
             reward_mode,
@@ -971,18 +942,6 @@ def _rollout_core(
             number_placement,
             n_players,
         )
-        if track_beliefs:
-            assert belief is not None
-            belief = _belief_step_core(
-                belief,
-                state,
-                out.state,
-                atype,
-                params,
-                _belief_reset_lanes(out.terminations, auto_reset, batch_size),
-                batch_size,
-                n_players,
-            )
         new_extras: _StepExtras = (
             out.reward,
             out.terminations,
@@ -994,7 +953,7 @@ def _rollout_core(
             out.state,
             out.avail,
             out.vps,
-            belief,
+            out.belief,
             new_extras,
             out.key,
             sample_key,
