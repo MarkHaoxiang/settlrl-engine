@@ -9,6 +9,7 @@ import Robber from "./Robber";
 import Port from "./Port";
 import BankStacks from "./BankStacks";
 import PlayerAreas from "./PlayerAreas";
+import TableDice from "./TableDice";
 
 // A popover anchor in this component's container coordinates (top-centre of
 // the clicked element, valid for the pan/zoom at click time).
@@ -47,16 +48,25 @@ const MAX_ZOOM = 3;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+// The table dice: the last roll's sum, a per-move seed for their resting
+// angles, and the roll handler while rolling is the viewer's move.
+export interface DiceState {
+  sum: number;
+  seed: number;
+  onRoll?: () => void;
+}
+
 interface Props {
   board: Board;
   interaction?: BoardInteraction;
+  dice?: DiceState;
 }
 
 // Renders a Catan board (tiles, ports, roads, buildings, robber, the bank's
 // card stacks on the table beside it) as a zoomable, pannable SVG. It fills
 // its parent container, so a parent can overlay mode-specific controls on top
 // (the replay scrubber, the play action bar, a back button, …).
-export default function BoardView({ board, interaction }: Props) {
+export default function BoardView({ board, interaction, dice }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -240,6 +250,18 @@ export default function BoardView({ board, interaction }: Props) {
           {/* The bank's card grid on the table, left of everyone */}
           {board.bank && (
             <BankStacks bank={board.bank} cx={bankBand / 2} cy={height / 2} cardW={CARD_W} cardH={CARD_H} />
+          )}
+
+          {/* The dice rest in the table's bottom-right corner */}
+          {dice && (
+            <TableDice
+              cx={oceanX + oceanW + EDGE_BAND / 2}
+              cy={oceanY + oceanH + EDGE_BAND / 2}
+              size={HEX_SIZE * 0.4}
+              sum={dice.sum}
+              seed={dice.seed}
+              onRoll={dice.onRoll}
+            />
           )}
 
           {/* Each seat's play area on its table edge */}

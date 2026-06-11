@@ -12,7 +12,8 @@ A menu lets you choose between two modes, each at its own URL:
   preview the piece) — click it and confirm in a popup there (which shows the build cost, or
   who to rob). The hand is live too: click a glowing development card to play it (resource
   picks come from a popover) and resource cards to discard after a 7. A small bottom bar keeps
-  the turn-flow moves (roll, buy a dev card, bank trade, end turn); the top bar holds New
+  the turn-flow moves (buy a dev card, bank trade, end turn — the dice sit on the table by
+  the board's corner and take the click to roll); the top bar holds New
   game and a light/dark theme toggle. The scene is a top-down table:
   the bank's card piles (true to card scale) sit left of the board, and each seat's play
   area lines its table edge — face-down hand and dev piles plus their unbuilt roads,

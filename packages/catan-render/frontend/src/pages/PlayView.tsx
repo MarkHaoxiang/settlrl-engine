@@ -66,7 +66,7 @@ const DEV_PLAY_TYPE: Partial<Record<DevCardKind, string>> = {
 };
 
 // Turn-flow actions that stay on the bottom bar (display order).
-const BAR_TYPES = ["roll_dice", "buy_development_card", "maritime_trade", "end_turn"];
+const BAR_TYPES = ["buy_development_card", "maritime_trade", "end_turn"];
 
 const PHASE_LABEL: Record<string, string> = {
   setup_settlement: "Setup",
@@ -425,6 +425,9 @@ export default function PlayView() {
     return cost;
   };
 
+  // Rolling happens on the table: the dice glow and take the click.
+  const rollAction = byType("roll_dice")[0];
+
   const barTitle = (type: string) => {
     const cost = BUILD_COSTS[type];
     return cost ? `${actionMeta(type).label} — costs ${cost.join(", ")}` : actionMeta(type).label;
@@ -444,6 +447,7 @@ export default function PlayView() {
               setup_road: `${turnLabel} — click an edge to place a road`,
               discard: `${turnLabel} — click resource cards to discard`,
               move_robber: `${turnLabel} — click a tile to move the robber`,
+              roll: `${turnLabel} — click the dice to roll`,
             } as Record<string, string>
           )[status.phase] ?? turnLabel;
 
@@ -451,7 +455,15 @@ export default function PlayView() {
     <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
       {/* Board area: the chrome inside is anchored to it, not the viewport */}
       <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
-        <BoardView board={board} interaction={interaction} />
+        <BoardView
+          board={board}
+          interaction={interaction}
+          dice={{
+            sum: status.dice_roll,
+            seed: snapshot.log.length,
+            onRoll: rollAction && !busy ? () => act(rollAction.flat) : undefined,
+          }}
+        />
         <TopBar mode="Play">
           <button style={smallButton} onClick={() => setConfiguring(true)}>
             New game
@@ -549,7 +561,6 @@ export default function PlayView() {
               }}
             >
               <span style={{ fontWeight: 700, opacity: 0.85 }}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
-              {status.dice_roll > 0 && <span style={{ opacity: 0.85 }}>🎲 {status.dice_roll}</span>}
               {snapshot.bot_move && (
                 <span
                   className="fade-in"

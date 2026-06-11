@@ -9,6 +9,7 @@ import { LINK, panelStyle } from "../lib/ui";
 // What each control does, keyed by action type and grouped by where it lives:
 // directly on the board, on a hand chip, or on the bottom bar (display order).
 const BOARD_HELP: [string, string][] = [
+  ["roll_dice", "The dice rest by the board's corner — click them when they glow to roll."],
   ["build_settlement", "A dot on a corner: click it to build a settlement there."],
   ["build_city", "A larger dot on your settlement: click it to upgrade to a city."],
   ["build_road", "A dash on an edge: click it to build a road there."],
@@ -22,7 +23,6 @@ const HAND_HELP: [string, string][] = [
   ["discard", "A 7 costs you half your hand: click resource cards to discard them."],
 ];
 const BAR_HELP: [string, string][] = [
-  ["roll_dice", "Roll the dice to start your turn."],
   ["buy_development_card", "Buy a development card."],
   ["maritime_trade", "Trade with the bank (4:1, or better via your ports)."],
   ["end_turn", "End your turn."],
