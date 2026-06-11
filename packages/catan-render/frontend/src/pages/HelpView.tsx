@@ -92,9 +92,10 @@ export default function HelpView() {
             Scroll or pinch to zoom, and drag to pan. Every build you can afford right now is
             marked on the board in your colour — a small dot on a corner, a short dash on an
             edge. Hover one to preview the piece, then click and confirm in the popup, which
-            lists the build cost. Esc or a click elsewhere cancels. The card stacks on the
-            table beside the board are the bank: each resource pile and the development deck,
-            with the count left.
+            lists the build cost. Esc or a click elsewhere cancels. The scene is the whole
+            table, seen from above: the bank's card piles sit to the left (counts on the
+            piles), and each seat's play area lines its table edge — their face-down hand
+            and dev cards plus every road, settlement, and city still in their box.
           </span>
           <ActionTable rows={BOARD_HELP} />
         </Section>

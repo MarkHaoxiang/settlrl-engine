@@ -8,6 +8,7 @@ import Building, { housePath } from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
 import BankStacks from "./BankStacks";
+import PlayerAreas from "./PlayerAreas";
 
 // A popover anchor in this component's container coordinates (top-centre of
 // the clicked element, valid for the pan/zoom at click time).
@@ -34,7 +35,14 @@ export interface BoardInteraction {
 const HEX_SIZE = 72;
 const PADDING = 90;
 
-const MIN_ZOOM = 0.4;
+// Physical table scale: a real hex is 80mm flat-to-flat and a card 57×89mm,
+// so cards render true to size against the tiles.
+const CARD_W = (Math.sqrt(3) * HEX_SIZE * 57) / 80;
+const CARD_H = (Math.sqrt(3) * HEX_SIZE * 89) / 80;
+// The table band around the ocean holding each seat's play area.
+const EDGE_BAND = CARD_H + 44;
+
+const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 3;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -159,18 +167,35 @@ export default function BoardView({ board, interaction }: Props) {
 
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
 
+
   const minX = Math.min(...pixels.map((p) => p.x));
   const maxX = Math.max(...pixels.map((p) => p.x));
   const minY = Math.min(...pixels.map((p) => p.y));
   const maxY = Math.max(...pixels.map((p) => p.y));
 
-  // Table space left of the ocean for the bank's card stacks: they live in
-  // board coordinates so they pan and zoom with the board.
-  const gutter = board.bank ? HEX_SIZE * 1.5 : 0;
-  const width = maxX - minX + HEX_SIZE * 2 + PADDING * 2 + gutter;
-  const height = maxY - minY + HEX_SIZE * 2 + PADDING * 2;
-  const offsetX = -minX + HEX_SIZE + PADDING + gutter;
-  const offsetY = -minY + HEX_SIZE + PADDING;
+  // The scene is a tabletop: the ocean board in the middle, a band around it
+  // holding each seat's play area, and a wider band left of that for the
+  // bank's card grid. Everything lives in board coordinates, so it all pans
+  // and zooms together.
+  const oceanW = maxX - minX + HEX_SIZE * 2 + PADDING * 2;
+  const oceanH = maxY - minY + HEX_SIZE * 2 + PADDING * 2;
+  const bankBand = board.bank ? CARD_W * 2 + 60 : 0;
+  const oceanX = bankBand + EDGE_BAND;
+  const oceanY = EDGE_BAND;
+  const width = oceanW + oceanX + EDGE_BAND;
+  const height = oceanH + EDGE_BAND * 2;
+  const offsetX = -minX + HEX_SIZE + PADDING + oceanX;
+  const offsetY = -minY + HEX_SIZE + PADDING + oceanY;
+
+  // Open with the whole table in view — the edge bands make the scene bigger
+  // than the viewport at 1:1; wheel/pinch still zoom freely afterwards.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const fit = Math.min(el.clientWidth / width, el.clientHeight / height, 1);
+    setZoom(clamp(fit * 0.98, MIN_ZOOM, 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width, height]);
 
   return (
     <div
@@ -209,13 +234,26 @@ export default function BoardView({ board, interaction }: Props) {
             </radialGradient>
           </defs>
 
-          {/* Ocean background (the gutter stays open table) */}
-          <rect x={gutter} width={width - gutter} height={height} fill="url(#oceanGrad)" rx={24} />
+          {/* Ocean board in the middle of the table */}
+          <rect x={oceanX} y={oceanY} width={oceanW} height={oceanH} fill="url(#oceanGrad)" rx={24} />
 
-          {/* The bank's card stacks on the table beside the board */}
+          {/* The bank's card grid on the table, left of everyone */}
           {board.bank && (
-            <BankStacks bank={board.bank} cx={gutter * 0.42} cy={height / 2} size={HEX_SIZE} />
+            <BankStacks bank={board.bank} cx={bankBand / 2} cy={height / 2} cardW={CARD_W} cardH={CARD_H} />
           )}
+
+          {/* Each seat's play area on its table edge */}
+          <PlayerAreas
+            board={board}
+            oceanX={oceanX}
+            oceanY={oceanY}
+            oceanW={oceanW}
+            oceanH={oceanH}
+            band={EDGE_BAND}
+            cardW={CARD_W}
+            cardH={CARD_H}
+            hex={HEX_SIZE}
+          />
 
           {/* Ports sit in the ocean; drawn first so docks tuck under the coast */}
           {board.ports.map((port, i) => {
