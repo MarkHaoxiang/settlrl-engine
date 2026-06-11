@@ -7,6 +7,9 @@ on:
 
 env:
   JAX_PLATFORMS: cpu
+  # The cuda dependency group is default-on for dev machines; runners have no
+  # GPU and shouldn't download the NVIDIA wheels.
+  UV_NO_GROUP: cuda
 
 jobs:
   checks:

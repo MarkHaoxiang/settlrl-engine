@@ -12,9 +12,9 @@ Three measures, each over every agent in ``POLICIES`` at its shipped
   ``rollout(actor=...)`` scan of self-play, every seat picking each step.
 
 All run 2-player games (search cost is near-identical at 4) and are swept
-over devices (CPU always; CUDA when a GPU-enabled jaxlib sees a device --
-install the engine's ``cuda`` extra -- otherwise the CUDA variants skip),
-pinned via ``jax.default_device``. JIT is warmed up before each timed region.
+over devices (CPU always; CUDA when a GPU-enabled jaxlib sees a device,
+otherwise the CUDA variants skip), pinned via ``jax.default_device``. JIT is
+warmed up before each timed region.
 """
 
 from __future__ import annotations

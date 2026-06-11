@@ -12,12 +12,10 @@ From the repo root:
 uv sync
 ```
 
-The engine runs on CPU by default. To run on an NVIDIA GPU (Linux), install the
-`cuda` extra — JAX then picks up the GPU automatically:
-
-```bash
-uv sync --package catan-engine --extra cuda
-```
+The engine is device-agnostic; in the workspace a Linux `uv sync` installs the
+CUDA jaxlib by default, so JAX picks up an NVIDIA GPU automatically (and falls
+back to CPU without one). Standalone installs get the same via the `cuda`
+extra: `pip install 'catan-engine[cuda]'`.
 
 ## What it provides
 

@@ -58,16 +58,12 @@ See `pytest-benchmark --help` for the full set of `--benchmark-*` flags.
 
 ## Running on GPU
 
-The CUDA variants need the engine's `cuda` extra (Linux + NVIDIA driver only;
-the wheels bundle the CUDA runtime, so no system CUDA toolkit is required):
-
-```bash
-uv sync --package catan-engine --extra cuda
-```
-
-After that, `./run_benchmarks.sh` picks up the GPU automatically and runs both
-the `cpu` and `cuda` variants. Without the extra (or without a GPU), the `cuda`
-variants report as skipped.
+On Linux the workspace installs the CUDA jaxlib by default (the `cuda`
+dependency group; the wheels bundle the CUDA runtime, so only the NVIDIA
+driver is needed), and `./run_benchmarks.sh` picks up the GPU automatically,
+running both the `cpu` and `cuda` variants. Without a usable GPU the `cuda`
+variants report as skipped. Standalone installs of `catan-engine` outside the
+workspace get the same wheels via the `cuda` extra.
 
 ## Profiling
 

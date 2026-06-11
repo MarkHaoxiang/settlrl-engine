@@ -15,8 +15,8 @@ parameters:
   `evaluate` / the CLI match tools.
 
 All run 2-player games and are swept over devices: `cpu` always, plus `cuda`
-when an NVIDIA GPU is usable (install the engine's `cuda` extra) — otherwise
-the CUDA variants skip. Each variant pins its device explicitly, and JIT is
+when an NVIDIA GPU is usable (the workspace installs the CUDA jaxlib by
+default on Linux) — otherwise the CUDA variants skip. Each variant pins its device explicitly, and JIT is
 warmed up before every timed region.
 
 These tests carry the `benchmark` marker and are **deselected from the default
