@@ -38,3 +38,20 @@ def test_invalid_empty_deck(buy_board: Board) -> None:
     st = st._replace(dev_deck=st.dev_deck.at[0].set(0))
     _, result = buy_development_card_step((layout, st), None)
     assert int(result[0]) == ActionResult.INVALID.value
+
+
+def test_forced_card_type(buy_board: Board) -> None:
+    """params=t+1 forces card type t: deck decrements there, hand gains it."""
+    before_deck = np.asarray(buy_board[1].dev_deck[0])
+    state, result = buy_development_card_step(buy_board, 2)  # force type 1
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.dev_hand[0, 0, 1]) == 1
+    assert int(state.dev_deck[0, 1]) == before_deck[1] - 1
+
+
+def test_forced_out_of_stock_is_invalid(buy_board: Board) -> None:
+    layout, st = buy_board
+    st = st._replace(dev_deck=st.dev_deck.at[0, 1].set(0))
+    state, result = buy_development_card_step((layout, st), 2)
+    assert int(result[0]) == ActionResult.INVALID.value
+    assert np.array_equal(np.asarray(state.dev_hand), np.asarray(st.dev_hand))

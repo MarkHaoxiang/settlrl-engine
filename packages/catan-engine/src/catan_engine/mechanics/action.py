@@ -117,11 +117,11 @@ class ActionParams(NamedTuple):
     - vertex/edge/tile/resource/give (single index)  -> ``idx``
       (Discard's ``idx`` is the resource to give up one card of)
     - victim / receive / second resource (Year of Plenty) -> ``target``
-    - RollDice reads ``idx`` as an optional forced outcome (2..12; any other
-      value, including the flat table's 0, samples from the state key) — the
-      chance-node seam for stochastic search.
-    - parameterless actions (BuyDevelopmentCard, PlayRoadBuilding, EndTurn)
-      read nothing.
+    - RollDice reads ``idx`` as an optional forced outcome (2..12), and
+      BuyDevelopmentCard as an optional forced card type (1..5, meaning type
+      ``idx - 1``); any other value, including the flat table's 0, samples
+      from the state key — the chance-node seams for stochastic search.
+    - parameterless actions (PlayRoadBuilding, EndTurn) read nothing.
 
     ``target`` follows the ``victim == -1`` ("steal from no one") convention for
     the robber actions.
@@ -144,7 +144,7 @@ _APPLY_BRANCHES = (
     lambda lay, st, pp, av: _build_road_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _build_settlement_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _build_city_apply(lay, st, pp.idx, av),
-    lambda lay, st, pp, av: _buy_dev_apply(lay, st, None, av),
+    lambda lay, st, pp, av: _buy_dev_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _knight_apply(lay, st, (pp.idx, pp.target), av),
     lambda lay, st, pp, av: _road_building_apply(lay, st, None, av),
     lambda lay, st, pp, av: _yop_apply(lay, st, (pp.idx, pp.target), av),

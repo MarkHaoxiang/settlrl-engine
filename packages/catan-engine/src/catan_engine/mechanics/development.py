@@ -96,10 +96,17 @@ def _buy_dev_avail(layout: BoardLayout, state: BoardState, params: None) -> Bool
 
 
 def _buy_dev_apply(
-    layout: BoardLayout, state: BoardState, params: None, available: BoolScalar
+    layout: BoardLayout, state: BoardState, params: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
+    """``params`` forces the drawn card type (1..N_DEV_CARD_TYPES, meaning
+    type ``params - 1``); any other value (the flat table's 0) samples from
+    the state key. Forcing an out-of-stock type is INVALID. The chance-node
+    seam for stochastic search: the key advances identically either way."""
     player = state.current_player.astype(jnp.int32)
-    key, card = draw_dev_card(state.key, state.dev_deck)
+    key, sampled = draw_dev_card(state.key, state.dev_deck)
+    forced = (params >= 1) & (params <= N_DEV_CARD_TYPES)
+    card = jnp.where(forced, jnp.clip(params - 1, 0, N_DEV_CARD_TYPES - 1), sampled)
+    available = available & (~forced | (state.dev_deck[card].astype(jnp.int32) > 0))
     new_deck = state.dev_deck.astype(jnp.int32).at[card].add(-1)
     new_hand = state.dev_hand.astype(jnp.int32).at[player, card].add(1)
     new_bought = state.dev_bought.astype(jnp.int32).at[card].add(1)
@@ -123,15 +130,19 @@ def buy_development_card_available(board: Board, params: None = None) -> Mask:
 
 
 def buy_development_card_step(
-    board: Board, params: None = None
+    board: Board, params: int | None = None
 ) -> tuple[BoardState, ResultCode]:
     """Buy a development card per game. Draws from ``state.dev_deck``.
 
-    Resolves any win (a drawn Victory Point card can reach the threshold) via
+    ``params`` forces the drawn type in every lane (1..N_DEV_CARD_TYPES,
+    meaning type ``params - 1``); None samples. Resolves any win (a drawn
+    Victory Point card can reach the threshold) via
     :func:`awards.resolve_step`.
     """
     available = _buy_dev_avail_b(board[0], board[1], None)
-    state, result = _buy_dev_apply_b(board[0], board[1], None, available)
+    state, result = _buy_dev_apply_b(
+        board[0], board[1], jnp.int32(params or 0), available
+    )
     return cast(
         "tuple[BoardState, ResultCode]",
         awards.resolve_step_b(state, result, jnp.zeros_like(result, jnp.bool_)),
