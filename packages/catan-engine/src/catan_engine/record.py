@@ -38,7 +38,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from catan_engine.board import Board
-from catan_engine.board.state import VICTORY_POINTS_TO_WIN
+from catan_engine.board.state import VICTORY_POINTS_TO_WIN, KeyScalar
 from catan_engine.board.tile import Tile
 from catan_engine.env import N_FLAT, ActionType, BatchedCatanEnv, flat_to_action
 
@@ -199,10 +199,10 @@ def _winner(env: BatchedCatanEnv) -> int | None:
 
 # An action chooser for record_game: given a PRNG key and the live single-game
 # env (read flat_mask / observe / board), the flat action to play.
-Act = Callable[[jax.Array, BatchedCatanEnv], int]
+Act = Callable[[KeyScalar, BatchedCatanEnv], int]
 
 
-def _uniform_random(key: jax.Array, env: BatchedCatanEnv) -> int:
+def _uniform_random(key: KeyScalar, env: BatchedCatanEnv) -> int:
     legal = np.flatnonzero(np.asarray(env.flat_mask()[0]))
     return int(legal[jax.random.randint(key, (), 0, legal.size)])
 

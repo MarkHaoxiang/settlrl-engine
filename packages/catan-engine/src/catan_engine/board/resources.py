@@ -1,6 +1,5 @@
-import jax
 import jax.numpy as jnp
-from jaxtyping import Array, UInt8
+from jaxtyping import Array, Int, UInt8
 
 N_PLAYERS = 4  # maximum seats; per-player arrays are sized to the seated count
 N_RESOURCES = 5  # Tile indices 0-4: SHEEP, WHEAT, WOOD, BRICK, ORE (excludes DESERT)
@@ -16,25 +15,21 @@ PlayerResourcesArray = UInt8[Array, f"batch players resources={N_RESOURCES}"]
 PlayerResourcesVec = UInt8[Array, f"players resources={N_RESOURCES}"]
 
 
-def bank_stock(player_resources: jax.Array, resource: jax.Array) -> jax.Array:
+def bank_stock(
+    player_resources: PlayerResourcesVec, resource: Int[Array, ""]
+) -> Int[Array, ""]:
     """Remaining bank stock of a single ``resource`` (single, unbatched game).
 
-    ``player_resources`` is the ``(players, resources)`` holdings row; the bank
-    holds ``BANK_INITIAL`` minus what the players collectively own.
+    The bank holds ``BANK_INITIAL`` minus what the players collectively own.
     """
     held = player_resources[:, resource].astype(jnp.int32).sum()
     return BANK_INITIAL - held
 
 
-def compute_bank_resources(player_resources: jax.Array) -> jax.Array:
-    """Return remaining bank stock for each resource.
-
-    Args:
-        player_resources: uint8 array of shape (batch, players, resources).
-
-    Returns:
-        uint8 array of shape (batch, resources).
-    """
+def compute_bank_resources(
+    player_resources: PlayerResourcesArray,
+) -> UInt8[Array, f"batch resources={N_RESOURCES}"]:
+    """Remaining bank stock for each resource."""
     # Sum in int32 (uint8 wraps past 255) and saturating-cast the difference,
     # matching the convention in state.to_u8 (not imported: resources is imported
     # BY state, so importing back would create a cycle).

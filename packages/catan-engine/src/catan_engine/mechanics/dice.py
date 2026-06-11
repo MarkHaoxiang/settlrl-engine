@@ -94,9 +94,16 @@ def _roll_avail(layout: BoardLayout, state: BoardState, params: None) -> BoolSca
 
 
 def _roll_apply(
-    layout: BoardLayout, state: BoardState, params: None, available: BoolScalar
+    layout: BoardLayout, state: BoardState, params: IntScalar, available: BoolScalar
 ) -> tuple[BoardState, IntScalar]:
-    key, roll = roll_dice(state.key)
+    """``params`` is the forced two-dice outcome (2..12), or any other value
+    (the flat table's 0) to sample from the state key. Forcing is the chance-
+    node seam for stochastic search: the key advances identically either way,
+    so downstream randomness (steals, draws) is unaffected by how the roll was
+    chosen."""
+    key, sampled = roll_dice(state.key)
+    forced = (params >= 2) & (params <= 12)
+    roll = jnp.where(forced, params.astype(jnp.int32), sampled)
     is_seven = roll == 7
 
     hand = state.player_resources.astype(jnp.int32).sum(axis=1)  # (P,)
@@ -129,10 +136,13 @@ def roll_available(board: Board, params: None = None) -> Mask:
     return cast(Mask, _roll_avail_b(board[0], board[1], None))
 
 
-def roll_step(board: Board, params: None = None) -> tuple[BoardState, ResultCode]:
-    """Apply RollDice per game; return (new state, ActionResult codes)."""
+def roll_step(board: Board, params: int | None = None) -> tuple[BoardState, ResultCode]:
+    """Apply RollDice per game; return (new state, ActionResult codes).
+
+    ``params`` forces the outcome (2..12) in every lane; None samples.
+    """
     available = _roll_avail_b(board[0], board[1], None)
     return cast(
         "tuple[BoardState, ResultCode]",
-        _roll_apply_b(board[0], board[1], None, available),
+        _roll_apply_b(board[0], board[1], jnp.int32(params or 0), available),
     )

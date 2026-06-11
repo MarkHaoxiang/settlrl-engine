@@ -73,7 +73,7 @@ def robber_victim_mask(
 
 
 def valid_robber_victim(
-    state: BoardState, tile: jax.Array, player: jax.Array, victim: IntScalar
+    state: BoardState, tile: IntScalar, player: IntScalar, victim: IntScalar
 ) -> BoolScalar:
     """Victim choice is legal for a robber move onto ``tile`` by ``player``.
 
@@ -90,7 +90,7 @@ def valid_robber_victim(
     )
 
 
-def apply_steal(state: BoardState, player: jax.Array, victim: IntScalar) -> BoardState:
+def apply_steal(state: BoardState, player: IntScalar, victim: IntScalar) -> BoardState:
     """Steal a random card from ``victim`` when ``victim >= 0``; else leave state."""
     vc = jnp.clip(victim, 0, state.n_players - 1)
     stolen = steal(state, player, vc)

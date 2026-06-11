@@ -24,7 +24,9 @@ contracts, gotchas); code and types are the documentation for the rest.
 - jaxtyping aliases live beside the constants that pin their dimensions —
   batched `*Array` forms and single-game `*Vec` / `*Scalar` counterparts (the
   batch axis is stripped under `vmap`). Check for an existing alias before
-  defining one.
+  defining one. Modules below `state.py` (`layout`, `resources`) inline the
+  dimension-free forms (`Key[Array, ""]`, `Int[Array, ""]`) instead of
+  importing the `*Scalar` aliases, which would cycle.
 - Players are 0-indexed except in `vertex_owner` / `edge_road` (player + 1,
   0 = empty).
 - Per-player arrays are sized to the seated count (`n_players` 2..4): a
@@ -138,9 +140,14 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
     `flat_available_b` uses in tests).
   - The whole step is **one fused jit dispatch** (`_env_step_core`); small
     batches are dispatch-bound, so collapsing ~5 kernels into 1 is the
-    speedup. `rollout(key, n_steps)` replays the `random_actions` + `step`
-    driver inside one `lax.scan`, bit-for-bit identical for the same key
-    (~2.2x at B=1; `benchmark/test_env_benchmark.py`).
+    speedup. `rollout(key, n_steps, actor=None)` replays the
+    `random_actions` + `step` driver inside one `lax.scan`, bit-for-bit
+    identical for the same key (~2.2x at B=1;
+    `benchmark/test_env_benchmark.py`); an `Actor` callback swaps in any
+    traceable per-step action source (catan-agents' `evaluate` seats its
+    policies through this seam, with `observe_for` / `belief_view` as the
+    pure in-scan view builders). The scan caches per `(n_steps, actor
+    identity)` — a fresh actor closure retraces.
   - Auto-reset is a device-side `lax.cond` on `any(done)` — no per-step
     device→host sync, and board generation is only paid when a lane finished.
     `auto_reset=False` freezes finished lanes instead (used by `aec.py`).

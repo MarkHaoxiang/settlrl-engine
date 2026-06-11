@@ -9,6 +9,7 @@ from typing import Literal
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Shaped
 
 from catan_engine.board.layout import BoardLayout, desert_tile, make_layout
 from catan_engine.board.state import (
@@ -46,7 +47,7 @@ def make_board(
 def replicate(board: Board, batch_size: int) -> Board:
     """Tile a single-game (batch=1) board into shape ``(batch_size, ...)``."""
 
-    def tile(x: jax.Array) -> jax.Array:
+    def tile(x: Shaped[Array, "1 *s"]) -> Shaped[Array, "batch *s"]:
         return jnp.broadcast_to(x, (batch_size, *x.shape[1:]))
 
     return (

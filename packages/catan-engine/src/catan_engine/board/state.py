@@ -3,7 +3,7 @@ from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Int, Key, UInt8
+from jaxtyping import Array, Bool, Int, Key, Num, UInt8
 
 from catan_engine.board.dev_cards import (
     DEV_CARD_COUNTS,
@@ -147,13 +147,13 @@ class BoardState(NamedTuple):
         return self.victory_points.shape[-1]
 
 
-def to_u8(x: jax.Array) -> jax.Array:
+def to_u8(x: Num[Array, "*s"]) -> UInt8[Array, "*s"]:
     """Saturating cast to uint8 (clip to ``[0, 255]``)."""
     return jnp.clip(x, 0, 255).astype(jnp.uint8)
 
 
-def tree_select(mask: jax.Array, a: BoardState, b: BoardState) -> BoardState:
-    """Per-leaf ``where(mask, a, b)`` over two single-game states (mask scalar).
+def tree_select(mask: BoolScalar, a: BoardState, b: BoardState) -> BoardState:
+    """Per-leaf ``where(mask, a, b)`` over two single-game states.
 
     The branchless-application primitive for the action layer: an action always
     computes its candidate next state, then commits it only where legal.
@@ -164,7 +164,7 @@ def tree_select(mask: jax.Array, a: BoardState, b: BoardState) -> BoardState:
 
 
 def make_board_state(
-    batch_size: int = 1, key: jax.Array | None = None, n_players: int = N_PLAYERS
+    batch_size: int = 1, key: KeyScalar | None = None, n_players: int = N_PLAYERS
 ) -> BoardState:
     if not 2 <= n_players <= N_PLAYERS:
         raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")

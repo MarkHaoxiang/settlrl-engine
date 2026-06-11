@@ -48,6 +48,11 @@ ignore_missing_imports = true
 extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-# jaxtyping shape strings in annotations ("*batch ...") trip the forward-ref rules.
+# jaxtyping shape strings in annotations ("*batch ...") trip the forward-ref
+# rules (and UP037 would strip the quotes they need).
+"packages/catan-engine/src/catan_engine/board/__init__.py" = ["F722", "F821", "UP037"]
+"packages/catan-engine/src/catan_engine/board/layout.py" = ["F722", "F821"]
+"packages/catan-engine/src/catan_engine/board/resources.py" = ["F722", "F821"]
+"packages/catan-engine/src/catan_engine/board/state.py" = ["F722", "F821"]
 "packages/catan-engine/src/catan_engine/env/batched.py" = ["F722", "F821"]
 "packages/catan-engine/src/catan_engine/mechanics/flat.py" = ["F722", "F821"]

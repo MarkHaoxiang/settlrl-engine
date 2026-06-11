@@ -60,6 +60,7 @@ __all__ = [
 # from board.state / board.resources / board.dev_cards. The functions below are
 # single-game (the env vmaps them), so they annotate with the batch-free forms.
 ResBoundsArray = UInt8[Array, f"batch observers players resources={N_RESOURCES}"]
+ResBoundsVec = Int[Array, f"players resources={N_RESOURCES}"]  # one observer, int32
 PlayerCountVec = Int[Array, "players"]
 ResTotalVec = Int[Array, f"resources={N_RESOURCES}"]
 
@@ -165,14 +166,14 @@ def make_belief(batch_size: int = 1, n_players: int = N_PLAYERS) -> BeliefState:
 
 
 def _tighten(
-    lo: jax.Array, hi: jax.Array, hand: jax.Array, total: jax.Array
-) -> tuple[jax.Array, jax.Array]:
-    """One constraint-propagation pass over a ``(players, resources)`` bound pair.
+    lo: ResBoundsVec, hi: ResBoundsVec, hand: PlayerCountVec, total: ResTotalVec
+) -> tuple[ResBoundsVec, ResBoundsVec]:
+    """One constraint-propagation pass over a bound pair.
 
     Each rule is individually sound, so applying them once per step converges
     toward the fixpoint over time: a hand can't exceed its public size, a type
     can't exceed the public total minus what others provably hold, and the dual
-    floors. All int32.
+    floors.
     """
     hi = jnp.minimum(hi, hand[:, None])
     hi = jnp.minimum(hi, total[None, :] - (lo.sum(axis=0)[None, :] - lo))
@@ -224,8 +225,8 @@ def update_belief(
     mono = (action_type == ActionType.PLAY_MONOPOLY) & (played[DevCard.MONOPOLY] > 0)
 
     def observer(
-        o: jax.Array, lo8: jax.Array, hi8: jax.Array
-    ) -> tuple[jax.Array, jax.Array]:
+        o: IntScalar, lo8: PlayerResourcesVec, hi8: PlayerResourcesVec
+    ) -> tuple[PlayerResourcesVec, PlayerResourcesVec]:
         lo, hi = lo8.astype(jnp.int32), hi8.astype(jnp.int32)
         sees = ~stole | (o == thief) | (o == victim)
         # Seen flows: the typed delta is public, so both bounds track it exactly.

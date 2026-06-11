@@ -11,6 +11,7 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Num
 
 from catan_engine.board import Board
 from catan_engine.board.layout import EDGE_V, N_EDGES, N_VERTICES, BoardLayout
@@ -50,7 +51,9 @@ _SRC = EDGE_V[:, 0]
 _DST = EDGE_V[:, 1]
 
 
-def _scatter_to_vertices(per_edge: jax.Array) -> jax.Array:
+def _scatter_to_vertices(
+    per_edge: Num[Array, f"edges={N_EDGES}"],
+) -> Num[Array, f"vertices={N_VERTICES}"]:
     """Sum a per-edge value onto both of each edge's endpoints."""
     acc = jnp.zeros((N_VERTICES,), per_edge.dtype)
     return acc.at[_SRC].add(per_edge).at[_DST].add(per_edge)
@@ -83,7 +86,7 @@ def setup_road_placeable(
     target = player + 1
     inc = _scatter_to_vertices((edge_road == target).astype(jnp.int32))
 
-    def end_ok(v: jax.Array) -> jax.Array:
+    def end_ok(v: IntScalar) -> BoolScalar:
         return (vertex_owner[v] == target) & (inc[v] == 0)
 
     return end_ok(EDGE_V[edge, 0]) | end_ok(EDGE_V[edge, 1])
@@ -105,7 +108,7 @@ def road_placeable(
     # ``empty``), so it is never one of mine and never self-counts.
     inc = _scatter_to_vertices((edge_road == target).astype(jnp.int32))
 
-    def end_ok(v: jax.Array) -> jax.Array:
+    def end_ok(v: IntScalar) -> BoolScalar:
         return own_here[v] | (~blocked[v] & (inc[v] > 0))
 
     return empty & (end_ok(EDGE_V[edge, 0]) | end_ok(EDGE_V[edge, 1]))

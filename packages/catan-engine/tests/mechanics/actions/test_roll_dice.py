@@ -3,7 +3,7 @@
 import jax
 import numpy as np
 from catan_engine.board import Board, give, make_board, to_main
-from catan_engine.board.state import GamePhase
+from catan_engine.board.state import BoardState, GamePhase
 from catan_engine.mechanics.action import ActionResult
 from catan_engine.mechanics.dice import roll_step
 from expecttest import assert_expected_inline
@@ -61,3 +61,24 @@ def test_invalid_already_rolled(roll_board: Board) -> None:
     st = st._replace(has_rolled=st.has_rolled.at[0].set(1))
     _, result = roll_step((layout, st), None)
     assert int(result[0]) == ActionResult.INVALID.value
+
+
+def test_forced_outcome(roll_board: Board) -> None:
+    """params=r (2..12) forces the roll; the payout matches the sampled path
+    for the same number and the key advances identically."""
+    sampled, _ = roll_step(roll_board, None)  # seed's natural roll is 4
+    forced, result = roll_step(roll_board, 4)
+    assert int(result[0]) == ActionResult.SUCCESS.value
+
+    def raw(st: BoardState) -> BoardState:
+        return st._replace(key=jax.random.key_data(st.key))
+
+    for a, b in zip(raw(forced), raw(sampled), strict=True):
+        assert np.array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_forced_seven_routes_to_robber(roll_board: Board) -> None:
+    state, result = roll_step(roll_board, 7)
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.dice_roll[0]) == 7
+    assert int(state.phase[0]) == GamePhase.MOVE_ROBBER  # no hand over 7 cards

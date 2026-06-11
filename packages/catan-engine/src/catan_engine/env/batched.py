@@ -86,6 +86,7 @@ __all__ = [
     "ActionParams",
     "ActionResult",
     "ActionType",
+    "Actor",
     "BatchedCatanEnv",
     "BeliefState",
     "BeliefView",
@@ -97,6 +98,7 @@ __all__ = [
     "available",
     "flat_available",
     "flat_to_action",
+    "observe_for",
     "step",
 ]
 
@@ -622,13 +624,17 @@ class BatchedCatanEnv:
         """
         return _random_actions_b(self._avail, key)
 
-    def rollout(self, key: KeyScalar, n_steps: int) -> RewardArray:
-        """Advance every lane ``n_steps`` steps under uniformly-random legal play.
+    def rollout(
+        self, key: KeyScalar, n_steps: int, actor: Actor | None = None
+    ) -> RewardArray:
+        """Advance every lane ``n_steps`` steps as one fused ``lax.scan``.
 
-        The trajectory is identical to a :meth:`random_actions` + :meth:`step`
-        loop for the same ``key``; afterwards the env reflects the final step.
-        Returns the reward summed over the window (under ``"sparse"`` reward:
-        each player's win count). Compiles once per distinct ``n_steps``.
+        Actions come from ``actor`` (see :data:`Actor`), or uniformly-random
+        legal play when it is None — in which case the trajectory is identical
+        to a :meth:`random_actions` + :meth:`step` loop for the same ``key``;
+        afterwards the env reflects the final step. Returns the reward summed
+        over the window (under ``"sparse"`` reward: each player's win count).
+        Compiles once per distinct ``(n_steps, actor identity)``.
         """
         (
             self._layout,
@@ -649,6 +655,7 @@ class BatchedCatanEnv:
             self._key,
             key,
             n_steps,
+            actor,
             self.batch_size,
             self.reward_mode,
             self.auto_reset,
@@ -669,44 +676,50 @@ class BatchedCatanEnv:
 
     def _obs_for(self, sel: jax.Array) -> Observation:
         """Observation with per-lane ``self`` index ``sel`` (``(B,)`` int array)."""
-        layout, state = self._layout, self._state
-        res = state.player_resources
-        self_res = jnp.take_along_axis(res, sel[:, None, None], axis=1)[:, 0, :]
-        self_dev = jnp.take_along_axis(state.dev_hand, sel[:, None, None], axis=1)[
-            :, 0, :
-        ]
-        self_pending = jnp.take_along_axis(state.pending_discard, sel[:, None], axis=1)[
-            :, 0
-        ]
-        return {
-            # public board
-            "tile_resource": layout.tile_resource,
-            "tile_number": layout.tile_number,
-            "port_allocation": layout.port_allocation,
-            "vertex_owner": state.vertex_owner,
-            "vertex_type": state.vertex_type,
-            "edge_road": state.edge_road,
-            "robber": state.robber,
-            # public player info
-            "victory_points": state.victory_points,
-            "knights_played": state.knights_played,
-            "hand_size": res.astype(jnp.int32).sum(axis=2),
-            "dev_card_count": state.dev_hand.astype(jnp.int32).sum(axis=2),
-            "longest_road_owner": state.longest_road_owner,
-            "largest_army_owner": state.largest_army_owner,
-            "longest_road_len": state.longest_road_len,
-            "bank": compute_bank_resources(res),
-            # turn / flow
-            "phase": state.phase,
-            "current_player": state.current_player,
-            "dice_roll": state.dice_roll,
-            "has_rolled": state.has_rolled,
-            # private (observer)
-            "self": sel,
-            "self_resources": self_res,
-            "self_dev_hand": self_dev,
-            "self_pending_discard": self_pending,
-        }
+        return observe_for(self._layout, self._state, sel)
+
+
+def observe_for(layout: BoardLayout, state: BoardState, sel: jax.Array) -> Observation:
+    """:class:`Observation` of a batched board with per-lane observer ``sel``.
+
+    The pure builder behind :meth:`BatchedCatanEnv.observe`, usable inside a
+    trace (e.g. an :data:`Actor` running under :meth:`BatchedCatanEnv.rollout`).
+    """
+    res = state.player_resources
+    self_res = jnp.take_along_axis(res, sel[:, None, None], axis=1)[:, 0, :]
+    self_dev = jnp.take_along_axis(state.dev_hand, sel[:, None, None], axis=1)[:, 0, :]
+    self_pending = jnp.take_along_axis(state.pending_discard, sel[:, None], axis=1)[
+        :, 0
+    ]
+    return {
+        # public board
+        "tile_resource": layout.tile_resource,
+        "tile_number": layout.tile_number,
+        "port_allocation": layout.port_allocation,
+        "vertex_owner": state.vertex_owner,
+        "vertex_type": state.vertex_type,
+        "edge_road": state.edge_road,
+        "robber": state.robber,
+        # public player info
+        "victory_points": state.victory_points,
+        "knights_played": state.knights_played,
+        "hand_size": res.astype(jnp.int32).sum(axis=2),
+        "dev_card_count": state.dev_hand.astype(jnp.int32).sum(axis=2),
+        "longest_road_owner": state.longest_road_owner,
+        "largest_army_owner": state.largest_army_owner,
+        "longest_road_len": state.longest_road_len,
+        "bank": compute_bank_resources(res),
+        # turn / flow
+        "phase": state.phase,
+        "current_player": state.current_player,
+        "dice_roll": state.dice_roll,
+        "has_rolled": state.has_rolled,
+        # private (observer)
+        "self": sel,
+        "self_resources": self_res,
+        "self_dev_hand": self_dev,
+        "self_pending_discard": self_pending,
+    }
 
 
 def _where_lane(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
@@ -859,6 +872,22 @@ def _env_step_core(
 # result, agent_sel).
 _StepExtras = tuple[RewardArray, DoneArray, ResultCode, AgentSelectionArray]
 
+Actor = Callable[
+    [
+        KeyScalar,
+        BoardLayout,
+        BoardState,
+        "BeliefState | None",
+        FlatMaskArray,
+        AgentSelectionArray,
+    ],
+    tuple[ActionTypeArray, ActionParams],
+]
+"""A traceable per-step action source for :meth:`BatchedCatanEnv.rollout`:
+``(step key, layout, state, belief, flat legality, acting players) -> one
+(action_type, params) per lane``. ``belief`` is None unless the env tracks
+beliefs. Runs inside the rollout's ``lax.scan``, so it must be pure."""
+
 
 @functools.partial(
     jax.jit,
@@ -870,6 +899,7 @@ _StepExtras = tuple[RewardArray, DoneArray, ResultCode, AgentSelectionArray]
         "number_placement",
         "n_players",
         "track_beliefs",
+        "actor",
     ),
 )
 def _rollout_core(
@@ -882,6 +912,7 @@ def _rollout_core(
     env_key: KeyScalar,
     sample_key: KeyScalar,
     n_steps: int,
+    actor: Actor | None,
     batch_size: int,
     reward_mode: str,
     auto_reset: bool,
@@ -922,7 +953,10 @@ def _rollout_core(
     def body(carry: Carry, _: None) -> tuple[Carry, None]:
         layout, state, avail, vps, belief, _extras, env_key, sample_key, cum = carry
         sample_key, k_act = jax.random.split(sample_key)
-        atype, params = _random_actions_b(avail, k_act)
+        if actor is None:
+            atype, params = _random_actions_b(avail, k_act)
+        else:
+            atype, params = actor(k_act, layout, state, belief, avail, _extras[3])
         out = _env_step_core(
             layout,
             state,

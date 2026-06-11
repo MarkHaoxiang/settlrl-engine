@@ -2,7 +2,7 @@ from typing import Literal, NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, UInt8
+from jaxtyping import Array, Int, Key, UInt8
 
 from catan_engine.board.port import Port
 from catan_engine.board.tile import Tile
@@ -19,16 +19,17 @@ TileResourceArray = UInt8[Array, f"batch tiles={N_TILES}"]
 TileNumberArray = UInt8[Array, f"batch tiles={N_TILES}"]
 PortAllocationArray = UInt8[Array, f"batch ports={N_PORTS}"]
 
-# Single-game (un-batched) view of port_allocation, used by the rule modules.
+# Single-game (un-batched) views, used by the rule modules.
 PortAllocVec = UInt8[Array, f"ports={N_PORTS}"]
+TileNumberVec = UInt8[Array, f"tiles={N_TILES}"]
 
 
 class BoardLayout(NamedTuple):
     """Immutable board geometry: tile resources, number tokens, and port types."""
 
-    tile_resource: jax.Array
-    tile_number: jax.Array
-    port_allocation: jax.Array
+    tile_resource: TileResourceArray
+    tile_number: TileNumberArray
+    port_allocation: PortAllocationArray
 
 
 # Two vertices share an edge iff one cube coord sums to +1, the other to -1,
@@ -40,7 +41,11 @@ Cube = tuple[int, int, int]
 
 
 def _generate_mappings() -> tuple[
-    jax.Array, jax.Array, jax.Array, dict[Cube, int], list[Cube]
+    Int[Array, "tiles 6"],
+    Int[Array, "edges 2"],
+    Int[Array, "ports 2"],
+    dict[Cube, int],
+    list[Cube],
 ]:
     tile_vertex_mapping: list[list[int]] = []
     tile_centres: list[Cube] = []  # cube coord of each tile centre, in tile order
@@ -216,7 +221,7 @@ _SPIRAL_NUMBERS_ARR = jnp.array(SPIRAL_NUMBERS, dtype=jnp.uint8)
 
 def make_layout(
     batch_size: int = 1,
-    key: jax.Array | None = None,
+    key: Key[Array, ""] | None = None,
     number_placement: Literal["random", "spiral"] = "random",
 ) -> BoardLayout:
     """Generate a batched random :class:`BoardLayout`.
@@ -298,12 +303,11 @@ def make_layout(
     )
 
 
-def desert_tile(tile_resource: jax.Array) -> jax.Array:
+def desert_tile(tile_resource: TileResourceArray) -> UInt8[Array, "batch"]:
     """Per-lane index of the desert tile -- the robber's starting position.
 
     Catan starts the robber on the desert (where it blocks no production). The
     desert is the only ``Tile.DESERT`` tile; ``make_layout`` shuffles tile
-    positions, so the location must be read off the generated ``tile_resource``
-    (shape ``(batch, N_TILES)``). Returns a ``(batch,)`` uint8 array.
+    positions, so the location must be read off the generated ``tile_resource``.
     """
     return jnp.argmax(tile_resource == Tile.DESERT.value, axis=1).astype(jnp.uint8)

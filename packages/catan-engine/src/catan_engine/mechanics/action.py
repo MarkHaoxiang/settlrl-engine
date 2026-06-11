@@ -117,8 +117,11 @@ class ActionParams(NamedTuple):
     - vertex/edge/tile/resource/give (single index)  -> ``idx``
       (Discard's ``idx`` is the resource to give up one card of)
     - victim / receive / second resource (Year of Plenty) -> ``target``
-    - parameterless actions (RollDice, BuyDevelopmentCard, PlayRoadBuilding,
-      EndTurn) read nothing.
+    - RollDice reads ``idx`` as an optional forced outcome (2..12; any other
+      value, including the flat table's 0, samples from the state key) — the
+      chance-node seam for stochastic search.
+    - parameterless actions (BuyDevelopmentCard, PlayRoadBuilding, EndTurn)
+      read nothing.
 
     ``target`` follows the ``victim == -1`` ("steal from no one") convention for
     the robber actions.
@@ -135,7 +138,7 @@ class ActionParams(NamedTuple):
 _APPLY_BRANCHES = (
     lambda lay, st, pp, av: _setup_settlement_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _setup_road_apply(lay, st, pp.idx, av),
-    lambda lay, st, pp, av: _roll_apply(lay, st, None, av),
+    lambda lay, st, pp, av: _roll_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _discard_apply(lay, st, pp.idx, av),
     lambda lay, st, pp, av: _move_robber_apply(lay, st, (pp.idx, pp.target), av),
     lambda lay, st, pp, av: _build_road_apply(lay, st, pp.idx, av),
