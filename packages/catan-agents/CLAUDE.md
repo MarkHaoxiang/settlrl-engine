@@ -67,13 +67,14 @@ agents run at 2–4 players with beliefs of varying sharpness.
 
 ## search/
 
-Both agents determinize at the root: `sample_world`, then search in the
-sample (PIMC, not ISMCTS — the simulated opponent shares the sampled world;
-lookahead uses one draw, mcts an ensemble of `num_worlds`). Residual
-approximations: a sampled in-tree draw's identity is visible one ply ahead
-(committed per node, not a chance node), and the in-tree opponent sees the
-sampled world (strategy fusion) — count-only value terms blunt what it can
-exploit.
+All search agents determinize at the root: `sample_world`, then search in
+the sample (PIMC, not ISMCTS — the simulated opponent shares the sampled
+world; lookahead uses one draw, mcts/smcts an ensemble of `num_worlds`).
+Residual approximations in lookahead/mcts: a sampled in-tree draw's identity
+is visible one ply ahead (committed per node, not a chance node), and the
+in-tree opponent sees the sampled world (strategy fusion) — count-only value
+terms blunt what it can exploit. smcts removes the first for dice and dev
+draws (true chance nodes); the second is inherent to PIMC.
 
 - `greedy.py` — one-step lookahead: all 560 successors in one
   `vmap(apply_action)`, valued and masked-argmaxed.
@@ -125,6 +126,23 @@ exploit.
   `mctx.stochastic_muzero_policy` is PUCT-based (no Gumbel/absolute-Q),
   an architecture change, not a knob. 4p evals: seed-batch variance at n=80
   is huge (30.9% vs 43.8% same config) — matched seeds or n ≥ 240.
+- `smcts.py` — experimental, deliberately **not** in `POLICIES`:
+  stochastic-MuZero search (PUCT) with dice and dev draws as true chance
+  nodes over the engine's forced-outcome seams (`ROLL_DICE idx=2..12`,
+  `BUY_DEV idx=1..5`); the two-sided frame shared with mcts. June 11
+  verdict (2p): tuned — `prior_scale=10` (2 degenerates PUCT, 45.6%),
+  `qtransform_by_parent_and_siblings` (PUCT wants normalized Q, the
+  *opposite* of Gumbel's absolute-Q fix) — it ties mcts: 56.7% vs lookahead
+  (pooled n=319) and 49.3% head-to-head (n=215), at ~2× wall-clock (a game
+  ply is two tree edges). The motivating hypothesis was **falsified**:
+  depth still doesn't pay with chance handled exactly (64→128 sims:
+  53.3%→49.5%), and the dev-draw chance node (which also removes the
+  one-ply draw peek) is strength-neutral (50.5% A/B, n=210) — the binding
+  constraint is the stationary heuristic leaf plus the optimizer's curse
+  over decision layers, not chance fusion. Deep lines through k rolls span
+  11^k outcomes, so unbiased depth is also variance-starved at 10²-sim
+  budgets. Becomes interesting only with a learned value function whose
+  error shrinks under search; kept as the working scaffold for that.
 
 ## cli.py
 
