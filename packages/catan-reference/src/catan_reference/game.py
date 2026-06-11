@@ -149,19 +149,30 @@ class MaritimeTrade:
 
 @dataclass(frozen=True)
 class ProposeTrade:
-    """Offer ``partner`` 1 card of ``give`` for 1 card of ``receive``.
+    """Offer ``partner`` the ``give`` bundle for the ``receive`` bundle.
 
-    Domestic trade, one card each way (rulebook p.7: the active player trades
-    with one other player; both sides must give something, and like-for-like
-    is barred by ``give != receive``). Proposing is legal on *public*
-    information only -- the proposer holds the give card and the partner's
-    hand is non-empty -- whether the partner actually holds the asked-for
-    card is settled by their Accept / Reject. Not available in 2-player games.
+    Domestic trade (rulebook p.7: the active player trades with one other
+    player). ``give`` / ``receive`` are per-resource counts in canonical
+    ``Resource`` order; both sides must give something and no resource may
+    appear on both sides (no gifts, no like-for-like). Proposing is legal on
+    *public* information only -- the proposer holds the give bundle and the
+    partner's hand covers the receive total -- whether the partner actually
+    holds the asked-for cards is settled by their Accept / Reject. Not
+    available in 2-player games. ``one_card`` builds the 1:1 case.
     """
 
     partner: int
-    give: Resource
-    receive: Resource
+    give: tuple[int, ...]
+    receive: tuple[int, ...]
+
+    @staticmethod
+    def one_card(partner: int, give: Resource, receive: Resource) -> ProposeTrade:
+        """A 1:1 proposal: one card of ``give`` for one card of ``receive``."""
+        return ProposeTrade(partner, _one_hot(give), _one_hot(receive))
+
+
+def _one_hot(resource: Resource) -> tuple[int, ...]:
+    return tuple(int(r == resource) for r in RESOURCES)
 
 
 @dataclass(frozen=True)
@@ -232,10 +243,11 @@ class Game:
     dev_played_this_turn: bool = False
     free_roads: int = 0  # owed by Road Building
     pending_discard: list[int] = field(default_factory=list)  # len n_players
-    # The pending trade proposal (set during TRADE_RESPONSE, else None).
+    # The pending trade proposal (set during TRADE_RESPONSE, else None);
+    # give/receive are per-resource count tuples in Resource order.
     trade_partner: int | None = None
-    trade_give: Resource | None = None
-    trade_receive: Resource | None = None
+    trade_give: tuple[int, ...] | None = None
+    trade_receive: tuple[int, ...] | None = None
 
     longest_road_owner: int | None = None
     largest_army_owner: int | None = None
@@ -705,17 +717,28 @@ class Game:
         p = self.current_player
         if not 0 <= a.partner < self.n_players or a.partner == p:
             return False
-        if a.give == a.receive:
+        if len(a.give) != len(RESOURCES) or len(a.receive) != len(RESOURCES):
             return False
-        if self.players[p].resources[a.give] < 1:
+        if any(c < 0 for c in (*a.give, *a.receive)):
             return False
-        return sum(self.players[a.partner].resources.values()) > 0
+        # Both sides give something; no resource appears on both sides.
+        if sum(a.give) < 1 or sum(a.receive) < 1:
+            return False
+        if any(g > 0 and r > 0 for g, r in zip(a.give, a.receive, strict=True)):
+            return False
+        hand = self.players[p].resources
+        if any(hand[r] < c for r, c in zip(RESOURCES, a.give, strict=True)):
+            return False
+        return sum(self.players[a.partner].resources.values()) >= sum(a.receive)
 
     def _legal_accept_trade(self, a: AcceptTrade) -> bool:
         if self.phase is not Phase.TRADE_RESPONSE:
             return False
         assert self.trade_partner is not None and self.trade_receive is not None
-        return self.players[self.trade_partner].resources[self.trade_receive] >= 1
+        hand = self.players[self.trade_partner].resources
+        return all(
+            hand[r] >= c for r, c in zip(RESOURCES, self.trade_receive, strict=True)
+        )
 
     def _legal_reject_trade(self, a: RejectTrade) -> bool:
         return self.phase is Phase.TRADE_RESPONSE
@@ -795,12 +818,15 @@ class Game:
             for r in RESOURCES
             if self._legal_maritime(MaritimeTrade(g, r))
         ]
+        # Enumerate only the 1:1 subset of the bundle domain (is_legal /
+        # apply accept arbitrary bundles).
         out += [
             t
             for g in RESOURCES
             for r in RESOURCES
             for partner in range(self.n_players)
-            if (t := ProposeTrade(partner, g, r)) and self._legal_propose_trade(t)
+            if (t := ProposeTrade.one_card(partner, g, r))
+            and self._legal_propose_trade(t)
         ]
         out += self._dev_plays()
         out.append(EndTurn())
@@ -1063,10 +1089,9 @@ class Game:
         give = self.trade_give
         receive = self.trade_receive
         assert partner is not None and give is not None and receive is not None
-        self.players[p].resources[give] -= 1
-        self.players[partner].resources[give] += 1
-        self.players[partner].resources[receive] -= 1
-        self.players[p].resources[receive] += 1
+        for r, g, rc in zip(RESOURCES, give, receive, strict=True):
+            self.players[p].resources[r] += rc - g
+            self.players[partner].resources[r] += g - rc
         self._clear_trade()
 
     def _apply_reject_trade(self, a: RejectTrade) -> None:

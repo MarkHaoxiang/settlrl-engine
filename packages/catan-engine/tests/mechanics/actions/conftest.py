@@ -27,7 +27,7 @@ from catan_engine.board import (
 from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.layout import TILE_V, BoardLayout
 from catan_engine.board.state import BoardState, GamePhase
-from catan_engine.mechanics.trade import pack_trade, propose_trade_step
+from catan_engine.mechanics.trade import pack_trade_single, propose_trade_step
 
 from tests.mechanics.actions.fixtures import road_fixture, settlement_fixture
 from tests.render import BoardRenderer
@@ -114,8 +114,9 @@ def propose_board() -> Board:
 @pytest.fixture
 def response_board(propose_board: Board) -> Board:
     """TRADE_RESPONSE board: player 0 has offered player 2 a sheep for a wood."""
+    idx, target = pack_trade_single(0, 2, partner=2)
     state, _ = propose_trade_step(
-        propose_board, (jnp.array([pack_trade(0, 2)]), jnp.array([2]))
+        propose_board, (jnp.array([idx]), jnp.array([target]))
     )
     return (propose_board[0], state)
 

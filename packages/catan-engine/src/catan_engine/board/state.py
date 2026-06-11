@@ -49,6 +49,7 @@ VertexTypeArray = UInt8[
 EdgeRoadArray = UInt8[Array, f"batch edges={N_EDGES}"]  # 0=none, 1-4=player
 VictoryPointsArray = UInt8[Array, "batch players"]
 PlayerDiscardArray = UInt8[Array, "batch players"]  # cards still owed
+TradeCountsArray = UInt8[Array, f"batch resources={N_RESOURCES}"]  # pending offer
 # Per-game scalars: phase, current_player, robber tile, counters, flags, awards.
 GameScalarArray = UInt8[Array, "batch"]
 KeyArray = Key[Array, "batch"]
@@ -64,6 +65,7 @@ VertexOwnerVec = UInt8[Array, f"vertices={N_VERTICES}"]
 VertexTypeVec = UInt8[Array, f"vertices={N_VERTICES}"]
 PlayerMaskVec = Bool[Array, "players"]
 PlayerU8Vec = UInt8[Array, "players"]  # one game's row of a (batch, players) array
+TradeCountsVec = UInt8[Array, f"resources={N_RESOURCES}"]
 U8Scalar = UInt8[Array, ""]  # a single uint8 state field (one game's GameScalarArray)
 IntScalar = Int[Array, ""]  # a single int index / count (player, vertex, roll, ...)
 BoolScalar = Bool[Array, ""]  # a single legality / flag
@@ -135,8 +137,8 @@ class BoardState(NamedTuple):
     free_roads: GameScalarArray  # free roads owed (Road Building)
     pending_discard: PlayerDiscardArray  # cards still owed after a 7
     trade_partner: GameScalarArray  # proposed-to player, or NO_INDEX
-    trade_give: GameScalarArray  # resource the proposer gives (1 card)
-    trade_receive: GameScalarArray  # resource the proposer asks for (1 card)
+    trade_give: TradeCountsArray  # per-resource counts the proposer gives
+    trade_receive: TradeCountsArray  # per-resource counts the proposer asks for
 
     # -- Awards -------------------------------------------------------------
     longest_road_owner: GameScalarArray  # player or NO_INDEX
@@ -199,8 +201,8 @@ def make_board_state(
         free_roads=jnp.zeros((B,), dtype=jnp.uint8),
         pending_discard=jnp.zeros((B, P), dtype=jnp.uint8),
         trade_partner=none,
-        trade_give=jnp.zeros((B,), dtype=jnp.uint8),
-        trade_receive=jnp.zeros((B,), dtype=jnp.uint8),
+        trade_give=jnp.zeros((B, N_RESOURCES), dtype=jnp.uint8),
+        trade_receive=jnp.zeros((B, N_RESOURCES), dtype=jnp.uint8),
         longest_road_owner=none,
         largest_army_owner=none,
         longest_road_len=jnp.zeros((B,), dtype=jnp.uint8),

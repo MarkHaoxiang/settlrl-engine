@@ -80,13 +80,15 @@ def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatActio
     t_pips = tile_pips(obs["tile_number"])
     held = obs["self_resources"].astype(jnp.float32)
     # The pending trade from the responder's side: it would *get* the
-    # proposer's give card and *pay* the asked-for card. The 2x gap against
-    # the fixed reject bonus of 1 keeps the response deterministic under the
-    # <1 tie noise: accept iff pay_held - get_held >= 1.
-    get_held = held[jnp.clip(obs["trade_give"].astype(jnp.int32), 0, N_RESOURCES - 1)]
-    pay_held = held[
-        jnp.clip(obs["trade_receive"].astype(jnp.int32), 0, N_RESOURCES - 1)
-    ]
+    # proposer's give bundle and *pay* the asked-for bundle, so weight its
+    # holdings by each side's counts (clipped to keep the bonus inside the
+    # tier gap). The 2x gap against the fixed reject bonus of 1 keeps the
+    # response deterministic under the <1 tie noise: accept iff
+    # pay_held - get_held >= 1.
+    get_held = jnp.clip((held * obs["trade_give"].astype(jnp.float32)).sum(), 0.0, 24.0)
+    pay_held = jnp.clip(
+        (held * obs["trade_receive"].astype(jnp.float32)).sum(), 0.0, 24.0
+    )
     bonus = jnp.where(
         _VERTEX_BUILD,
         v_pips[jnp.clip(_ROW_IDX, 0, N_VERTICES - 1)],

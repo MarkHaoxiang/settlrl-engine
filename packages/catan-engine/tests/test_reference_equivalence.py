@@ -126,3 +126,42 @@ def test_engine_matches_reference_with_fewer_players() -> None:
     for n_players in (2, 3):
         for seed in (0, 1):
             _play_one_game(seed, n_players=n_players)
+
+
+def test_bundle_trade_matches_reference() -> None:
+    # legal_actions() only enumerates 1:1 proposals, so random play never
+    # reaches a bundle: script one multiset exchange on both engines directly.
+    from catan_engine.board.state import GamePhase
+    from catan_engine.mechanics.action import ActionType
+    from catan_engine.mechanics.trade import pack_trade
+
+    layout, st = make_board(1, seed=3, n_players=3)
+    st = st._replace(
+        phase=st.phase.at[0].set(int(GamePhase.MAIN)),
+        has_rolled=st.has_rolled.at[0].set(1),
+        player_resources=st.player_resources.at[0, 0]
+        .set(jnp.asarray([2, 0, 0, 0, 0], jnp.uint8))
+        .at[0, 2]
+        .set(jnp.asarray([0, 0, 1, 1, 0], jnp.uint8)),
+    )
+    board = (layout, st)
+    game = conv.to_reference_single(board, 0)
+
+    give, receive = [2, 0, 0, 0, 0], [0, 0, 1, 1, 0]
+    proposal = ref.ProposeTrade(partner=2, give=tuple(give), receive=tuple(receive))
+    assert game.is_legal(proposal)
+    atype, idx, target = conv.to_engine_action(proposal)
+    assert (idx, target) == pack_trade(give, receive, partner=2)
+
+    new_state, code = step(board, jnp.asarray([atype], jnp.int32), _params(idx, target))
+    assert int(np.asarray(code[0])) != _INVALID
+    game.apply(proposal)
+    board = (board[0], new_state)
+    conv.assert_states_match(board, game, 0)
+
+    new_state, code = step(
+        board, jnp.asarray([int(ActionType.ACCEPT_TRADE)], jnp.int32), _params(0, -1)
+    )
+    assert int(np.asarray(code[0])) != _INVALID
+    game.apply(ref.AcceptTrade())
+    conv.assert_states_match((board[0], new_state), game, 0)

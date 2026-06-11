@@ -15,6 +15,7 @@ from catan_engine.mechanics.action import (
     action_available,
     apply_action,
 )
+from catan_engine.mechanics.trade import _PARTNER_BITS
 
 from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
 from catan_agents.shared.sample import sample_world
@@ -23,13 +24,14 @@ from catan_agents.shared.value import ValueFunction, heuristic_value
 # Static decode of every flat row: its action type and (idx, target) params.
 _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 
-# The ProposeTrade rows and their partners: a proposal's successor is
-# material-neutral (cards only move on the partner's accept), so these rows
-# are scored by their *accepted* outcome instead (see ``make_greedy``).
+# The ProposeTrade rows and their partners (the low bits of the packed
+# target — see trade.pack_trade): a proposal's successor is material-neutral
+# (cards only move on the partner's accept), so these rows are scored by
+# their *accepted* outcome instead (see ``make_greedy``).
 _PROPOSE_ROWS = jnp.asarray(
     np.flatnonzero(np.asarray(_ROW_TYPE) == int(ActionType.PROPOSE_TRADE))
 )
-_PROPOSE_PARTNER = _ROW_PARAMS.target[_PROPOSE_ROWS]
+_PROPOSE_PARTNER = _ROW_PARAMS.target[_PROPOSE_ROWS] & ((1 << _PARTNER_BITS) - 1)
 _ACCEPT = jnp.int32(ActionType.ACCEPT_TRADE)
 _NO_PARAMS = ActionParams(idx=jnp.int32(0), target=jnp.int32(0))
 

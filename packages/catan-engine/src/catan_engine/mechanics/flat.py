@@ -65,7 +65,7 @@ from catan_engine.mechanics.trade import (
     _maritime_avail,
     _propose_trade_avail,
     _reject_trade_avail,
-    pack_trade,
+    pack_trade_single,
 )
 from catan_engine.mechanics.turn import _end_turn_avail
 
@@ -127,10 +127,12 @@ def _build_action_table() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     for g in range(N_RESOURCES):
         for r in range(N_RESOURCES):
             add(ActionType.MARITIME_TRADE, g, r)
+    # Domestic trade supports arbitrary bundles via the packed params (see
+    # trade.pack_trade); the table enumerates only the 1:1 subset.
     for g in range(N_RESOURCES):
         for r in range(N_RESOURCES):
             for partner in range(N_PLAYERS):
-                add(ActionType.PROPOSE_TRADE, pack_trade(g, r), partner)
+                add(ActionType.PROPOSE_TRADE, *pack_trade_single(g, r, partner))
     add(ActionType.ACCEPT_TRADE)
     add(ActionType.REJECT_TRADE)
     add(ActionType.END_TURN)
@@ -192,15 +194,20 @@ def random_flat(key: KeyScalar, mask: FlatMaskVec) -> IntScalar:
 # of a cached ``(B, N_FLAT)`` flat-legality sweep (:func:`flat_legality`) instead
 # of recomputing avail for the chosen action. The flat table holds one row per
 # concrete move, so ``(action_type, idx, target)`` is unique per row; we pack the
-# triple into a dense int32 index and store its row.
+# triple into a dense int32 index and store its row. PROPOSE_TRADE is excluded:
+# its bit-packed params span ~2^27 values (a dense table can't), and the
+# enumerable rows are only the 1:1 subset of the bundle domain anyway — callers
+# evaluate proposals with the trade core directly (see ``env.batched``).
 # ===========================================================================
-_IDX_RANGE = int(_IDX.max()) + 1
-_TGT_MIN = int(_TARGET.min())
-_TGT_RANGE = int(_TARGET.max()) - _TGT_MIN + 1
+_DENSE = int(ActionType.PROPOSE_TRADE) != _ATYPE
+_IDX_RANGE = int(_IDX[_DENSE].max()) + 1
+_TGT_MIN = int(_TARGET[_DENSE].min())
+_TGT_RANGE = int(_TARGET[_DENSE].max()) - _TGT_MIN + 1
 _REVERSE = np.zeros(N_ACTION_TYPES * _IDX_RANGE * _TGT_RANGE, dtype=np.int32)
-_REVERSE[(_ATYPE * _IDX_RANGE + _IDX) * _TGT_RANGE + (_TARGET - _TGT_MIN)] = np.arange(
-    N_FLAT, dtype=np.int32
-)
+_REVERSE[
+    (_ATYPE[_DENSE] * _IDX_RANGE + _IDX[_DENSE]) * _TGT_RANGE
+    + (_TARGET[_DENSE] - _TGT_MIN)
+] = np.flatnonzero(_DENSE).astype(np.int32)
 _REVERSE_J = jnp.asarray(_REVERSE)
 
 
@@ -213,8 +220,8 @@ def flat_legality(
     """``(B,)`` legality of each lane's ``(action_type, idx, target)`` move.
 
     Gathers each lane's bit from the ``(B, N_FLAT)`` mask ``avail_flat``. An
-    action that is not a row of the flat table (out-of-range params) reads
-    ``False``.
+    action that is not a row of the flat table (out-of-range params, and every
+    PROPOSE_TRADE — see the reverse-lookup note) reads ``False``.
     """
     pack = (action_type * _IDX_RANGE + idx) * _TGT_RANGE + (target - _TGT_MIN)
     pack = jnp.clip(pack, 0, _REVERSE_J.shape[0] - 1)
@@ -223,6 +230,7 @@ def flat_legality(
         (FLAT_ATYPE[row] == action_type)
         & (FLAT_IDX[row] == idx)
         & (FLAT_TARGET[row] == target)
+        & (action_type != ActionType.PROPOSE_TRADE)
     )
     rows = jnp.arange(avail_flat.shape[0])
     return avail_flat[rows, row] & matches

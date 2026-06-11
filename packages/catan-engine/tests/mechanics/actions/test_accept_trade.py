@@ -1,10 +1,15 @@
 """Tests for the vectorized AcceptTrade action."""
 
+import jax.numpy as jnp
 import numpy as np
-from catan_engine.board import Board
+from catan_engine.board import Board, give
 from catan_engine.board.state import NO_INDEX, GamePhase
 from catan_engine.mechanics.action import ActionResult
-from catan_engine.mechanics.trade import accept_trade_step
+from catan_engine.mechanics.trade import (
+    accept_trade_step,
+    pack_trade,
+    propose_trade_step,
+)
 from expecttest import assert_expected_inline
 
 from tests.mechanics.actions.fixtures import fmt
@@ -46,3 +51,14 @@ def test_invalid_wrong_phase(propose_board: Board) -> None:
     state, result = accept_trade_step(propose_board)
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.player_resources), before)
+
+
+def test_accept_swaps_bundles(propose_board: Board) -> None:
+    # 1 sheep for 2 wood + 1 brick: the whole multiset moves on accept.
+    board = give(propose_board, 2, [0, 0, 2, 1, 0])
+    idx, target = pack_trade([1, 0, 0, 0, 0], [0, 0, 2, 1, 0], partner=2)
+    st, _ = propose_trade_step(board, (jnp.array([idx]), jnp.array([target])))
+    state, result = accept_trade_step((board[0], st))
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert np.asarray(state.player_resources[0, 0]).tolist() == [0, 0, 2, 1, 0]
+    assert np.asarray(state.player_resources[0, 2]).tolist() == [1, 0, 0, 0, 0]

@@ -40,6 +40,7 @@ from catan_engine.board.layout import (
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import NO_INDEX, BoardState, GamePhase
 from catan_engine.mechanics.action import ActionType
+from catan_engine.mechanics.trade import pack_trade
 from catan_reference import board as ref_board
 
 # --- index bridges (engine index -> reference index, via cube coords) -------
@@ -104,10 +105,10 @@ def _owner_or_none(value: int) -> int | None:
     return None if value == NO_INDEX else value
 
 
-def _trade_resource(partner: int, value: int) -> ref.Resource | None:
-    """A pending trade's resource (``None`` when no proposal is pending: the
-    engine zeroes the give/receive fields, the reference uses ``None``)."""
-    return None if partner == NO_INDEX else ref.Resource(value)
+def _trade_counts(partner: int, counts: np.ndarray) -> tuple[int, ...] | None:
+    """A pending trade's per-resource counts (``None`` when no proposal is
+    pending: the engine zeroes the count vectors, the reference uses ``None``)."""
+    return None if partner == NO_INDEX else tuple(int(c) for c in counts)
 
 
 # --- layout conversion ------------------------------------------------------
@@ -218,11 +219,11 @@ def _build_game(layout: ref.Layout, state: BoardState, b: int) -> ref.Game:
         free_roads=int(state.free_roads[b]),
         pending_discard=[int(pending[p]) for p in range(n_players)],
         trade_partner=_owner_or_none(int(state.trade_partner[b])),
-        trade_give=_trade_resource(
-            int(state.trade_partner[b]), int(state.trade_give[b])
+        trade_give=_trade_counts(
+            int(state.trade_partner[b]), np.asarray(state.trade_give[b])
         ),
-        trade_receive=_trade_resource(
-            int(state.trade_partner[b]), int(state.trade_receive[b])
+        trade_receive=_trade_counts(
+            int(state.trade_partner[b]), np.asarray(state.trade_receive[b])
         ),
         longest_road_owner=_owner_or_none(int(state.longest_road_owner[b])),
         largest_army_owner=_owner_or_none(int(state.largest_army_owner[b])),
@@ -387,7 +388,8 @@ def to_engine_action(action: ref.Action) -> tuple[int, int, int]:
         case ref.MaritimeTrade(give=g, receive=r):
             return int(ActionType.MARITIME_TRADE), int(g), int(r)
         case ref.ProposeTrade(partner=p, give=g, receive=r):
-            return int(ActionType.PROPOSE_TRADE), int(g) * N_RESOURCES + int(r), p
+            idx, target = pack_trade(list(g), list(r), p)
+            return int(ActionType.PROPOSE_TRADE), idx, target
         case ref.AcceptTrade():
             return int(ActionType.ACCEPT_TRADE), 0, -1
         case ref.RejectTrade():

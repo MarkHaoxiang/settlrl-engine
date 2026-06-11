@@ -14,6 +14,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from catan_engine.env import N_FLAT, ActionType, flat_to_action
+from catan_engine.mechanics.trade import _COUNT_BITS, _COUNT_MASK, _PARTNER_BITS
 
 from .convert import _RESOURCE_NAMES, EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _cube
 from .models import ActionModel, EdgeModel, HexModel
@@ -48,6 +49,13 @@ _BASE_LABELS = {
     ActionType.ACCEPT_TRADE: "Accept trade",
     ActionType.REJECT_TRADE: "Reject trade",
 }
+
+
+def _packed_single(packed: int) -> int:
+    """The lone resource index of a 1:1 packed count field (flat table rows)."""
+    counts = [(packed >> (_COUNT_BITS * r)) & _COUNT_MASK for r in range(5)]
+    (r,) = (i for i, c in enumerate(counts) if c)
+    return r
 
 
 def _decode(flat: int) -> ActionModel:
@@ -109,15 +117,18 @@ def _decode(flat: int) -> ActionModel:
         )
 
     if at is ActionType.PROPOSE_TRADE:
-        n_res = len(_RESOURCE_NAMES)
-        give, receive = _RESOURCE_NAMES[idx // n_res], _RESOURCE_NAMES[idx % n_res]
+        # Flat propose rows are the 1:1 subset of the bundle domain, so each
+        # packed side holds exactly one resource (engine trade.pack_trade).
+        give = _RESOURCE_NAMES[_packed_single(idx)]
+        receive = _RESOURCE_NAMES[_packed_single(target >> _PARTNER_BITS)]
+        partner = target & ((1 << _PARTNER_BITS) - 1)
         return ActionModel(
             flat=flat,
             type=type_name,
-            label=f"Offer P{target + 1} {give} → {receive}",
+            label=f"Offer P{partner + 1} {give} → {receive}",
             give=give,
             receive=receive,
-            partner=target,
+            partner=partner,
         )
 
     return ActionModel(flat=flat, type=type_name, label=_BASE_LABELS.get(at, type_name))

@@ -46,7 +46,7 @@ def test_json_roundtrip(record4: GameRecord) -> None:
 
 def test_json_is_readable(record4: GameRecord) -> None:
     doc = json.loads(record4.to_json())
-    assert doc["version"] == 2
+    assert doc["version"] == 3
     assert doc["meta"] == {"note": "test game"}
     moves = doc["moves"]
     first = moves[0]
@@ -60,14 +60,21 @@ def test_json_is_readable(record4: GameRecord) -> None:
     assert 2 <= roll["dice"] <= 12
 
 
-def test_version_1_records_migrate_via_annotations(record4: GameRecord) -> None:
-    # A v1 file stored flat table positions, which went stale when the table
-    # grew; the loader must recover every move from its annotations instead.
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_records_migrate_via_annotations(
+    record4: GameRecord, version: int
+) -> None:
+    # v1 stored flat table positions (stale once the table grew); v2 stored
+    # ProposeTrade params in a retired encoding. The loader must recover every
+    # move from its annotations instead.
     doc = json.loads(record4.to_json())
-    doc["version"] = 1
+    doc["version"] = version
     for move in doc["moves"]:
-        del move["idx"], move["target"]
-        move["flat"] = 0  # deliberately wrong: must be ignored
+        if version == 1:
+            del move["idx"], move["target"]
+            move["flat"] = 0  # deliberately wrong: must be ignored
+        elif move["type"] == "propose_trade":
+            move["idx"], move["target"] = -1, -1  # retired encoding: ignored
     assert GameRecord.from_json(json.dumps(doc)) == record4
 
 

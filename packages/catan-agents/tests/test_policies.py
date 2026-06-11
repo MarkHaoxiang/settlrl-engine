@@ -25,7 +25,7 @@ from catan_engine.env import (
     observe_for,
 )
 from catan_engine.mechanics.flat import FLAT_ATYPE, flat_available_for
-from catan_engine.mechanics.trade import pack_trade, propose_trade_step
+from catan_engine.mechanics.trade import pack_trade_single, propose_trade_step
 
 BATCH = 4
 
@@ -117,9 +117,8 @@ def _pending_trade_board(responder_hand: list[int]) -> Board:
     board = give(board, 1, responder_hand)
     layout, st = board
     st = st._replace(victory_points=st.victory_points.at[0, 2].set(5))
-    st, _ = propose_trade_step(
-        (layout, st), (jnp.array([pack_trade(WOOD, SHEEP)]), jnp.array([1]))
-    )
+    idx, target = pack_trade_single(WOOD, SHEEP, partner=1)
+    st, _ = propose_trade_step((layout, st), (jnp.array([idx]), jnp.array([target])))
     return layout, st
 
 

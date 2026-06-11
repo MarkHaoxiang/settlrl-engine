@@ -51,14 +51,17 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   pre-roll) but may also be *deferred* past the roll — the rulebook says
   place immediately, but forcing that could stall a game whose owner has no
   placeable edge, so rolling stays legal while free roads are owed.
-- **Domestic trade is one card each way**
-  (`ProposeTrade(partner, give, receive)` → `AcceptTrade` / `RejectTrade`,
-  through `Phase.TRADE_RESPONSE`): a deliberate restriction of the rulebook's
-  free-form negotiation to a flat action set, matching the engine. Proposing
-  is gated on *public* information only (the proposer holds the give card,
-  the partner's hand is non-empty); whether the partner holds the asked-for
-  card is settled by Accept (illegal without it) / Reject (always legal).
-  Disabled in 2-player games.
+- **Domestic trade carries arbitrary bundles**
+  (`ProposeTrade(partner, give, receive)` with per-resource count tuples →
+  `AcceptTrade` / `RejectTrade`, through `Phase.TRADE_RESPONSE`), matching
+  the engine's packed-params encoding. Both sides must give something and no
+  resource may appear on both sides. Proposing is gated on *public*
+  information only (the proposer holds the give bundle, the partner's hand
+  covers the receive total); whether the partner holds the asked-for cards
+  is settled by Accept (illegal without them) / Reject (always legal).
+  `legal_actions()` enumerates only the 1:1 subset (the differential driver's
+  choice set); `is_legal` / `apply` take any bundle. Disabled in 2-player
+  games.
 
 ## Checks
 

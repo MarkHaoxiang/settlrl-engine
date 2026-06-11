@@ -394,3 +394,50 @@ class TestRollout:
         cum = np.asarray(e.rollout(jax.random.key(1), 800))
         assert cum.shape == (8, e.n_players)
         assert (cum >= 0).all() and (cum == cum.astype(int)).all()
+
+
+class TestBundleTradeThroughTheEnv:
+    """Bundle proposals live outside the flat table; the env validates them
+    with the trade core directly (see ``_env_step_core``)."""
+
+    def test_bundle_proposal_steps_and_resolves(self) -> None:
+        from catan_engine.board import give, to_main
+        from catan_engine.mechanics.trade import pack_trade
+
+        e = env.BatchedCatanEnv(batch_size=1, seed=0, auto_reset=False)
+        layout, st = to_main(
+            give(give(e.board, 0, [2, 0, 0, 0, 0]), 1, [0, 0, 1, 1, 0])
+        )
+        e._state = st
+        e._avail = flat_available_b(layout, st)
+        idx, target = pack_trade([2, 0, 0, 0, 0], [0, 0, 1, 1, 0], partner=1)
+        e.step(
+            jnp.array([int(ActionType.PROPOSE_TRADE)], jnp.int32),
+            _batch_params([idx], [target]),
+        )
+        assert int(e._state.phase[0]) == GamePhase.TRADE_RESPONSE
+        assert int(e.agent_selection[0]) == 1
+        # The partner accepts: both multisets move.
+        e.step(
+            jnp.array([int(ActionType.ACCEPT_TRADE)], jnp.int32),
+            _batch_params([0], [0]),
+        )
+        assert np.asarray(e._state.player_resources[0, 0]).tolist() == [0, 0, 1, 1, 0]
+        assert np.asarray(e._state.player_resources[0, 1]).tolist() == [2, 0, 0, 0, 0]
+
+    def test_illegal_bundle_is_rejected(self) -> None:
+        from catan_engine.board import give, to_main
+        from catan_engine.mechanics.trade import pack_trade
+
+        e = env.BatchedCatanEnv(batch_size=1, seed=0, auto_reset=False)
+        layout, st = to_main(give(e.board, 0, [1, 0, 0, 0, 0]))
+        e._state = st
+        e._avail = flat_available_b(layout, st)
+        # Asking a card from an empty-handed partner can never complete.
+        idx, target = pack_trade([1, 0, 0, 0, 0], [0, 0, 1, 0, 0], partner=1)
+        e.step(
+            jnp.array([int(ActionType.PROPOSE_TRADE)], jnp.int32),
+            _batch_params([idx], [target]),
+        )
+        assert int(e._result[0]) == ActionResult.INVALID.value
+        assert int(e._state.phase[0]) == GamePhase.MAIN

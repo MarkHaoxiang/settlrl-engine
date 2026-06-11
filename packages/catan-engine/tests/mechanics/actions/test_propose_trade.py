@@ -1,4 +1,4 @@
-"""Tests for the vectorized ProposeTrade action (1:1 domestic trade offer)."""
+"""Tests for the vectorized ProposeTrade action (bundle domestic-trade offer)."""
 
 import jax
 import jax.numpy as jnp
@@ -9,6 +9,7 @@ from catan_engine.mechanics.action import ActionResult
 from catan_engine.mechanics.common import agent_selection_single
 from catan_engine.mechanics.trade import (
     pack_trade,
+    pack_trade_single,
     propose_trade_available,
     propose_trade_step,
 )
@@ -17,12 +18,17 @@ from expecttest import assert_expected_inline
 from tests.mechanics.actions.fixtures import fmt
 
 SHEEP, WHEAT, WOOD = 0, 1, 2
+Params = tuple[jnp.ndarray, jnp.ndarray]
 
 
-def _params(
-    give_r: int, receive_r: int, partner: int
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    return jnp.array([pack_trade(give_r, receive_r)]), jnp.array([partner])
+def _params(give_r: int, receive_r: int, partner: int) -> Params:
+    idx, target = pack_trade_single(give_r, receive_r, partner)
+    return jnp.array([idx]), jnp.array([target])
+
+
+def _bundle(give: list[int], receive: list[int], partner: int) -> Params:
+    idx, target = pack_trade(give, receive, partner)
+    return jnp.array([idx]), jnp.array([target])
 
 
 def test_propose_parks_game_in_trade_response(propose_board: Board) -> None:
@@ -32,16 +38,16 @@ def test_propose_parks_game_in_trade_response(propose_board: Board) -> None:
             result,
             phase=str(GamePhase(int(state.phase[0]))),
             partner=int(state.trade_partner[0]),
-            give=int(state.trade_give[0]),
-            receive=int(state.trade_receive[0]),
+            give=np.asarray(state.trade_give[0]).tolist(),
+            receive=np.asarray(state.trade_receive[0]).tolist(),
             acting=int(jax.vmap(agent_selection_single)(state)[0]),
         ),
         """\
 result=OK
 phase=TRADE_RESPONSE
 partner=2
-give=0
-receive=2
+give=[1, 0, 0, 0, 0]
+receive=[0, 0, 1, 0, 0]
 acting=2""",
     )
     # The offer itself moves no cards.
@@ -51,10 +57,27 @@ acting=2""",
     )
 
 
+def test_bundle_offer_records_the_counts(propose_board: Board) -> None:
+    # 1 sheep for 2 wood + 1 brick: any multiset goes through the packed params.
+    board = give(propose_board, 2, [0, 0, 2, 1, 0])
+    state, result = propose_trade_step(
+        board, _bundle([1, 0, 0, 0, 0], [0, 0, 2, 1, 0], partner=2)
+    )
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert np.asarray(state.trade_give[0]).tolist() == [1, 0, 0, 0, 0]
+    assert np.asarray(state.trade_receive[0]).tolist() == [0, 0, 2, 1, 0]
+
+
 def test_propose_ignores_partner_exact_holdings(propose_board: Board) -> None:
     # Player 2 holds no ore, but proposing sheep -> ore is still legal: only
-    # public information (a non-empty hand) gates the offer.
+    # public information (a big-enough hand) gates the offer.
     assert bool(propose_trade_available(propose_board, _params(SHEEP, 4, 2))[0])
+    # Asking for more cards than the partner holds *at all* is not.
+    assert not bool(
+        propose_trade_available(
+            propose_board, _bundle([1, 0, 0, 0, 0], [0, 0, 0, 0, 4], partner=2)
+        )[0]
+    )
 
 
 def test_invalid_two_player_board() -> None:
@@ -67,20 +90,39 @@ def test_invalid_two_player_board() -> None:
 
 
 def test_invalid_partner_choices(propose_board: Board) -> None:
-    for partner in (0, -1, 4):  # self / out of range
-        assert not bool(
-            propose_trade_available(propose_board, _params(SHEEP, WOOD, partner))[0]
-        )
-    # Player 1's hand is empty: no chance the trade could complete.
+    # Self, and a partner with an empty hand (no chance the trade completes).
+    assert not bool(propose_trade_available(propose_board, _params(SHEEP, WOOD, 0))[0])
     assert not bool(propose_trade_available(propose_board, _params(SHEEP, WOOD, 1))[0])
+    # Out-of-range packed params.
+    assert not bool(
+        propose_trade_available(propose_board, (jnp.array([1]), jnp.array([-1])))[0]
+    )
 
 
-def test_invalid_resource_choices(propose_board: Board) -> None:
-    # Like-for-like, a give card the proposer lacks, and a packed index out of range.
+def test_invalid_bundle_shapes(propose_board: Board) -> None:
+    # Like-for-like overlap, a give bundle the proposer lacks, and gifts
+    # (one side empty) are all rejected.
     assert not bool(propose_trade_available(propose_board, _params(SHEEP, SHEEP, 2))[0])
     assert not bool(propose_trade_available(propose_board, _params(WHEAT, WOOD, 2))[0])
     assert not bool(
-        propose_trade_available(propose_board, (jnp.array([25]), jnp.array([2])))[0]
+        propose_trade_available(
+            propose_board, _bundle([2, 0, 0, 0, 0], [0, 0, 1, 0, 0], partner=2)
+        )[0]
+    )
+    assert not bool(
+        propose_trade_available(
+            propose_board, _bundle([1, 0, 0, 0, 0], [0, 0, 0, 0, 0], partner=2)
+        )[0]
+    )
+    assert not bool(
+        propose_trade_available(
+            propose_board, _bundle([0, 0, 0, 0, 0], [0, 0, 1, 0, 0], partner=2)
+        )[0]
+    )
+    assert not bool(
+        propose_trade_available(
+            propose_board, _bundle([1, 0, 1, 0, 0], [0, 0, 1, 0, 0], partner=2)
+        )[0]
     )
 
 

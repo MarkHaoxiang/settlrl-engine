@@ -99,18 +99,24 @@ the standalone API stays fully resolved.
 - `robber.py` — Discard is **one card per action**, repeated until the owed
   count reaches zero: keeps the choice space flat instead of enumerating
   combinatorial whole-hand splits.
-- `trade.py` — domestic trade is **one card each way** (ProposeTrade packs
-  (give, receive) into one index via `pack_trade`; the partner is `target`),
-  the same flat-choice-space trade-off as Discard — the rulebook's arbitrary
-  bundles are out of the action space. Propose legality reads *public*
-  information only (proposer holds the give card; the partner's hand is
-  non-empty), so the legality mask never leaks the partner's hidden hand;
-  whether the partner holds the asked-for card is checked by AcceptTrade,
-  whose mask only the partner sees. The proposal parks the game in
-  TRADE_RESPONSE (`trade_partner`/`trade_give`/`trade_receive` on the state;
-  partner = NO_INDEX when none); Accept/Reject return to MAIN. Disabled at 2
-  players (`n_players > 2` is static, so the propose rows are statically
-  illegal there, like unseated robber victims).
+- `trade.py` — domestic trade supports **arbitrary bundles**: per-resource
+  give/receive counts, bit-packed into ProposeTrade's two int params
+  (`pack_trade`: 5 bits per count in `idx`, partner + receive counts in
+  `target`) so any multiset flows through the unified `(action_type, params)`
+  interface — env step, records, belief diffing — with no new plumbing. The
+  flat table enumerates only the 1:1 subset (`pack_trade_single`), and the
+  packed domain (~2^27) can't live in the dense reverse lookup, so
+  `flat_legality` reads False for every proposal and the env validates them
+  with the trade core directly (`_env_step_core`). Propose legality reads
+  *public* information only (proposer holds the give bundle; partner's hand
+  covers the receive total; both sides non-empty; no resource on both sides),
+  so the legality mask never leaks the partner's hidden hand; whether the
+  partner holds the asked-for cards is checked by AcceptTrade, whose mask
+  only the partner sees. The proposal parks the game in TRADE_RESPONSE
+  (`trade_partner` + the `trade_give`/`trade_receive` count vectors on the
+  state; partner = NO_INDEX when none); Accept/Reject return to MAIN.
+  Disabled at 2 players (`n_players > 2` is static, so proposing is
+  statically illegal there, like unseated robber victims).
 - `setup.py` — the snake order is computed arithmetically because `n_players`
   is per-game state; the host-side `setup_order` restates it plainly for
   tests.

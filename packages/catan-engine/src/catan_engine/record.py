@@ -7,10 +7,11 @@ stable identifiers that survive growth of the flat action table, unlike flat
 indices or ``ActionType`` integer values, which renumber whenever actions are
 added (the version-1 schema stored flat indices and every pre-trade record
 went stale). The remaining per-move fields are readable derivations, ignored
-on load. Schema (version 2)::
+on load. Schema (version 3; version 2 stored ProposeTrade's params in a
+retired 1:1 encoding)::
 
     {
-      "version": 2,
+      "version": 3,
       "seed": 7,
       "n_players": 4,
       "number_placement": "random",
@@ -55,6 +56,12 @@ from catan_engine.env import (
     flat_to_action,
     random_flat,
 )
+from catan_engine.mechanics.trade import (
+    _COUNT_BITS,
+    _COUNT_MASK,
+    _PARTNER_BITS,
+    pack_trade_single,
+)
 
 __all__ = [
     "GameRecord",
@@ -65,7 +72,7 @@ __all__ = [
     "replay",
 ]
 
-_VERSION = 2
+_VERSION = 3
 
 # Host-side copy of the flat action table: row -> (type, idx, target), and the
 # reverse map serialisation uses to recover a move's flat row from its stable
@@ -154,7 +161,7 @@ class GameRecord:
         """
         doc = json.loads(text)
         version = doc.get("version")
-        if version not in (1, _VERSION):
+        if version not in (1, 2, _VERSION):
             raise ValueError(f"unsupported record version: {version!r}")
         winner = doc["winner"]
         return cls(
@@ -180,9 +187,10 @@ def _move_flat(m: dict[str, Any], version: int) -> int:
         at = ActionType[str(m["type"]).upper()]
     except KeyError as exc:
         raise ValueError(f"unknown action type {m['type']!r}") from exc
-    idx, target = (
-        (int(m["idx"]), int(m["target"])) if version >= 2 else _v1_params(at, m)
-    )
+    # v1 stored only flat indices; v2 stored ProposeTrade in a retired 1:1
+    # encoding. Both migrate through their (identical) annotations.
+    direct = version >= 3 or (version == 2 and at is not ActionType.PROPOSE_TRADE)
+    idx, target = (int(m["idx"]), int(m["target"])) if direct else _legacy_params(at, m)
     try:
         return _ROW[(int(at), idx, target)]
     except KeyError as exc:
@@ -192,9 +200,10 @@ def _move_flat(m: dict[str, Any], version: int) -> int:
         ) from exc
 
 
-def _v1_params(at: ActionType, m: dict[str, Any]) -> tuple[int, int]:
-    """``(idx, target)`` recovered from a version-1 move's annotations (the
-    recorded flat index is stale: the table has grown since)."""
+def _legacy_params(at: ActionType, m: dict[str, Any]) -> tuple[int, int]:
+    """``(idx, target)`` recovered from a v1/v2 move's annotations (v1 flat
+    indices are stale — the table has grown — and v2 propose params used the
+    retired 1:1 encoding)."""
     if at in _VERTEX_TYPES:
         return int(m["vertex"]), 0
     if at in _EDGE_TYPES:
@@ -209,9 +218,17 @@ def _v1_params(at: ActionType, m: dict[str, Any]) -> tuple[int, int]:
     if at is ActionType.MARITIME_TRADE:
         return _RESOURCE_INDEX[m["give"]], _RESOURCE_INDEX[m["receive"]]
     if at is ActionType.PROPOSE_TRADE:
-        give, receive = _RESOURCE_INDEX[m["give"]], _RESOURCE_INDEX[m["receive"]]
-        return give * N_RESOURCES + receive, int(m["partner"])
+        return pack_trade_single(
+            _RESOURCE_INDEX[m["give"]], _RESOURCE_INDEX[m["receive"]], int(m["partner"])
+        )
     return 0, 0  # parameterless (roll / buy dev / road building / trade response)
+
+
+def _packed_resource(packed: int) -> str:
+    """The single resource name of a 1:1 packed count field (table rows only)."""
+    counts = [(packed >> (_COUNT_BITS * r)) & _COUNT_MASK for r in range(N_RESOURCES)]
+    (r,) = (i for i, c in enumerate(counts) if c)
+    return _RESOURCE_NAMES[r]
 
 
 def _describe(move: Move) -> dict[str, Any]:
@@ -236,9 +253,10 @@ def _describe(move: Move) -> dict[str, Any]:
         out["give"] = _RESOURCE_NAMES[idx]
         out["receive"] = _RESOURCE_NAMES[target]
     elif at is ActionType.PROPOSE_TRADE:
-        out["give"] = _RESOURCE_NAMES[idx // N_RESOURCES]
-        out["receive"] = _RESOURCE_NAMES[idx % N_RESOURCES]
-        out["partner"] = target
+        # Table propose rows are the 1:1 subset, so each side is one name.
+        out["give"] = _packed_resource(idx)
+        out["receive"] = _packed_resource(target >> _PARTNER_BITS)
+        out["partner"] = target & ((1 << _PARTNER_BITS) - 1)
     elif at is ActionType.ROLL_DICE and move.dice is not None:
         out["dice"] = move.dice
     return out

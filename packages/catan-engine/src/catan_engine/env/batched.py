@@ -81,6 +81,7 @@ from catan_engine.mechanics.flat import (
     random_flat,
     type_mask_from_flat,
 )
+from catan_engine.mechanics.trade import _propose_trade_avail
 
 __all__ = [
     "N_ACTION_TYPES",
@@ -182,8 +183,8 @@ class Observation(TypedDict):
     dice_roll: UInt8[Array, "*batch"]
     has_rolled: UInt8[Array, "*batch"]
     trade_partner: UInt8[Array, "*batch"]
-    trade_give: UInt8[Array, "*batch"]
-    trade_receive: UInt8[Array, "*batch"]
+    trade_give: UInt8[Array, "*batch resources"]
+    trade_receive: UInt8[Array, "*batch resources"]
     # private (observer)
     self: Int[Array, "*batch"]
     self_resources: UInt8[Array, "*batch resources"]
@@ -502,8 +503,11 @@ class BatchedCatanEnv:
         """Descriptor of the ``(action_type, ActionParams)`` action (per lane)."""
         return {
             "action_type": Discrete(N_ACTION_TYPES),
-            "idx": Discrete(max(N_VERTICES, N_EDGES)),  # vertex/edge/tile/resource
-            "target": Discrete(N_PLAYERS),  # victim / receive / 2nd resource
+            # vertex / edge / tile / resource — or ProposeTrade's bit-packed
+            # give counts (see mechanics.trade.pack_trade).
+            "idx": Discrete(1 << 25),
+            # victim / receive / 2nd resource — or packed receive counts + partner.
+            "target": Discrete(1 << 27),
         }
 
     def observation_space(self, agent: object = None) -> dict[str, Space]:
@@ -529,8 +533,8 @@ class BatchedCatanEnv:
             "dice_roll": Discrete(13),
             "has_rolled": Discrete(2),
             "trade_partner": Discrete(256),  # player, or NO_INDEX (255)
-            "trade_give": Discrete(N_RESOURCES),
-            "trade_receive": Discrete(N_RESOURCES),
+            "trade_give": Box((N_RESOURCES,), "uint8", 0, 31),  # offered counts
+            "trade_receive": Box((N_RESOURCES,), "uint8", 0, 31),  # asked counts
             "self": Discrete(self.n_players),
             "self_resources": Box((N_RESOURCES,), "uint8", 0, BANK_INITIAL),
             "self_dev_hand": Box((N_DEV_CARD_TYPES,), "uint8", 0, 25),
@@ -799,6 +803,13 @@ def _env_step_core(
     ``auto_reset`` is False.
     """
     legal = flat_legality(avail_flat, action_type, params.idx, params.target)
+    # Trade proposals live outside the flat reverse lookup (their bundle
+    # params are bit-packed over a domain the table only samples at 1:1), so
+    # they are validated with the trade core directly.
+    propose_ok = jax.vmap(_propose_trade_avail)(
+        layout, state, (params.idx, params.target)
+    )
+    legal = jnp.where(action_type == ActionType.PROPOSE_TRADE, propose_ok, legal)
     applied, result = _apply_action_v(layout, state, action_type, params, legal)
 
     vps_after = _total_vp_v(applied)

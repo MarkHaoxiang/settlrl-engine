@@ -306,8 +306,10 @@ class GameSession:
             TradeOfferModel(
                 proposer=int(state.current_player[0]),
                 partner=partner,
-                give=_RESOURCE_NAMES[int(state.trade_give[0])],
-                receive=_RESOURCE_NAMES[int(state.trade_receive[0])],
+                # Render games play only the flat 1:1 propose rows, so each
+                # count vector holds exactly one card.
+                give=_RESOURCE_NAMES[int(np.argmax(state.trade_give[0]))],
+                receive=_RESOURCE_NAMES[int(np.argmax(state.trade_receive[0]))],
             )
             if partner != NO_INDEX
             else None

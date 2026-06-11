@@ -4,10 +4,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import cast
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Int
 
 from catan_engine.board import Board
 from catan_engine.board.layout import N_VERTICES, PORT_V, BoardLayout, PortAllocVec
@@ -121,49 +123,91 @@ def maritime_step(
 # Domestic trade: ProposeTrade -> AcceptTrade / RejectTrade
 # ===========================================================================
 #
-# One card each way: the current player offers 1 card of ``give`` to ``partner``
-# for 1 card of ``receive`` (give/receive packed into one index, see
-# ``pack_trade``). Proposing is gated on *public* information only -- the
-# proposer holds the give card and the partner's hand is non-empty -- so the
+# The current player offers ``partner`` a *bundle*: per-resource give and
+# receive counts, bit-packed into ProposeTrade's two int params (see
+# ``pack_trade``) so arbitrary trades flow through the unified
+# ``(action_type, params)`` interface — and everything built on it (env step,
+# records, belief diffing) — without new parameter plumbing. The flat table
+# enumerates only the 1:1 subset; bundles are reachable through the params
+# directly, and their legality is checked by this core, not the flat sweep.
+#
+# Proposing is gated on *public* information only -- the proposer holds the
+# give bundle and the partner's hand is at least the receive total -- so the
 # legality mask never leaks the partner's hidden hand; whether the partner
-# actually holds the asked-for card is checked only by AcceptTrade, whose mask
-# is shown to the partner (who knows their own hand). The proposal parks the
-# game in TRADE_RESPONSE, where the partner's only moves are Accept / Reject;
-# either returns to MAIN, so the proposer may propose again (multiple trades
-# per turn, per the rulebook). Disabled at 2 players.
+# actually holds the asked-for cards is checked only by AcceptTrade, whose
+# mask is shown to the partner (who knows their own hand). The proposal parks
+# the game in TRADE_RESPONSE, where the partner's only moves are Accept /
+# Reject; either returns to MAIN, so the proposer may propose again (multiple
+# trades per turn, per the rulebook). Disabled at 2 players.
+
+_COUNT_BITS = 5  # per-resource count field: 0..31 (hands cap at 19 in practice)
+_COUNT_MASK = (1 << _COUNT_BITS) - 1
+_PARTNER_BITS = 2  # partner seat 0..3
+_PACK_LIMIT = 1 << (_COUNT_BITS * N_RESOURCES)
 
 
-def pack_trade(give: int, receive: int) -> int:
-    """Pack a (give, receive) resource pair into ProposeTrade's primary index."""
-    return give * N_RESOURCES + receive
+def pack_trade(
+    give: Sequence[int], receive: Sequence[int], partner: int
+) -> tuple[int, int]:
+    """Pack a bundle proposal into ProposeTrade's ``(idx, target)`` params.
+
+    ``give`` / ``receive`` are per-resource counts (length ``N_RESOURCES``,
+    each 0..31): ``idx`` holds the give counts in 5-bit fields, ``target``
+    the partner seat (2 bits) under the receive counts.
+    """
+    if len(give) != N_RESOURCES or len(receive) != N_RESOURCES:
+        raise ValueError(f"give/receive must have {N_RESOURCES} counts")
+    if any(not 0 <= c <= _COUNT_MASK for c in (*give, *receive)):
+        raise ValueError(f"counts must be in [0, {_COUNT_MASK}]")
+    if not 0 <= partner < (1 << _PARTNER_BITS):
+        raise ValueError(f"partner must be in [0, {(1 << _PARTNER_BITS) - 1}]")
+    idx = sum(c << (_COUNT_BITS * r) for r, c in enumerate(give))
+    packed_receive = sum(c << (_COUNT_BITS * r) for r, c in enumerate(receive))
+    return idx, partner | (packed_receive << _PARTNER_BITS)
 
 
-def _unpack_trade(gr: IntScalar) -> tuple[IntScalar, IntScalar]:
-    c = jnp.clip(gr, 0, N_RESOURCES * N_RESOURCES - 1)
-    return c // N_RESOURCES, c % N_RESOURCES
+def pack_trade_single(give: int, receive: int, partner: int) -> tuple[int, int]:
+    """:func:`pack_trade` for the 1:1 case (the flat table's propose rows)."""
+    one_give = [int(r == give) for r in range(N_RESOURCES)]
+    one_receive = [int(r == receive) for r in range(N_RESOURCES)]
+    return pack_trade(one_give, one_receive, partner)
+
+
+_COUNT_SHIFTS = jnp.arange(N_RESOURCES) * _COUNT_BITS
+
+
+def _unpack_counts(packed: IntScalar) -> Int[Array, f"resources={N_RESOURCES}"]:
+    """The per-resource counts of one 5-bit-field packed int."""
+    return (packed >> _COUNT_SHIFTS) & _COUNT_MASK
 
 
 def _propose_trade_avail(
     layout: BoardLayout, state: BoardState, params: tuple[IntScalar, IntScalar]
 ) -> BoolScalar:
-    gr, partner = params
+    idx, target = params
     n = state.n_players
     player = state.current_player.astype(jnp.int32)
-    give, receive = _unpack_trade(gr)
+    partner = target & ((1 << _PARTNER_BITS) - 1)
+    give = _unpack_counts(idx)
+    receive = _unpack_counts(target >> _PARTNER_BITS)
     pc = jnp.clip(partner, 0, n - 1)
-    in_range = (gr >= 0) & (gr < N_RESOURCES * N_RESOURCES)
-    partner_ok = (partner >= 0) & (partner < n) & (partner != player)
-    distinct = give != receive
-    has_give = state.player_resources[player, give] >= 1
-    partner_has_cards = state.player_resources[pc].astype(jnp.int32).sum() > 0
+    in_range = (idx >= 0) & (idx < _PACK_LIMIT) & (target >= 0)
+    partner_ok = (partner < n) & (partner != player)
+    # Both sides give something, and no resource appears on both (rulebook:
+    # no gifts, no like-for-like).
+    two_sided = (give.sum() >= 1) & (receive.sum() >= 1)
+    disjoint = ~jnp.any((give > 0) & (receive > 0))
+    has_give = jnp.all(state.player_resources[player].astype(jnp.int32) >= give)
+    partner_could = state.player_resources[pc].astype(jnp.int32).sum() >= receive.sum()
     return (
         main_after_roll(state)
         & (n > 2)
         & in_range
         & partner_ok
-        & distinct
+        & two_sided
+        & disjoint
         & has_give
-        & partner_has_cards
+        & partner_could
     )
 
 
@@ -173,13 +217,13 @@ def _propose_trade_apply(
     params: tuple[IntScalar, IntScalar],
     available: BoolScalar,
 ) -> tuple[BoardState, IntScalar]:
-    gr, partner = params
-    give, receive = _unpack_trade(gr)
+    idx, target = params
+    partner = target & ((1 << _PARTNER_BITS) - 1)
     pc = jnp.clip(partner, 0, state.n_players - 1)
     cand = state._replace(
         trade_partner=pc.astype(jnp.uint8),
-        trade_give=give.astype(jnp.uint8),
-        trade_receive=receive.astype(jnp.uint8),
+        trade_give=to_u8(_unpack_counts(idx)),
+        trade_receive=to_u8(_unpack_counts(target >> _PARTNER_BITS)),
         phase=jnp.uint8(GamePhase.TRADE_RESPONSE),
     )
     return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
@@ -189,19 +233,21 @@ def _accept_trade_avail(
     layout: BoardLayout, state: BoardState, params: None
 ) -> BoolScalar:
     partner = jnp.clip(state.trade_partner.astype(jnp.int32), 0, state.n_players - 1)
-    receive = jnp.clip(state.trade_receive.astype(jnp.int32), 0, N_RESOURCES - 1)
     phase_ok = state.phase == GamePhase.TRADE_RESPONSE
-    # The proposer still holds the give card (nothing moved since the propose);
-    # only the partner's side needs checking.
-    holds = state.player_resources[partner, receive] >= 1
+    # The proposer still holds the give bundle (nothing moved since the
+    # propose); only the partner's side needs checking.
+    holds = jnp.all(
+        state.player_resources[partner].astype(jnp.int32)
+        >= state.trade_receive.astype(jnp.int32)
+    )
     return phase_ok & holds
 
 
 def _clear_trade(state: BoardState) -> BoardState:
     return state._replace(
         trade_partner=jnp.uint8(NO_INDEX),
-        trade_give=jnp.uint8(0),
-        trade_receive=jnp.uint8(0),
+        trade_give=jnp.zeros_like(state.trade_give),
+        trade_receive=jnp.zeros_like(state.trade_receive),
         phase=jnp.uint8(GamePhase.MAIN),
     )
 
@@ -211,11 +257,11 @@ def _accept_trade_apply(
 ) -> tuple[BoardState, IntScalar]:
     proposer = state.current_player.astype(jnp.int32)
     partner = jnp.clip(state.trade_partner.astype(jnp.int32), 0, state.n_players - 1)
-    give = jnp.clip(state.trade_give.astype(jnp.int32), 0, N_RESOURCES - 1)
-    receive = jnp.clip(state.trade_receive.astype(jnp.int32), 0, N_RESOURCES - 1)
+    give = state.trade_give.astype(jnp.int32)
+    receive = state.trade_receive.astype(jnp.int32)
     res = state.player_resources.astype(jnp.int32)
-    res = res.at[proposer, give].add(-1).at[partner, give].add(1)
-    res = res.at[partner, receive].add(-1).at[proposer, receive].add(1)
+    res = res.at[proposer].add(receive - give)
+    res = res.at[partner].add(give - receive)
     cand = _clear_trade(state._replace(player_resources=to_u8(res)))
     return tree_select(available, cand, state), jnp.where(available, SUCCESS, INVALID)
 
@@ -242,20 +288,21 @@ _reject_trade_apply_b = jax.jit(jax.vmap(_reject_trade_apply, in_axes=(0, 0, Non
 
 
 def propose_trade_available(board: Board, params: TwoIndexParams) -> Mask:
-    """``(batch,)`` legality of proposing a trade (params: (packed give/receive,
-    partner); no state change)."""
+    """``(batch,)`` legality of proposing a trade (params from
+    :func:`pack_trade`; no state change)."""
     return cast(Mask, _propose_trade_avail_b(board[0], board[1], params))
 
 
 def propose_trade_step(
     board: Board, params: TwoIndexParams
 ) -> tuple[BoardState, ResultCode]:
-    """Propose a 1:1 trade to ``partner`` (params: (packed give/receive, partner)).
+    """Propose a trade bundle to a partner (params from :func:`pack_trade`).
 
     Legality reads only public information: the proposer must hold the give
-    card and the partner must hold *some* card; whether the partner holds the
-    asked-for card is resolved by their Accept / Reject. Moves the game to
-    TRADE_RESPONSE, where the partner acts. Never legal with 2 players.
+    bundle and the partner's hand must cover the receive total; whether the
+    partner holds the asked-for cards is resolved by their Accept / Reject.
+    Moves the game to TRADE_RESPONSE, where the partner acts. Never legal
+    with 2 players.
     """
     available = _propose_trade_avail_b(board[0], board[1], params)
     return cast(
@@ -274,9 +321,9 @@ def accept_trade_step(
 ) -> tuple[BoardState, ResultCode]:
     """Accept the pending trade as the proposed-to partner.
 
-    Swaps one give card from the proposer for one receive card from the
+    Swaps the give bundle from the proposer for the receive bundle from the
     partner, clears the proposal, and returns to MAIN. Legal only while the
-    partner holds the asked-for card. Never wins.
+    partner holds the asked-for cards. Never wins.
     """
     available = _accept_trade_avail_b(board[0], board[1], None)
     return cast(
