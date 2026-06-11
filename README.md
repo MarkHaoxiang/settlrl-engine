@@ -26,15 +26,3 @@ uv sync
 ```
 
 Then see each package's README for usage.
-
-## Parallel development
-
-Each session (or agent) works in its own [git worktree](https://git-scm.com/docs/git-worktree) — a separate checkout of the same repository — so several branches can move at once without sharing a working tree:
-
-```bash
-./wt.sh learn-stage1     # checkout at ../catan-engine.wt/learn-stage1, new branch off main, synced
-./wt.sh ls               # list worktrees
-./wt.sh rm learn-stage1  # remove the checkout once merged (the branch is kept)
-```
-
-Every worktree gets its own venv; the JAX compilation cache is shared, so warm compiles carry across. Branches land on `main` via PR once CI is green.
