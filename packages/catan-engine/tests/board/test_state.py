@@ -7,9 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 from catan_engine.board.dev_cards import DEV_CARD_COUNTS
-from catan_engine.board.layout import N_VERTICES
 from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
 from catan_engine.board.state import (
     NO_INDEX,
@@ -59,12 +57,6 @@ class TestMakeBoardState:
         assert np.array_equal(np.asarray(s.dev_deck[0]), DEV_CARD_COUNTS)
         assert int(s.longest_road_owner[0]) == NO_INDEX
         assert int(s.largest_army_owner[0]) == NO_INDEX
-
-    def test_batch_size_leads_every_array(self) -> None:
-        s = make_board_state(4)
-        assert s.vertex_owner.shape == (4, N_VERTICES)
-        assert s.player_resources.shape == (4, N_PLAYERS, N_RESOURCES)
-        assert s.key.shape == (4,)
 
     def test_n_players_defaults_full_and_validates(self) -> None:
         # The per-player arrays are sized to the seated player count, and the

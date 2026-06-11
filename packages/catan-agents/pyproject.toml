@@ -26,6 +26,7 @@ catan-engine = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto"
 
 [tool.mypy]
 strict = true

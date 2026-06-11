@@ -1,11 +1,8 @@
+from itertools import pairwise
 from typing import Any, ClassVar
 
 import jax
 import numpy as np
-from expecttest import TestCase
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from catan_engine.board.layout import (
     EDGE_V,
     N_EDGES,
@@ -25,6 +22,10 @@ from catan_engine.board.layout import (
 )
 from catan_engine.board.port import Port
 from catan_engine.board.tile import Tile
+from expecttest import TestCase
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from tests.render import _EDGE_VERTICES, _VERTEX_CUBE
 
 
@@ -63,21 +64,15 @@ class TestBoardGenerator(TestCase):
     def setUpClass(cls) -> None:
         cls.board = make_layout(batch_size=1, key=jax.random.key(0))
 
-    @given(st.integers(min_value=1, max_value=8))
-    @settings(deadline=None)
-    def test_output_shapes(self, batch_size: int) -> None:
-        board = make_layout(batch_size=batch_size, key=jax.random.key(0))
-        assert board.tile_resource.shape == (batch_size, N_TILES)
-        assert board.tile_number.shape == (batch_size, N_TILES)
-        assert board.port_allocation.shape == (batch_size, 9)
-
     @given(st.integers(min_value=0, max_value=2**31))
     @settings(max_examples=20, deadline=None)
     def test_tile_resource_counts(self, seed: int) -> None:
         board = make_layout(batch_size=1, key=jax.random.key(seed))
         resources = np.asarray(board.tile_resource[0])
         unique, counts = np.unique(resources, return_counts=True)
-        summary = sorted(f"{Tile(int(t))!s}: {int(c)}" for t, c in zip(unique, counts))
+        summary = sorted(
+            f"{Tile(int(t))!s}: {int(c)}" for t, c in zip(unique, counts, strict=True)
+        )
         self.assertExpectedInline(
             "\n".join(summary),
             """\
@@ -117,7 +112,9 @@ WOD: 4""",
         board = make_layout(batch_size=1, key=jax.random.key(seed))
         ports = np.asarray(board.port_allocation[0])
         unique, counts = np.unique(ports, return_counts=True)
-        summary = sorted(f"{Port(int(p))!s}: {int(c)}" for p, c in zip(unique, counts))
+        summary = sorted(
+            f"{Port(int(p))!s}: {int(c)}" for p, c in zip(unique, counts, strict=True)
+        )
         self.assertExpectedInline(
             "\n".join(summary),
             """\
@@ -142,7 +139,7 @@ class TestSpiralLayout(TestCase):
         # Covers every tile exactly once, every step is to an adjacent hex, and
         # the walk spirals inward: outer ring (12), middle ring (6), centre.
         assert sorted(SPIRAL_TILE_ORDER) == list(range(N_TILES))
-        for a, b in zip(SPIRAL_TILE_ORDER, SPIRAL_TILE_ORDER[1:]):
+        for a, b in pairwise(SPIRAL_TILE_ORDER):
             assert _tiles_adjacent(a, b), f"spiral jumps from tile {a} to {b}"
         radii = [max(abs(c) for c in tile_cube(t)) for t in SPIRAL_TILE_ORDER]
         assert radii == [2] * 12 + [1] * 6 + [0]

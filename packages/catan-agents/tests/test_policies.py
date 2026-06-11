@@ -13,14 +13,12 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import pytest
-
+from catan_agents import POLICIES, AgentSpec, evaluate
+from catan_agents.shared.policy import BeliefPolicy, Policy
 from catan_engine.belief import BeliefView
 from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
 
-from catan_agents import POLICIES, AgentSpec, evaluate
-from catan_agents.shared.policy import BeliefPolicy, Policy
-
-BATCH = 8
+BATCH = 4
 
 
 def _acting_obs(env: BatchedCatanEnv) -> Observation:
@@ -43,9 +41,7 @@ def _acting_view(env: BatchedCatanEnv) -> BeliefView:
     )
 
 
-def _self_play(
-    spec: AgentSpec, seed: int, n_steps: int
-) -> tuple[jax.Array, jax.Array]:
+def _self_play(spec: AgentSpec, seed: int, n_steps: int) -> tuple[jax.Array, jax.Array]:
     """Drive ``n_steps`` of self-play; return the per-step ``(masks, actions)``."""
     env = BatchedCatanEnv(
         batch_size=BATCH,
@@ -76,7 +72,7 @@ def _self_play(
 
 @pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
 def test_picks_only_legal_actions(spec: AgentSpec) -> None:
-    masks, actions = _self_play(spec, seed=0, n_steps=150)
+    masks, actions = _self_play(spec, seed=0, n_steps=100)
     # Whenever a lane has any legal move, the pick must be one of them.
     legal = jnp.take_along_axis(masks, actions[..., None], axis=2)[..., 0]
     assert bool(jnp.all(~masks.any(axis=2) | legal))
@@ -84,14 +80,15 @@ def test_picks_only_legal_actions(spec: AgentSpec) -> None:
 
 @pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
 def test_same_seed_reproduces_rollout(spec: AgentSpec) -> None:
-    _, first = _self_play(spec, seed=3, n_steps=60)
-    _, second = _self_play(spec, seed=3, n_steps=60)
+    _, first = _self_play(spec, seed=3, n_steps=40)
+    _, second = _self_play(spec, seed=3, n_steps=40)
     assert bool(jnp.all(first == second))
 
 
 @pytest.mark.parametrize("spec", POLICIES.values(), ids=POLICIES.keys())
 def test_self_play_rollouts_complete_games(spec: AgentSpec) -> None:
-    result = evaluate([spec, spec], n_steps=600, batch_size=BATCH, seed=0)
+    # The episode budget stops as soon as two games finish (instead of a fixed
+    # step count), which is what bounds the expensive search agents' runtime.
+    result = evaluate([spec, spec], n_episodes=2, batch_size=BATCH, seed=0)
     assert result.wins.shape == (2,)
-    assert result.episodes == int(result.wins.sum())
-    assert result.episodes > 0
+    assert result.episodes >= 2

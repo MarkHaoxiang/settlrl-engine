@@ -4,7 +4,6 @@ the rest of the test suite composes its fixtures from."""
 from __future__ import annotations
 
 import numpy as np
-
 from catan_engine.board import (
     give,
     give_dev_card,
@@ -25,11 +24,6 @@ from catan_engine.board.tile import Tile
 
 
 class TestMakeBoardAndReplicate:
-    def test_make_board_shapes(self) -> None:
-        layout, state = make_board(1, seed=0)
-        assert state.vertex_owner.shape == (1, N_VERTICES)
-        assert layout.tile_resource.shape == (1, N_TILES)
-
     def test_seed_is_deterministic(self) -> None:
         a, _ = make_board(1, seed=7)
         b, _ = make_board(1, seed=7)

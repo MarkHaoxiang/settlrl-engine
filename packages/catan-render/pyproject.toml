@@ -24,3 +24,7 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 catan-engine = { workspace = true }
 catan-agents = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto"

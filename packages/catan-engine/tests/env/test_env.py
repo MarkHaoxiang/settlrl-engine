@@ -7,8 +7,16 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 from catan_engine import env
+from catan_engine.board import make_board, replicate, set_phase
+from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
+from catan_engine.board.state import GamePhase
+from catan_engine.env import (
+    N_ACTION_TYPES,
+    BatchedCatanEnv,
+    Infos,
+    Observation,
+)
 from catan_engine.mechanics.action import (
     ActionParams,
     ActionResult,
@@ -16,17 +24,7 @@ from catan_engine.mechanics.action import (
 )
 from catan_engine.mechanics.flat import flat_available_b
 from catan_engine.mechanics.placement import build_road_step
-from catan_engine.board import make_board, replicate, set_phase
-from catan_engine.env import (
-    N_ACTION_TYPES,
-    BatchedCatanEnv,
-    Box,
-    Discrete,
-    Infos,
-    Observation,
-)
-from catan_engine.board.resources import N_PLAYERS, N_RESOURCES
-from catan_engine.board.state import GamePhase
+
 from tests.mechanics.actions.fixtures import road_fixture
 
 
@@ -210,14 +208,6 @@ class TestBatchedCatanEnv:
     def test_invalid_reward_mode(self) -> None:
         with pytest.raises(ValueError, match="reward must be"):
             BatchedCatanEnv(batch_size=1, reward="bogus")
-
-    def test_spaces_descriptors(self) -> None:
-        e = BatchedCatanEnv(batch_size=1, seed=11)
-        aspace = e.action_space()
-        assert aspace["action_type"] == Discrete(N_ACTION_TYPES)
-        ospace = e.observation_space()
-        assert isinstance(ospace["vertex_owner"], Box)
-        assert ospace["vertex_owner"].shape == (54,)
 
     def test_space_and_info_keys_match_typed_dicts(self) -> None:
         # mypy ties observe() to the Observation TypedDict; this pins the

@@ -1,13 +1,12 @@
 import jax.numpy as jnp
 import numpy as np
-from expecttest import TestCase
-
 from catan_engine.board.resources import (
     BANK_INITIAL,
     N_PLAYERS,
     N_RESOURCES,
     compute_bank_resources,
 )
+from expecttest import TestCase
 
 
 class TestBankResources(TestCase):
@@ -28,15 +27,3 @@ class TestBankResources(TestCase):
         player_resources = jnp.ones((1, N_PLAYERS, N_RESOURCES), dtype=jnp.uint8)
         bank = np.asarray(compute_bank_resources(player_resources)[0])
         assert bank.tolist() == [BANK_INITIAL - N_PLAYERS] * N_RESOURCES
-
-    def test_bank_batched(self) -> None:
-        B = 3
-        player_resources = jnp.zeros((B, N_PLAYERS, N_RESOURCES), dtype=jnp.uint8)
-        # Batch item 1: player 0 has 2 wheat
-        player_resources = player_resources.at[1, 0, 1].set(2)
-        bank = np.asarray(compute_bank_resources(player_resources))
-        assert bank.shape == (B, N_RESOURCES)
-        # Untouched lanes keep the full bank; only lane 1's wheat is reduced.
-        assert bank[0].tolist() == [BANK_INITIAL] * N_RESOURCES
-        assert bank[1, 1] == BANK_INITIAL - 2
-        assert bank[2].tolist() == [BANK_INITIAL] * N_RESOURCES

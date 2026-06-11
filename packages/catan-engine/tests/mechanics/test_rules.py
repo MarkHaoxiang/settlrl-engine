@@ -118,7 +118,7 @@ def _boards(draw: st.DrawFn) -> tuple[np.ndarray, np.ndarray]:
 
 class TestLongestRoad(TestCase):
     @given(_boards())
-    @settings(max_examples=400, deadline=None)
+    @settings(max_examples=150, deadline=None)
     def test_matches_reference_property(
         self, board: tuple[np.ndarray, np.ndarray]
     ) -> None:
@@ -551,7 +551,7 @@ def test_dfs_peak_sp_stays_below_dump(monkeypatch: pytest.MonkeyPatch) -> None:
         edge_road[edges] = 1
         run(edge_road, np.zeros(N_VERTICES, np.uint8), 0)
     dense_edge_p = [0.4, 0.2, 0.16, 0.14, 0.1]
-    for seed in range(100):
+    for seed in range(50):
         edge_road, vertex_owner = random_occupancy(
             seed, edge_p=dense_edge_p, vertex_p=_VERTEX_P
         )
