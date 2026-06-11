@@ -37,6 +37,7 @@ from catan_engine.mechanics.common import agent_selection_single
 
 from catan_agents.search.mcts import (
     _ILLEGAL,
+    _NO_PROPOSE,
     _QTRANSFORM,
     _ROLL_P,
     _ROW_PARAMS,
@@ -269,6 +270,7 @@ def make_smcts(
             root_logits = (
                 jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
                 / prior_scale
+                + _NO_PROPOSE
             )
         else:
             root_logits = prior(layout, state, player)

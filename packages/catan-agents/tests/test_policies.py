@@ -12,10 +12,20 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 from catan_agents import POLICIES, BeliefSpec, ObservationSpec, evaluate
-from catan_engine.belief import BeliefView
-from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
+from catan_engine.belief import BeliefState, BeliefView, belief_view
+from catan_engine.board import Board, give, make_board, to_main
+from catan_engine.env import (
+    ActionType,
+    BatchedCatanEnv,
+    Observation,
+    flat_to_action,
+    observe_for,
+)
+from catan_engine.mechanics.flat import FLAT_ATYPE, flat_available_for
+from catan_engine.mechanics.trade import pack_trade, propose_trade_step
 
 BATCH = 4
 
@@ -90,10 +100,66 @@ def test_same_seed_reproduces_rollout(spec: ObservationSpec | BeliefSpec) -> Non
     assert bool(jnp.all(first == second))
 
 
+SHEEP, WOOD = 0, 2
+_ACCEPT_ROW = int(np.flatnonzero(np.asarray(FLAT_ATYPE) == ActionType.ACCEPT_TRADE)[0])
+_REJECT_ROW = int(np.flatnonzero(np.asarray(FLAT_ATYPE) == ActionType.REJECT_TRADE)[0])
+
+
+def _pending_trade_board(responder_hand: list[int]) -> Board:
+    """A 3p TRADE_RESPONSE board: player 0 has offered player 1 wood for sheep.
+
+    Player 2 is far ahead on victory points, so the best-opponent term of the
+    two-sided heuristic is theirs (unchanged by the trade) and the responder's
+    decision reduces to its own side of the swap.
+    """
+    board = to_main(make_board(1, seed=0, n_players=3))
+    board = give(board, 0, [0, 0, 4, 0, 0])
+    board = give(board, 1, responder_hand)
+    layout, st = board
+    st = st._replace(victory_points=st.victory_points.at[0, 2].set(5))
+    st, _ = propose_trade_step(
+        (layout, st), (jnp.array([pack_trade(WOOD, SHEEP)]), jnp.array([1]))
+    )
+    return layout, st
+
+
+@pytest.mark.parametrize("name", ["greedy", "lookahead"])
+@pytest.mark.parametrize("favorable", [True, False], ids=["accepts", "rejects"])
+def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
+    # Favorable: pay 1 of 6 sheep for a first wood. Unfavorable: pay the only
+    # sheep for a seventh wood.
+    hand = [6, 0, 0, 0, 0] if favorable else [1, 0, 6, 0, 0]
+    layout, state = _pending_trade_board(hand)
+    layout0, state0 = jax.tree.map(lambda x: x[0], (layout, state))
+    mask = flat_available_for(layout0, state0)
+    spec = SPECS[name]
+    key = jax.random.key(0)
+    if isinstance(spec, ObservationSpec):
+        obs = cast(
+            Observation,
+            jax.tree.map(
+                lambda x: x[0], observe_for(layout, state, jnp.array([1], jnp.int32))
+            ),
+        )
+        flat = spec.policy(key, obs, mask)
+    else:
+        res = state0.player_resources  # exact public knowledge: lo == hi == truth
+        belief = BeliefState(
+            res_lo=jnp.broadcast_to(res, (3, *res.shape)),
+            res_hi=jnp.broadcast_to(res, (3, *res.shape)),
+            dev_played=jnp.zeros_like(state0.dev_deck),
+        )
+        view = belief_view(state0, belief, 1)
+        flat = spec.policy(key, layout0, view, jnp.int32(1), mask)
+    assert int(flat) == (_ACCEPT_ROW if favorable else _REJECT_ROW)
+
+
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
 def test_self_play_rollouts_complete_games(spec: ObservationSpec | BeliefSpec) -> None:
     # The episode budget stops as soon as two games finish (instead of a fixed
     # step count), which is what bounds the expensive search agents' runtime.
-    result = evaluate([spec, spec], n_episodes=2, batch_size=BATCH, seed=0)
-    assert result.wins.shape == (2,)
+    # Three seats so domestic trade is live: a proposer stuck re-offering a
+    # trade its partner keeps rejecting would stall the games and fail here.
+    result = evaluate([spec, spec, spec], n_episodes=2, batch_size=BATCH, seed=0)
+    assert result.wins.shape == (3,)
     assert result.episodes >= 2

@@ -57,10 +57,12 @@ agents run at 2–4 players with beliefs of varying sharpness.
   mcts (44.5%, n=200): honest calibration is not the best search temperature.
 - `greedy.py` — scripted policy: a static per-row tier score plus small
   observation bonuses. Invariant: tier gaps (≥ 100) exceed every bonus range
-  (pips ≤ 15, held ≤ 19), so bonuses only reorder within a tier; types
-  sharing a tier are phase-disjoint or both dominated (the trade types sit
-  below END_TURN). Deliberately simple: no resource targeting, never trades
-  (and rejects every proposal), ignores whose production the robber blocks.
+  (|bonus| < 50), so bonuses only reorder within a tier; types sharing a tier
+  are phase-disjoint, both dominated (MARITIME / PROPOSE sit below END_TURN),
+  or deliberately bonus-decided (ACCEPT vs REJECT: accept iff it holds
+  strictly more of the card it would give than of the card it would get).
+  Deliberately simple: no resource targeting, never offers a trade, ignores
+  whose production the robber blocks.
 - `evaluate.py` — fused driver over the engine's `rollout(actor=...)` seam:
   every seat's vmapped agent picks in every lane each step inside the scan and
   the acting seat's pick is kept — n_seats policy evals per step, fine for
@@ -83,10 +85,28 @@ in-tree opponent sees the sampled world (strategy fusion) — count-only value
 terms blunt what it can exploit. smcts removes the first for dice and dev
 draws (true chance nodes); the second is inherent to PIMC.
 
-- `greedy.py` — one-step lookahead: all 560 successors in one
-  `vmap(apply_action)`, valued and masked-argmaxed.
+- `greedy.py` — one-step lookahead: all 662 successors in one
+  `vmap(apply_action)`, valued and masked-argmaxed. Trade proposals are the
+  one material-neutral successor, so they're scored by their *accepted*
+  outcome instead, gated on a partner model (the same value from the
+  partner's seat must prefer accepting) minus `trade_penalty` (default 0.25
+  — the quality bar that keeps marginal offers below not trading).
+  `propose_rate` (default 0.5) randomly withholds proposing each move: the
+  engine keeps no memory of rejected offers, so a deterministic proposer
+  facing a mispredicted partner (e.g. one playing a different family) would
+  re-offer the same trade forever; the gate bounds such streaks
+  geometrically. Responding needs none of this — accept vs reject is an
+  ordinary value comparison. Measured 3p vs the
+  `propose_rate=0` member (seat-rotated, chance 33.3%): 38.7% (n=186) and
+  36.9% (n=187) across two seed batches — 37.8% pooled (n=373), a modest but
+  consistent edge for offering.
 - `mcts.py` — `mctx.gumbel_muzero_policy` with the engine as `recurrent_fn`;
-  after `jit` the search runs (games × trees)-wide, trees = `num_worlds`
+  trade proposals are excluded from both priors (`_NO_PROPOSE`): under the
+  paranoid frame the in-tree responder prices every offer as
+  rejected-or-harmful, so their ~100 near-tied rows only flood the candidate
+  pool — mcts answers trades through search (accept vs reject backs up like
+  any move) but never offers one.
+  After `jit` the search runs (games × trees)-wide, trees = `num_worlds`
   (belief width) × `num_futures` (chance width: re-keyed replicas of one
   draw). Width is near-free vs `num_simulations` (a sequential scan): 16
   trees cost +66% wall-clock, 8× sims cost ~8× (RTX 5090, B=32). Frames are

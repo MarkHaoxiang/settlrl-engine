@@ -23,11 +23,12 @@ _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 _ROW_IDX = _ROW_PARAMS.idx
 _ROW_TARGET = _ROW_PARAMS.target
 
-# Priority tier per action type. Tiers are spaced so no per-target bonus (max
-# 15 pips) can cross between them; types sharing a tier are never both the
-# argmax (disjoint phases, or — MARITIME_TRADE / PROPOSE_TRADE — both strictly
-# dominated by END_TURN in MAIN, so the greedy player never trades). As the
-# proposed-to partner it always rejects (REJECT_TRADE > ACCEPT_TRADE).
+# Priority tier per action type. Tiers are spaced so no per-target bonus
+# (|bonus| < 50) can cross between them; types sharing a tier are never both
+# the argmax (disjoint phases, or — MARITIME_TRADE / PROPOSE_TRADE — both
+# strictly dominated by END_TURN in MAIN, so the greedy player never offers a
+# trade). ACCEPT_TRADE / REJECT_TRADE share a tier on purpose: their trade
+# bonus decides the response (see ``greedy_policy``).
 _TIER: dict[ActionType, float] = {
     ActionType.BUILD_CITY: 900.0,
     ActionType.BUILD_SETTLEMENT: 800.0,
@@ -43,8 +44,8 @@ _TIER: dict[ActionType, float] = {
     ActionType.DISCARD: 200.0,
     ActionType.MOVE_ROBBER: 200.0,
     ActionType.REJECT_TRADE: 200.0,
+    ActionType.ACCEPT_TRADE: 200.0,
     ActionType.END_TURN: 100.0,
-    ActionType.ACCEPT_TRADE: 100.0,
     ActionType.MARITIME_TRADE: 0.0,
     ActionType.PROPOSE_TRADE: 0.0,
 }
@@ -60,28 +61,45 @@ _ROBBER_MOVE = (_ROW_TYPE == ActionType.MOVE_ROBBER) | (
     _ROW_TYPE == ActionType.PLAY_KNIGHT
 )
 _DISCARD = _ROW_TYPE == ActionType.DISCARD
+_ACCEPT = _ROW_TYPE == ActionType.ACCEPT_TRADE
+_REJECT = _ROW_TYPE == ActionType.REJECT_TRADE
 
 
 def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatAction:
     """Highest-priority legal action, ties broken uniformly at random.
 
     Priorities: city > settlement > dev card > road > play dev > everything
-    forced (roll/setup road/discard/robber) > end turn; never trades, and
-    rejects every trade proposed to it. Within a
-    tier, settlement/city targets are scored by adjacent-tile pips, the robber
-    goes to the highest-pip tile (preferring a steal), and the discard gives up
-    the most-held resource.
+    forced (roll/setup road/discard/robber/trade response) > end turn; never
+    offers a trade, and accepts one exactly when it holds strictly more of the
+    card it would give than of the card it would get (trading surplus toward
+    scarcity). Within a tier, settlement/city targets are scored by
+    adjacent-tile pips, the robber goes to the highest-pip tile (preferring a
+    steal), and the discard gives up the most-held resource.
     """
     v_pips = vertex_pips(obs["tile_number"])
     t_pips = tile_pips(obs["tile_number"])
     held = obs["self_resources"].astype(jnp.float32)
+    # The pending trade from the responder's side: it would *get* the
+    # proposer's give card and *pay* the asked-for card. The 2x gap against
+    # the fixed reject bonus of 1 keeps the response deterministic under the
+    # <1 tie noise: accept iff pay_held - get_held >= 1.
+    get_held = held[jnp.clip(obs["trade_give"].astype(jnp.int32), 0, N_RESOURCES - 1)]
+    pay_held = held[
+        jnp.clip(obs["trade_receive"].astype(jnp.int32), 0, N_RESOURCES - 1)
+    ]
     bonus = jnp.where(
         _VERTEX_BUILD,
         v_pips[jnp.clip(_ROW_IDX, 0, N_VERTICES - 1)],
         jnp.where(
             _ROBBER_MOVE,
             t_pips[jnp.clip(_ROW_IDX, 0, N_TILES - 1)] + (_ROW_TARGET >= 0),
-            jnp.where(_DISCARD, held[jnp.clip(_ROW_IDX, 0, N_RESOURCES - 1)], 0.0),
+            jnp.where(
+                _DISCARD,
+                held[jnp.clip(_ROW_IDX, 0, N_RESOURCES - 1)],
+                jnp.where(
+                    _ACCEPT, 2.0 * (pay_held - get_held), jnp.where(_REJECT, 1.0, 0.0)
+                ),
+            ),
         ),
     )
     noise = jax.random.uniform(key, (N_FLAT,))

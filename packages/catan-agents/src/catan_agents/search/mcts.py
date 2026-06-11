@@ -40,8 +40,15 @@ _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 
 # Interior-node prior: greedy's static tier table, tempered so tier gaps
 # (>= 100) land ~2 nats apart — strong enough to order first expansions,
-# weak enough for a few backed-up values to override.
-_TIER_LOGITS = _BASE / 50.0
+# weak enough for a few backed-up values to override. Trade proposals are
+# excluded outright: under the paranoid two-sided frame the in-tree responder
+# prices every offer as rejected-or-harmful, so their ~100 near-tied rows
+# would only flood the candidate pool — mcts answers trades through search but
+# never offers one.
+_NO_PROPOSE = jnp.where(
+    _ROW_TYPE == ActionType.PROPOSE_TRADE, _ILLEGAL, 0.0
+)  # additive row demotion for both priors
+_TIER_LOGITS = _BASE / 50.0 + _NO_PROPOSE
 
 # Two-dice outcomes and their probabilities.
 _ROLLS = jnp.arange(2, 13)
@@ -270,13 +277,15 @@ def make_mcts(
             return out, pack(t.next_state)
 
         if prior is None:
-            # Heuristic root prior: the one-step value sweep over legal moves.
+            # Heuristic root prior: the one-step value sweep over legal moves
+            # (proposals excluded, like the interior prior — see _NO_PROPOSE).
             successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
                 layout, state, _ROW_TYPE, _ROW_PARAMS, mask
             )
             root_logits = (
                 jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
                 / prior_scale
+                + _NO_PROPOSE
             )
         else:
             root_logits = prior(layout, state, player)
