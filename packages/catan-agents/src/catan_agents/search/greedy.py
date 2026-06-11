@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import IntScalar
+from catan_engine.board.state import IntScalar, KeyScalar
 from catan_engine.env import N_FLAT, flat_to_action
 from catan_engine.mechanics.action import apply_action
 
@@ -28,7 +28,7 @@ def make_greedy(value: ValueFunction) -> BeliefPolicy:
     """
 
     def policy(
-        key: jax.Array,
+        key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
         player: IntScalar,

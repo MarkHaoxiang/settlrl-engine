@@ -11,9 +11,11 @@ from catan_agents.search import (
 from catan_agents.shared import (
     AgentSpec,
     BeliefPolicy,
+    BeliefSpec,
     EvalResult,
     FlatAction,
     FlatMask,
+    ObservationSpec,
     Policy,
     Value,
     ValueFunction,
@@ -27,15 +29,14 @@ from catan_agents.shared import (
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 
-POLICIES: dict[str, AgentSpec] = {
-    "random": AgentSpec(lambda: random_policy, "observation", _ANY_COUNT),
-    "greedy": AgentSpec(lambda: greedy_policy, "observation", _ANY_COUNT),
-    "lookahead": AgentSpec(
-        make_greedy, "belief", _ANY_COUNT, defaults={"value": heuristic_value}
+POLICIES: dict[str, ObservationSpec | BeliefSpec] = {
+    "random": ObservationSpec(lambda: random_policy, _ANY_COUNT),
+    "greedy": ObservationSpec(lambda: greedy_policy, _ANY_COUNT),
+    "lookahead": BeliefSpec(
+        make_greedy, _ANY_COUNT, defaults={"value": heuristic_value}
     ),
-    "mcts": AgentSpec(
+    "mcts": BeliefSpec(
         make_mcts,
-        "belief",
         _ANY_COUNT,
         defaults={"value": heuristic_value},
         # One world/future and a small Gumbel budget: a cheap member of the
@@ -54,9 +55,11 @@ __all__ = [
     "POLICIES",
     "AgentSpec",
     "BeliefPolicy",
+    "BeliefSpec",
     "EvalResult",
     "FlatAction",
     "FlatMask",
+    "ObservationSpec",
     "Policy",
     "Value",
     "ValueFunction",

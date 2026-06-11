@@ -20,7 +20,7 @@ from catan_engine.env.aec import CatanAECEnv
 from catan_engine.record import GameRecord, Move
 
 from .actions import decode_actions
-from .bots import POLICIES, bot_act
+from .bots import POLICIES, BeliefSpec, bot_act
 from .models import GameStatusModel, LogEntryModel
 
 # Seat kind for a human-controlled seat; every other kind is a POLICIES name.
@@ -99,7 +99,7 @@ class GameSession:
             number_placement=number_placement,
             # Belief seats read the env's honest per-observer card counting.
             track_beliefs=any(
-                kind != HUMAN and POLICIES[kind].observes == "belief"
+                kind != HUMAN and isinstance(POLICIES[kind], BeliefSpec)
                 for kind in self.seats
             ),
         )

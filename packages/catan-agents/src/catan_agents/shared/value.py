@@ -21,12 +21,14 @@ from catan_engine.board.layout import (
     PORT_V,
     TILE_V,
     BoardLayout,
+    TileNumberVec,
 )
-from catan_engine.board.resources import CITY_COST, SETTLEMENT_COST
+from catan_engine.board.resources import CITY_COST, N_RESOURCES, SETTLEMENT_COST
 from catan_engine.board.state import (
     MAX_SETTLEMENTS,
     SETTLEMENT,
     BoardState,
+    BoolScalar,
     IntScalar,
 )
 from jaxtyping import Array, Float
@@ -48,13 +50,13 @@ class ValueFunction(Protocol):
     ) -> Value: ...
 
 
-def tile_pips(tile_number: jax.Array) -> Float[Array, f"tiles={N_TILES}"]:
+def tile_pips(tile_number: TileNumberVec) -> Float[Array, f"tiles={N_TILES}"]:
     """Expected-production weight per tile: 6 - |7 - number| (0 for the desert)."""
     n = tile_number.astype(jnp.int32)
     return jnp.where(n == 0, 0, 6 - jnp.abs(7 - n)).astype(jnp.float32)
 
 
-def vertex_pips(tile_number: jax.Array) -> Float[Array, f"vertices={N_VERTICES}"]:
+def vertex_pips(tile_number: TileNumberVec) -> Float[Array, f"vertices={N_VERTICES}"]:
     """Summed pips of each vertex's adjacent tiles."""
     pips = tile_pips(tile_number)
     acc = jnp.zeros((N_VERTICES,), jnp.float32)
@@ -99,8 +101,8 @@ def make_heuristic(
     """
 
     def strength(
-        layout: BoardLayout, state: BoardState, p: jax.Array, exact_dev: jax.Array
-    ) -> jax.Array:
+        layout: BoardLayout, state: BoardState, p: IntScalar, exact_dev: BoolScalar
+    ) -> Value:
         vp = state.victory_points[p].astype(jnp.float32)
         vp += 2.0 * (state.longest_road_owner == p)
         vp += 2.0 * (state.largest_army_owner == p)
@@ -146,7 +148,7 @@ def make_heuristic(
         n_roads = own_road.sum().astype(jnp.float32)
 
         # Progress toward the closest next build (gated on it being usable).
-        def completeness(cost: jax.Array) -> jax.Array:
+        def completeness(cost: Float[Array, f"resources={N_RESOURCES}"]) -> Value:
             return jnp.minimum(res, cost).sum() / cost.sum()
 
         deck_left = state.dev_deck.astype(jnp.int32).sum() > 0

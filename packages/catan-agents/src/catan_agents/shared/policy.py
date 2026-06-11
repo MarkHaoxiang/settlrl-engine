@@ -13,12 +13,11 @@ from __future__ import annotations
 import dataclasses
 import functools
 from collections.abc import Callable, Mapping
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
-import jax
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import IntScalar
+from catan_engine.board.state import IntScalar, KeyScalar
 from catan_engine.env import N_FLAT, Observation
 from jaxtyping import Array, Bool, Int
 
@@ -41,7 +40,7 @@ class Policy(Protocol):
     """
 
     def __call__(
-        self, key: jax.Array, obs: Observation, mask: FlatMask
+        self, key: KeyScalar, obs: Observation, mask: FlatMask
     ) -> FlatAction: ...
 
 
@@ -57,7 +56,7 @@ class BeliefPolicy(Protocol):
 
     def __call__(
         self,
-        key: jax.Array,
+        key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
         player: IntScalar,
@@ -65,32 +64,39 @@ class BeliefPolicy(Protocol):
     ) -> FlatAction: ...
 
 
+P = TypeVar("P", Policy, BeliefPolicy)
+# `for_tests` returns the spec's own class; a bound TypeVar instead of Self
+# because the tests' beartype hook can't check PEP 673 on hook-decorated
+# methods (and only resolves unsubscripted forward-ref bounds).
+S = TypeVar("S", bound="AgentSpec")
+
+
 @dataclasses.dataclass(frozen=True)
-class AgentSpec:
+class AgentSpec(Generic[P]):
     """A registry entry: a policy *family* plus the parameters to build it at.
 
     ``make(**defaults)`` builds the shipped agent (cached as :attr:`policy`;
     parameterless families pass an empty ``defaults``). ``for_testing`` holds
     overrides applied on top of ``defaults`` for a cheaper member of the same
-    family (see :attr:`for_tests`). ``observes`` says which protocol the
-    family satisfies (``"observation"`` -> :class:`Policy`, ``"belief"`` ->
-    :class:`BeliefPolicy`); ``n_players`` holds the player counts the agent
-    may be seated at.
+    family (see :attr:`for_tests`). The subclass is the protocol tag —
+    :class:`ObservationSpec` families build a :class:`Policy`,
+    :class:`BeliefSpec` families a :class:`BeliefPolicy` — so consumers
+    dispatch with ``isinstance``. ``n_players`` holds the player counts the
+    agent may be seated at.
     """
 
-    make: Callable[..., Policy | BeliefPolicy]
-    observes: Literal["observation", "belief"]
+    make: Callable[..., P]
     n_players: frozenset[int]
     defaults: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     for_testing: Mapping[str, Any] | None = None
 
     @functools.cached_property
-    def policy(self) -> Policy | BeliefPolicy:
+    def policy(self) -> P:
         """The shipped agent: the family built at ``defaults``."""
         return self.make(**self.defaults)
 
     @property
-    def for_tests(self) -> AgentSpec:
+    def for_tests(self: S) -> S:
         """The same family at its cheap test parameters (itself when none).
 
         The protocol properties (legality, determinism, completing games)
@@ -102,3 +108,11 @@ class AgentSpec:
         return dataclasses.replace(
             self, defaults={**self.defaults, **self.for_testing}, for_testing=None
         )
+
+
+class ObservationSpec(AgentSpec[Policy]):
+    """A family of observation-driven seats."""
+
+
+class BeliefSpec(AgentSpec[BeliefPolicy]):
+    """A family of belief-driven seats."""

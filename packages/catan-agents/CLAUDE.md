@@ -16,7 +16,12 @@ agents run at 2–4 players with beliefs of varying sharpness.
   (`make` + `defaults`, with `policy` the cached shipped build) plus optional
   `for_testing` parameter overrides — `spec.for_tests` is the cheap family
   member the protocol tests run (the tested properties are
-  parameter-independent). Policies are masked-argmax style: with no legal
+  parameter-independent). `AgentSpec` is generic over its protocol and the
+  subclass is the tag (`ObservationSpec` / `BeliefSpec`), so consumers
+  dispatch with `isinstance` and `spec.policy` is precisely typed — no casts.
+  The generic cannot type `defaults` itself: `make(**mapping)` is uncheckable
+  (ParamSpec doesn't apply to dynamic unpacking). Policies are
+  masked-argmax style: with no legal
   move the returned index is arbitrary and the engine rejects it as
   `INVALID` (the lane stalls until auto-reset), matching
   `BatchedCatanEnv.random_actions`.
@@ -49,13 +54,16 @@ agents run at 2–4 players with beliefs of varying sharpness.
   (pips ≤ 15, held ≤ 19), so bonuses only reorder within a tier; types
   sharing a tier are phase-disjoint. Deliberately simple: no resource
   targeting, never trades, ignores whose production the robber blocks.
-- `evaluate.py` — Python-loop driver: every seat's vmapped agent picks in
-  every lane each step and the acting seat's pick is kept — n_seats policy
-  evals per step, fine for ≤ 4 seats. Budget is exactly one of `n_steps`
-  (sync-free) or `n_episodes` (syncs on the win count each step; may
-  overshoot when lanes finish together; `_MAX_STEPS_PER_EPISODE` guards
-  non-termination). Not a fused rollout; a `lax.scan` version is the obvious
-  next step if evaluation throughput starts to matter.
+- `evaluate.py` — fused driver over the engine's `rollout(actor=...)` seam:
+  every seat's vmapped agent picks in every lane each step inside the scan and
+  the acting seat's pick is kept — n_seats policy evals per step, fine for
+  ≤ 4 seats. Steps run in `_SYNC_WINDOW`-sized scans; the win count syncs only
+  between windows, so `n_episodes` may overshoot by up to a window of lanes.
+  Measured June 11 (B=32, RTX 5090): 1.7× over the per-step loop on
+  lookahead-vs-greedy, ~1.3× steady-state on mcts matches (42 vs ~57 ms/step).
+  Caveat: the scan retraces per `evaluate` call (the actor closure is fresh
+  each time) — ~12 s per call for mcts-sized bodies, amortised over 200-game
+  matches, noticeable on ≤ 20-game probes.
 
 ## search/
 
@@ -128,7 +136,7 @@ in as new subparsers.
 
 `__init__.py` exports the `POLICIES` registry — the single list of shipped
 agents, consumed by both the protocol tests and catan-render's bot seam
-(which dispatches on `AgentSpec.observes` and filters seat counts).
+(which dispatches on the spec's class and filters seat counts).
 
 Tests are protocol-level only (`tests/test_policies.py`), parametrized over
 every agent in `POLICIES` at its `for_testing` parameters: legality through

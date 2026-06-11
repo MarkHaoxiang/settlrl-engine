@@ -11,18 +11,27 @@ import mctx
 from catan_engine.belief import BeliefView
 from catan_engine.board import Board
 from catan_engine.board.layout import BoardLayout
-from catan_engine.board.state import VICTORY_POINTS_TO_WIN, BoardState, IntScalar
+from catan_engine.board.state import (
+    VICTORY_POINTS_TO_WIN,
+    BoardState,
+    BoolScalar,
+    IntScalar,
+    KeyScalar,
+)
 from catan_engine.env import N_FLAT, available, flat_available, flat_to_action
 from catan_engine.mechanics.action import ActionType, apply_action
 from catan_engine.mechanics.common import agent_selection_single, player_total_vp
 from catan_engine.mechanics.dice import distribute_resources
+from jaxtyping import Array, Bool, Float, Int
 
 from catan_agents.shared.greedy import _BASE
 from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
 from catan_agents.shared.sample import sample_world
-from catan_agents.shared.value import ValueFunction, heuristic_value
+from catan_agents.shared.value import Value, ValueFunction, heuristic_value
 
 _ILLEGAL = -1e9  # prior logit for illegal moves
+
+_Weights = Float[Array, f"flat={N_FLAT}"]  # one tree's improved-policy weights
 
 # Static decode of every flat row, for the root's one-step value sweep.
 _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
@@ -43,14 +52,14 @@ _QTRANSFORM = functools.partial(
 )
 
 
-def _terminal(state: BoardState) -> jax.Array:
+def _terminal(state: BoardState) -> BoolScalar:
     """Whether any player has won (single game)."""
     players = jnp.arange(state.n_players)
     totals = jax.vmap(lambda p: player_total_vp(state, p))(players)
     return jnp.any(totals >= VICTORY_POINTS_TO_WIN)
 
 
-def _winner(state: BoardState) -> jax.Array:
+def _winner(state: BoardState) -> IntScalar:
     """The player with the highest VP total (single game)."""
     players = jnp.arange(state.n_players)
     totals = jax.vmap(lambda p: player_total_vp(state, p))(players)
@@ -61,16 +70,19 @@ class _Transition(NamedTuple):
     """One batched tree step, in mctx's frame conventions."""
 
     next_state: BoardState
-    next_mover: jax.Array
-    reward: jax.Array  # +/-1 to the acting side on a winning transition
-    discount: jax.Array  # -1 crossing the searcher/opponents boundary, 0 into terminals
-    prior_logits: jax.Array  # tier table over the child's legal moves
-    roll_child: jax.Array  # lanes whose child should back up the roll expectation
-    terminal: jax.Array
+    next_mover: Int[Array, "batch"]
+    reward: Float[Array, "batch"]  # +/-1 to the acting side on a winning transition
+    discount: Float[Array, "batch"]  # -1 crossing the side boundary, 0 into terminals
+    prior_logits: Float[Array, "batch flat"]  # tier table over the child's legal moves
+    roll_child: Bool[Array, "batch"]  # lanes backing up the roll expectation
+    terminal: Bool[Array, "batch"]
 
 
 def _transition(
-    layout: BoardLayout, state: BoardState, action: jax.Array, player: jax.Array
+    layout: BoardLayout,
+    state: BoardState,
+    action: Int[Array, "batch"],
+    player: IntScalar,
 ) -> _Transition:
     """Apply one flat action per lane; value-free dynamics shared by all trees.
 
@@ -132,12 +144,12 @@ def make_mcts(
 
     # --- evaluation: everything below the engine step that needs `value` ---
 
-    def leaf_value(layout: BoardLayout, state: BoardState, p: jax.Array) -> jax.Array:
+    def leaf_value(layout: BoardLayout, state: BoardState, p: IntScalar) -> Value:
         return jnp.tanh(value(layout, state, p) / value_scale)
 
     def expected_roll_value(
-        layout: BoardLayout, state: BoardState, p: jax.Array
-    ) -> jax.Array:
+        layout: BoardLayout, state: BoardState, p: IntScalar
+    ) -> Value:
         """E over the 11 rolls of the post-payout value of a pre-roll state.
 
         The 7 row distributes nothing, so it values the state as-is — the
@@ -151,18 +163,18 @@ def make_mcts(
     # --- search: one tree over one concrete world ---
 
     def search_world(
-        key: jax.Array,
+        key: KeyScalar,
         layout: BoardLayout,
         state: BoardState,
         player: IntScalar,
         mask: FlatMask,
-    ) -> jax.Array:
+    ) -> _Weights:
         """Improved-policy weights from one search of a single concrete world."""
 
         # Every node's value is the searcher's, signed into the mover's side
         # of the two-sided frame (see _transition).
         def recurrent_fn(
-            params: None, rng: jax.Array, action: jax.Array, embedding: Board
+            params: None, rng: KeyScalar, action: Int[Array, "batch"], embedding: Board
         ) -> tuple[mctx.RecurrentFnOutput, Board]:
             layout, state = embedding
             t = _transition(layout, state, action, player)
@@ -205,12 +217,12 @@ def make_mcts(
             max_num_considered_actions=max_num_considered_actions,
             qtransform=_QTRANSFORM,
         )
-        return cast(jax.Array, out.action_weights[0])
+        return cast(_Weights, out.action_weights[0])
 
     # --- ensemble: sample worlds, fan out futures, average the trees ---
 
     def policy(
-        key: jax.Array,
+        key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
         player: IntScalar,

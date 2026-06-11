@@ -6,8 +6,10 @@ from catan_agents.shared.greedy import greedy_policy
 from catan_agents.shared.policy import (
     AgentSpec,
     BeliefPolicy,
+    BeliefSpec,
     FlatAction,
     FlatMask,
+    ObservationSpec,
     Policy,
 )
 from catan_agents.shared.sample import sample_world
@@ -21,9 +23,11 @@ from catan_agents.shared.value import (
 __all__ = [
     "AgentSpec",
     "BeliefPolicy",
+    "BeliefSpec",
     "EvalResult",
     "FlatAction",
     "FlatMask",
+    "ObservationSpec",
     "Policy",
     "Value",
     "ValueFunction",

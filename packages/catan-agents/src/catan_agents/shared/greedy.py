@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from catan_engine.board.layout import N_TILES, N_VERTICES
 from catan_engine.board.resources import N_RESOURCES
+from catan_engine.board.state import KeyScalar
 from catan_engine.env import (
     N_ACTION_TYPES,
     N_FLAT,
@@ -57,7 +58,7 @@ _ROBBER_MOVE = (_ROW_TYPE == ActionType.MOVE_ROBBER) | (
 _DISCARD = _ROW_TYPE == ActionType.DISCARD
 
 
-def greedy_policy(key: jax.Array, obs: Observation, mask: FlatMask) -> FlatAction:
+def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatAction:
     """Highest-priority legal action, ties broken uniformly at random.
 
     Priorities: city > settlement > dev card > road > play dev > everything

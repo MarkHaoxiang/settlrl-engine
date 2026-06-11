@@ -11,14 +11,15 @@ not the posterior itself.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
-from catan_engine.belief import BeliefView
-from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES
+from catan_engine.belief import BeliefView, ResBoundsVec, ResTotalVec
+from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES, DevDeckVec
 from catan_engine.board.resources import N_RESOURCES
-from catan_engine.board.state import BoardState, IntScalar, to_u8
+from catan_engine.board.state import BoardState, IntScalar, KeyScalar, to_u8
+from jaxtyping import Array, UInt8
 
 _DECK_SIZE = sum(DEV_CARD_COUNTS)
 # Card-slot view of the deck composition: each of the 25 interchangeable cards
@@ -32,8 +33,8 @@ _MAX_DEAL = 5 * 19
 
 
 def _deal_dev_hands(
-    key: jax.Array, view: BeliefView, player: IntScalar
-) -> tuple[jax.Array, jax.Array]:
+    key: KeyScalar, view: BeliefView, player: IntScalar
+) -> tuple[UInt8[Array, f"players dev_card_types={N_DEV_CARD_TYPES}"], DevDeckVec]:
     """Deal every opponent's dev hand from the unseen pool, uniformly without
     replacement; returns ``(dev_hand, dev_deck)`` with the remainder as the
     deck and the observer's own hand in its row."""
@@ -58,7 +59,10 @@ def _deal_dev_hands(
     return to_u8(dev_hand), to_u8(pool.astype(jnp.int32) - dealt)
 
 
-def _deal_resources(key: jax.Array, view: BeliefView) -> jax.Array:
+_DealCarry: TypeAlias = tuple[ResBoundsVec, ResTotalVec, KeyScalar]
+
+
+def _deal_resources(key: KeyScalar, view: BeliefView) -> ResBoundsVec:
     """Deal every opponent's unknown resource cards within ``[lo, hi]``.
 
     Rows start at ``lo`` (the observer's own row is already exact there);
@@ -70,15 +74,11 @@ def _deal_resources(key: jax.Array, view: BeliefView) -> jax.Array:
     pool = view.belief.res_total - res.sum(axis=0)  # (R,) cards left to place
     need = view.belief.hand_size - res.sum(axis=1)  # (P,) 0 where lo is exact
 
-    def deal_player(
-        p: int, carry: tuple[jax.Array, jax.Array, jax.Array]
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    def deal_player(p: int, carry: _DealCarry) -> _DealCarry:
         res, pool, key = carry
         hi = view.belief.res_hi[p].astype(jnp.int32)
 
-        def deal_one(
-            i: jax.Array, inner: tuple[jax.Array, jax.Array, jax.Array]
-        ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        def deal_one(i: IntScalar, inner: _DealCarry) -> _DealCarry:
             res, pool, key = inner
             key, k = jax.random.split(key)
             active = i < need[p]
@@ -90,8 +90,7 @@ def _deal_resources(key: jax.Array, view: BeliefView) -> jax.Array:
             return res.at[p, r].add(add), pool.at[r].add(-add), key
 
         return cast(
-            "tuple[jax.Array, jax.Array, jax.Array]",
-            jax.lax.fori_loop(0, _MAX_DEAL, deal_one, (res, pool, key)),
+            _DealCarry, jax.lax.fori_loop(0, _MAX_DEAL, deal_one, (res, pool, key))
         )
 
     carry = (res, pool, key)
@@ -101,7 +100,7 @@ def _deal_resources(key: jax.Array, view: BeliefView) -> jax.Array:
     return res
 
 
-def sample_world(key: jax.Array, view: BeliefView, player: IntScalar) -> BoardState:
+def sample_world(key: KeyScalar, view: BeliefView, player: IntScalar) -> BoardState:
     """Sample one concrete world from ``player``'s :class:`BeliefView`.
 
     Public fields are copied through; hand sizes, dev counts, and per-type

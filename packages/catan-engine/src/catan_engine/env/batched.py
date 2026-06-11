@@ -191,14 +191,14 @@ class Infos(TypedDict):
 
     action_mask: TypeMaskArray
     agent_selection: AgentSelectionArray
-    current_player: Int[Array, batch]
+    current_player: Int[Array, "batch"]
     result: ResultCode
 
 
 # ---------------------------------------------------------------------------
 # Batched derived quantities used by the environment.
 # ---------------------------------------------------------------------------
-def _total_vp_single(state: BoardState) -> Int[Array, players]:
+def _total_vp_single(state: BoardState) -> Int[Array, "players"]:
     """Total VP (buildings + awards + VP cards) for every player in one game."""
     players = jnp.arange(state.n_players, dtype=jnp.int32)
     return jax.vmap(lambda p: player_total_vp(state, p))(players)
@@ -259,7 +259,7 @@ _belief_view_b: Callable[[BoardState, BeliefState, int], BeliefView] = jax.jit(
 
 def _belief_reset_lanes(
     terminations: DoneArray, auto_reset: bool, batch_size: int
-) -> Bool[Array, batch]:
+) -> Bool[Array, "batch"]:
     """Lanes whose belief restarts this step: the auto-reset-replaced ones.
 
     Without auto-reset a done lane freezes (every further action is INVALID, a
@@ -277,7 +277,7 @@ def _belief_step_core(
     after: BoardState,
     action_type: ActionTypeArray,
     params: ActionParams,
-    reset_lane: Bool[Array, batch],
+    reset_lane: Bool[Array, "batch"],
     batch_size: int,
     n_players: int,
 ) -> BeliefState:
@@ -450,9 +450,9 @@ class BatchedCatanEnv:
         self,
     ) -> tuple[
         Observation,
-        Float[Array, batch],
-        Bool[Array, batch],
-        Bool[Array, batch],
+        Float[Array, "batch"],
+        Bool[Array, "batch"],
+        Bool[Array, "batch"],
         Infos,
     ]:
         """``(obs, reward, termination, truncation, info)`` for the acting agents.
@@ -738,7 +738,7 @@ def _select_key(mask: jax.Array, a: jax.Array, b: jax.Array) -> jax.Array:
 _Tree = TypeVar("_Tree")
 
 
-def _tree_where_lane(mask: Bool[Array, batch], a: _Tree, b: _Tree) -> _Tree:
+def _tree_where_lane(mask: Bool[Array, "batch"], a: _Tree, b: _Tree) -> _Tree:
     """Per-leaf ``_where_lane`` over two matching pytrees of batched arrays
     (PRNG-key leaves route through ``_select_key``)."""
 

@@ -13,8 +13,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import pytest
-from catan_agents import POLICIES, AgentSpec, evaluate
-from catan_agents.shared.policy import BeliefPolicy, Policy
+from catan_agents import POLICIES, BeliefSpec, ObservationSpec, evaluate
 from catan_engine.belief import BeliefView
 from catan_engine.env import BatchedCatanEnv, Observation, flat_to_action
 
@@ -45,20 +44,22 @@ def _acting_view(env: BatchedCatanEnv) -> BeliefView:
     )
 
 
-def _self_play(spec: AgentSpec, seed: int, n_steps: int) -> tuple[jax.Array, jax.Array]:
+def _self_play(
+    spec: ObservationSpec | BeliefSpec, seed: int, n_steps: int
+) -> tuple[jax.Array, jax.Array]:
     """Drive ``n_steps`` of self-play; return the per-step ``(masks, actions)``."""
     env = BatchedCatanEnv(
         batch_size=BATCH,
         seed=seed,
         n_players=max(spec.n_players),
-        track_beliefs=spec.observes == "belief",
+        track_beliefs=isinstance(spec, BeliefSpec),
     )
     act: Callable[[jax.Array], jax.Array]
-    if spec.observes == "observation":
-        obs_act = jax.jit(jax.vmap(cast(Policy, spec.policy)))
+    if isinstance(spec, ObservationSpec):
+        obs_act = jax.jit(jax.vmap(spec.policy))
         act = lambda keys: obs_act(keys, _acting_obs(env), env.flat_mask())  # noqa: E731
     else:
-        belief_act = jax.jit(jax.vmap(cast(BeliefPolicy, spec.policy)))
+        belief_act = jax.jit(jax.vmap(spec.policy))
         act = lambda keys: belief_act(  # noqa: E731
             keys, env.board[0], _acting_view(env), env.agent_selection, env.flat_mask()
         )
@@ -75,7 +76,7 @@ def _self_play(spec: AgentSpec, seed: int, n_steps: int) -> tuple[jax.Array, jax
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_picks_only_legal_actions(spec: AgentSpec) -> None:
+def test_picks_only_legal_actions(spec: ObservationSpec | BeliefSpec) -> None:
     masks, actions = _self_play(spec, seed=0, n_steps=100)
     # Whenever a lane has any legal move, the pick must be one of them.
     legal = jnp.take_along_axis(masks, actions[..., None], axis=2)[..., 0]
@@ -83,14 +84,14 @@ def test_picks_only_legal_actions(spec: AgentSpec) -> None:
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_same_seed_reproduces_rollout(spec: AgentSpec) -> None:
+def test_same_seed_reproduces_rollout(spec: ObservationSpec | BeliefSpec) -> None:
     _, first = _self_play(spec, seed=3, n_steps=40)
     _, second = _self_play(spec, seed=3, n_steps=40)
     assert bool(jnp.all(first == second))
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_self_play_rollouts_complete_games(spec: AgentSpec) -> None:
+def test_self_play_rollouts_complete_games(spec: ObservationSpec | BeliefSpec) -> None:
     # The episode budget stops as soon as two games finish (instead of a fixed
     # step count), which is what bounds the expensive search agents' runtime.
     result = evaluate([spec, spec], n_episodes=2, batch_size=BATCH, seed=0)
