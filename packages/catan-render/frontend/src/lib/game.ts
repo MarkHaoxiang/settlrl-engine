@@ -137,9 +137,21 @@ export interface CreatedGame {
   tokens: SeatTokens;
 }
 
-export async function createGame(config: NewGameConfig): Promise<CreatedGame> {
+// The server is at its concurrency cap: the caller's place in line. Re-call
+// createGame with the ticket to keep polling until a CreatedGame comes back.
+export interface QueuedGame {
+  queued: true;
+  ticket: string;
+  position: number;
+  total: number;
+}
+
+export async function createGame(
+  config: NewGameConfig,
+  ticket?: string
+): Promise<CreatedGame | QueuedGame> {
   const key = savedCreateKey();
-  return api<CreatedGame>("/api/games", {
+  return api<CreatedGame | QueuedGame>("/api/games", {
     method: "POST",
     body: JSON.stringify({
       seed: config.seed,
@@ -150,6 +162,7 @@ export async function createGame(config: NewGameConfig): Promise<CreatedGame> {
         s.params && Object.keys(s.params).length > 0 ? { kind: s.kind, params: s.params } : s.kind
       ),
       claim: config.claim,
+      ticket,
     }),
     headers: key ? { "X-Create-Key": key } : {},
   });

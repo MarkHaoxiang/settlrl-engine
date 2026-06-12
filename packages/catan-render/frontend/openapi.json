@@ -8,6 +8,7 @@
   "/api/games": {
    "post": {
     "summary": "Post Create",
+    "description": "Create a game, or return the caller's place in line when the server\nis at its concurrency cap (a ``202`` they re-POST with ``ticket``).",
     "operationId": "post_create_api_games_post",
     "parameters": [
      {
@@ -43,7 +44,15 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/_CreatedModel"
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/_CreatedModel"
+          },
+          {
+           "$ref": "#/components/schemas/_QueuedModel"
+          }
+         ],
+         "title": "Response Post Create Api Games Post"
         }
        }
       }
@@ -1558,6 +1567,17 @@
       ],
       "title": "Claim",
       "default": "all"
+     },
+     "ticket": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ticket"
      }
     },
     "type": "object",
@@ -1632,6 +1652,36 @@
      "token"
     ],
     "title": "_JoinedModel"
+   },
+   "_QueuedModel": {
+    "properties": {
+     "queued": {
+      "type": "boolean",
+      "const": true,
+      "title": "Queued",
+      "default": true
+     },
+     "ticket": {
+      "type": "string",
+      "title": "Ticket"
+     },
+     "position": {
+      "type": "integer",
+      "title": "Position"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ticket",
+     "position",
+     "total"
+    ],
+    "title": "_QueuedModel",
+    "description": "The server is at its concurrency cap: the caller's place in line. They\nre-POST with ``ticket`` until they get a :class:`_CreatedModel` back."
    },
    "_SeatSpec": {
     "properties": {

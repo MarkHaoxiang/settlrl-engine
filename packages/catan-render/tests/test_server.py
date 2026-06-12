@@ -88,6 +88,18 @@ def test_full_registry_of_active_games_returns_503() -> None:
     assert client.post("/api/games", json={"seed": 0}).status_code == 503
 
 
+def test_create_queues_past_the_active_cap() -> None:
+    # max_active=1: the second creator gets a 202 with their place in line.
+    client = TestClient(create_app(GameRegistry(max_games=8, max_active=1)))
+    body = {"seed": 0, "n_players": 2, "seats": ["human", "human"]}
+    assert client.post("/api/games", json=body).status_code == 200
+    queued = client.post("/api/games", json=body)
+    assert queued.status_code == 202
+    doc = queued.json()
+    assert doc["queued"] is True and doc["ticket"]
+    assert doc["position"] == 1 and doc["total"] == 1
+
+
 def test_unknown_game_404s(client: TestClient) -> None:
     assert client.get("/api/games/nope").status_code == 404
     assert client.post("/api/games/nope/action", json={"flat": 0}).status_code == 404

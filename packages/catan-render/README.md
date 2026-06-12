@@ -100,8 +100,10 @@ size so idle streams can't starve ordinary requests — extras get `503`),
 `CATAN_RENDER_STATE_DIR` (a directory to persist games in — see below),
 `CATAN_RENDER_TURN_TIMEOUT_S` (default `0` = off; after this many seconds of an
 idle human turn the server auto-plays a move, so an abandoned game still
-finishes instead of stalling), and `ROOT_PATH` (the proxy prefix when served
-under a path). Run **one process, one worker**: live games are held in memory,
+finishes instead of stalling), `CATAN_RENDER_MAX_ACTIVE` (default `16`; games
+running at once before new creators are queued — keep it below the registry
+cap), and `ROOT_PATH` (the proxy prefix when served under a path). Run **one
+process, one worker**: live games are held in memory,
 so extra workers would split them.
 The registry holds up to 32 games, evicting finished games, hour-idle ones, or
 unstarted ones idle past a few minutes (so a burst of empty games can't pin
@@ -186,7 +188,7 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none" }` — returns the game id and the creator's seat tokens. Requires the `X-Create-Key` header when the server sets `CATAN_RENDER_CREATE_KEY`; `503` when every slot holds an active game |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees. Requires the `X-Create-Key` header when the server sets `CATAN_RENDER_CREATE_KEY` |
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |

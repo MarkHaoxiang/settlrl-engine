@@ -120,21 +120,54 @@ export default function PlayView() {
   // Whether the new-game configuration dialog is open (shown on entry
   // without a game, and reopened by the New game button).
   const [configuring, setConfiguring] = useState(!gameId);
+  // Set while waiting in line when the server is at its concurrency cap.
+  const [queue, setQueue] = useState<{ position: number; total: number } | null>(null);
+  const queueTimer = useRef<number | null>(null);
 
   // Creating a game claims human seats per the dialog's seating choice
   // (hotseat: all of them; online: just the first) — the rest are claimed
-  // through the invite link (auto-join above).
-  const start = async (config: NewGameConfig) => {
-    setConfiguring(false);
+  // through the invite link (auto-join above). When the server is full the
+  // request comes back as a queue position; we re-poll with the ticket until a
+  // slot frees and the game is created.
+  const QUEUE_POLL_MS = 3000;
+  const pollCreate = async (config: NewGameConfig, ticket?: string) => {
     try {
-      const created = await createGame(config);
-      saveTokens(created.id, created.tokens);
-      rememberGame(created.id);
-      navigate(`/play/${created.id}`);
+      const res = await createGame(config, ticket);
+      if ("queued" in res) {
+        setQueue({ position: res.position, total: res.total });
+        queueTimer.current = window.setTimeout(
+          () => void pollCreate(config, res.ticket),
+          QUEUE_POLL_MS
+        );
+      } else {
+        setQueue(null);
+        saveTokens(res.id, res.tokens);
+        rememberGame(res.id);
+        navigate(`/play/${res.id}`);
+      }
     } catch (e) {
+      setQueue(null);
       setCreateError(`Could not create the game: ${String(e)}`);
     }
   };
+  const start = (config: NewGameConfig) => {
+    setConfiguring(false);
+    setCreateError(null);
+    void pollCreate(config);
+  };
+  const cancelQueue = () => {
+    if (queueTimer.current !== null) window.clearTimeout(queueTimer.current);
+    queueTimer.current = null;
+    setQueue(null);
+    setConfiguring(true);
+  };
+  // Stop polling if the view unmounts mid-queue.
+  useEffect(
+    () => () => {
+      if (queueTimer.current !== null) window.clearTimeout(queueTimer.current);
+    },
+    []
+  );
 
   const actions = snapshot?.actions ?? [];
 
@@ -193,6 +226,17 @@ export default function PlayView() {
     return (
       <div style={{ width: "100vw", height: "100vh" }}>
         {createError && <div style={overlayMsgStyle}>{createError}</div>}
+        {queue && (
+          <div style={overlayMsgStyle}>
+            You're #{queue.position} of {queue.total} in line…
+            <div style={{ fontSize: "0.85rem", opacity: 0.7, marginTop: 6 }}>
+              The server is busy; your game starts automatically.
+            </div>
+            <button style={{ ...smallButtonStyle, marginTop: 12 }} onClick={cancelQueue}>
+              Cancel
+            </button>
+          </div>
+        )}
         {configuring && (
           <NewGameDialog onStart={(c) => void start(c)} onClose={() => navigate("/")} />
         )}

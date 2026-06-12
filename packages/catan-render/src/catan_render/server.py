@@ -26,7 +26,13 @@ from starlette.types import Scope
 
 from .bots import bot_catalog
 from .driver import start_game_driver
-from .games import GameHandle, GameRegistry, RegistryFullError, restore_registry
+from .games import (
+    GameHandle,
+    GameRegistry,
+    QueuePosition,
+    RegistryFullError,
+    restore_registry,
+)
 from .models import GameModel, ReplayStateModel
 from .replay import ReplaySession
 from .session import HUMAN, GameSession, IllegalActionError
@@ -50,14 +56,16 @@ def _warm_jit_cache() -> None:
         scratch.bot_step()  # compiles the default bot policy
 
 
-def _build_registry(games: GameRegistry | None, state_dir: str | None) -> GameRegistry:
+def _build_registry(
+    games: GameRegistry | None, state_dir: str | None, max_active: int
+) -> GameRegistry:
     """The app's registry: the one passed in (tests), one restored from the
     store, or a fresh in-memory one."""
     if games is not None:
         return games
     if state_dir:
-        return restore_registry(GameStore(state_dir))
-    return GameRegistry()
+        return restore_registry(GameStore(state_dir), max_active=max_active)
+    return GameRegistry(max_active=max_active)
 
 
 def _needs_driver(handle: GameHandle, turn_timeout: float) -> bool:
@@ -112,6 +120,9 @@ class _CreateRequest(BaseModel):
     # hotseat default), just the first ("first", online play — others join
     # via POST /join), or none.
     claim: Literal["all", "first", "none"] = "all"
+    # The caller's place in line from a prior queued response, re-sent each poll
+    # while waiting for a free slot; None on the first attempt.
+    ticket: str | None = None
 
 
 class _CreatedModel(BaseModel):
@@ -120,6 +131,16 @@ class _CreatedModel(BaseModel):
     id: str
     seats: list[str]
     tokens: dict[int, str]
+
+
+class _QueuedModel(BaseModel):
+    """The server is at its concurrency cap: the caller's place in line. They
+    re-POST with ``ticket`` until they get a :class:`_CreatedModel` back."""
+
+    queued: Literal[True] = True
+    ticket: str
+    position: int
+    total: int
 
 
 class _JoinRequest(BaseModel):
@@ -152,6 +173,7 @@ def create_app(
     max_body_bytes: int = 2 * 1024 * 1024,
     state_dir: str | None = None,
     turn_timeout: float = 0.0,
+    max_active: int = 16,
     warm: bool = True,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
@@ -168,10 +190,12 @@ def create_app(
     games are journalled there and replayed back on the next startup (ignored
     when ``games`` is passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a
     human turn that has gone idle that long, so an abandoned game still finishes.
-    ``warm`` pre-compiles the engine at startup (off in tests, which compile
-    lazily and don't want the background contention).
+    ``max_active`` caps how many games run at once; beyond it, new creators are
+    queued (``POST /api/games`` returns their place in line). ``warm``
+    pre-compiles the engine at startup (off in tests, which compile lazily and
+    don't want the background contention).
     """
-    registry = _build_registry(games, state_dir)
+    registry = _build_registry(games, state_dir, max_active)
     replays = _ReplaySlot()
     # Each live event stream holds one permit for its whole connection; past
     # the cap, new subscribers get 503 rather than exhausting the threadpool.
@@ -214,8 +238,10 @@ def create_app(
 
     @app.post("/api/games")
     def post_create(
-        req: _CreateRequest, x_create_key: CreateKey = None
-    ) -> _CreatedModel:
+        req: _CreateRequest, response: Response, x_create_key: CreateKey = None
+    ) -> _CreatedModel | _QueuedModel:
+        """Create a game, or return the caller's place in line when the server
+        is at its concurrency cap (a ``202`` they re-POST with ``ticket``)."""
         if create_key is not None and not (
             x_create_key is not None
             and secrets.compare_digest(x_create_key, create_key)
@@ -234,17 +260,22 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
-            handle = registry.create(session)
+            seated = registry.admit(session, req.ticket)
         except RegistryFullError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        humans = handle.human_seats()
+        if isinstance(seated, QueuePosition):
+            response.status_code = 202
+            return _QueuedModel(
+                ticket=seated.ticket, position=seated.position, total=seated.total
+            )
+        humans = seated.human_seats()
         claiming = (
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
-        tokens = dict(handle.claim(seat) for seat in claiming)
-        if _needs_driver(handle, turn_timeout):
-            start_game_driver(handle, bot_delay, turn_timeout)
-        return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
+        tokens = dict(seated.claim(seat) for seat in claiming)
+        if _needs_driver(seated, turn_timeout):
+            start_game_driver(seated, bot_delay, turn_timeout)
+        return _CreatedModel(id=seated.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
     def post_join(game_id: str, req: _JoinRequest) -> _JoinedModel:
@@ -449,4 +480,5 @@ app = create_app(
     max_streams=int(os.environ.get("CATAN_RENDER_MAX_STREAMS", "64")),
     state_dir=os.environ.get("CATAN_RENDER_STATE_DIR") or None,
     turn_timeout=float(os.environ.get("CATAN_RENDER_TURN_TIMEOUT_S", "0")),
+    max_active=int(os.environ.get("CATAN_RENDER_MAX_ACTIVE", "16")),
 )

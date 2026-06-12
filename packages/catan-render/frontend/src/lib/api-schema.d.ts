@@ -13,7 +13,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Post Create */
+        /**
+         * Post Create
+         * @description Create a game, or return the caller's place in line when the server
+         *     is at its concurrency cap (a ``202`` they re-POST with ``ticket``).
+         */
         post: operations["post_create_api_games_post"];
         delete?: never;
         options?: never;
@@ -666,6 +670,8 @@ export interface components {
              * @enum {string}
              */
             claim: "all" | "first" | "none";
+            /** Ticket */
+            ticket?: string | null;
         };
         /**
          * _CreatedModel
@@ -694,6 +700,25 @@ export interface components {
             seat: number;
             /** Token */
             token: string;
+        };
+        /**
+         * _QueuedModel
+         * @description The server is at its concurrency cap: the caller's place in line. They
+         *     re-POST with ``ticket`` until they get a :class:`_CreatedModel` back.
+         */
+        _QueuedModel: {
+            /**
+             * Queued
+             * @default true
+             * @constant
+             */
+            queued: true;
+            /** Ticket */
+            ticket: string;
+            /** Position */
+            position: number;
+            /** Total */
+            total: number;
         };
         /**
          * _SeatSpec
@@ -740,7 +765,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["_CreatedModel"];
+                    "application/json": components["schemas"]["_CreatedModel"] | components["schemas"]["_QueuedModel"];
                 };
             };
             /** @description Validation Error */

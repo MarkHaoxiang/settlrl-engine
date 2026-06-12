@@ -4,7 +4,12 @@ import time
 from typing import cast
 
 import pytest
-from catan_render.games import GameHandle, GameRegistry, RegistryFullError
+from catan_render.games import (
+    GameHandle,
+    GameRegistry,
+    QueuePosition,
+    RegistryFullError,
+)
 from catan_render.session import GameSession
 
 # A touch time well past every eviction TTL. Relative to ``monotonic()`` rather
@@ -118,3 +123,54 @@ def test_unstarted_but_recent_game_is_protected() -> None:
     with pytest.raises(RegistryFullError):
         registry.create(_session())
     assert registry.get(fresh.id) is fresh
+
+
+def _finish(handle: GameHandle) -> None:
+    cast("_FakeSession", handle.session)._terminal = True
+
+
+def test_admit_seats_until_the_active_cap_then_queues_fifo() -> None:
+    reg = GameRegistry(max_games=10, max_active=1)
+    seated = reg.admit(_session(), None)
+    assert isinstance(seated, GameHandle)  # first one is seated immediately
+
+    # total is the queue length at the moment each creator was told their place.
+    second = reg.admit(_session(), None)
+    assert isinstance(second, QueuePosition) and (second.position, second.total) == (
+        1,
+        1,
+    )
+    third = reg.admit(_session(), None)
+    assert isinstance(third, QueuePosition) and (third.position, third.total) == (2, 2)
+
+    # Re-polling holds your place; the head is not seated while the cap is full.
+    again = reg.admit(_session(), second.ticket)
+    assert isinstance(again, QueuePosition) and again.position == 1
+
+    # A freed slot seats the head, and only the head.
+    _finish(seated)
+    head = reg.admit(_session(), second.ticket)
+    assert isinstance(head, GameHandle)
+    behind = reg.admit(_session(), third.ticket)
+    assert isinstance(behind, QueuePosition) and behind.position == 1  # now the head
+
+
+def test_fresh_request_never_jumps_a_waiting_queue() -> None:
+    reg = GameRegistry(max_games=10, max_active=1)
+    seated = reg.admit(_session(), None)
+    assert isinstance(seated, GameHandle)
+    waiting = reg.admit(_session(), None)
+    assert isinstance(waiting, QueuePosition)
+    _finish(seated)  # a slot is free, but someone is already in line
+    fresh = reg.admit(_session(), None)
+    assert isinstance(fresh, QueuePosition) and fresh.position == 2  # behind the waiter
+
+
+def test_abandoned_ticket_ages_out_of_the_queue() -> None:
+    reg = GameRegistry(max_games=10, max_active=1)
+    reg.admit(_session(), None)  # seats the one active slot
+    ghost = reg.admit(_session(), None)
+    assert isinstance(ghost, QueuePosition)
+    reg._queue[0].last_seen = _LONG_AGO  # the ghost stopped polling
+    nxt = reg.admit(_session(), None)  # a new creator: the ghost is pruned first
+    assert isinstance(nxt, QueuePosition) and nxt.total == 1

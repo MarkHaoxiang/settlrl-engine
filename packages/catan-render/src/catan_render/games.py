@@ -14,6 +14,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from dataclasses import dataclass
 from typing import cast
 
 from .models import BotMoveModel
@@ -35,9 +36,32 @@ _IDLE_TTL_S = 3600.0
 # almost always a create-flood leftover, not a game someone is about to join.
 _UNSTARTED_TTL_S = 600.0
 
+# A queued creator who stops polling (closed tab) drops out of the line this
+# long after their last poll, so a ghost can't hold up the queue. Keep it a few
+# poll intervals so a live client never loses its place.
+_TICKET_BYTES = 9
+_TICKET_TTL_S = 12.0
+
 
 class RegistryFullError(Exception):
     """Every slot holds a recently-active running game; creation must wait."""
+
+
+@dataclass
+class _Ticket:
+    """One creator waiting for a free slot; ``last_seen`` is their last poll."""
+
+    id: str
+    last_seen: float
+
+
+@dataclass(frozen=True)
+class QueuePosition:
+    """A creator's place in line when the server is at its concurrency cap."""
+
+    ticket: str
+    position: int  # 1-based
+    total: int
 
 
 class GameHandle:
@@ -108,27 +132,75 @@ class GameRegistry:
 
     ``max_games`` caps memory: past it, the least-recently-touched finished or
     abandoned game is evicted; ``create`` raises :class:`RegistryFullError`
-    when nothing is evictable. A ``store`` persists games so they survive a
-    restart (see :func:`restore_registry`).
+    when nothing is evictable. ``max_active`` caps how many games run at once:
+    past it, :meth:`admit` puts new creators in a FIFO queue instead (keep it
+    below ``max_games`` so finished games can always be evicted to seat the next
+    in line). A ``store`` persists games so they survive a restart (see
+    :func:`restore_registry`).
     """
 
-    def __init__(self, max_games: int = 32, store: GameStore | None = None) -> None:
+    def __init__(
+        self,
+        max_games: int = 32,
+        max_active: int = 16,
+        store: GameStore | None = None,
+    ) -> None:
         self._games: dict[str, GameHandle] = {}
         self._max = max_games
+        self._max_active = max_active
         self._store = store
+        self._queue: list[_Ticket] = []
         self._lock = threading.Lock()
 
     def create(self, session: GameSession) -> GameHandle:
         with self._lock:
-            self._evict()
+            return self._create_locked(session)
+
+    def admit(
+        self, session: GameSession, ticket_id: str | None
+    ) -> GameHandle | QueuePosition:
+        """Seat a new game, or return the caller's place in line when at the
+        concurrency cap. ``ticket_id`` is the caller's prior place (None on the
+        first try); callers re-present it each poll until they get a handle.
+        FIFO: a freed slot seats the head of the queue, and a fresh request
+        never jumps a non-empty line.
+        """
+        with self._lock:
+            now = time.monotonic()
+            self._prune_tickets(now)
+            slot_free = self._active_count() < self._max_active
+            ticket = next((t for t in self._queue if t.id == ticket_id), None)
+            if ticket is not None:
+                ticket.last_seen = now
+                if slot_free and self._queue[0] is ticket:
+                    self._queue.remove(ticket)
+                    return self._create_locked(session)
+                return self._position(ticket)
+            if slot_free and not self._queue:
+                return self._create_locked(session)
+            ticket = _Ticket(secrets.token_urlsafe(_TICKET_BYTES), now)
+            self._queue.append(ticket)
+            return self._position(ticket)
+
+    def _create_locked(self, session: GameSession) -> GameHandle:
+        self._evict()
+        game_id = secrets.token_urlsafe(_ID_BYTES)
+        while game_id in self._games:
             game_id = secrets.token_urlsafe(_ID_BYTES)
-            while game_id in self._games:
-                game_id = secrets.token_urlsafe(_ID_BYTES)
-            handle = GameHandle(game_id, session)
-            if self._store is not None:
-                handle.journal = self._store.create(game_id, session.setup.to_dict())
-            self._games[game_id] = handle
-            return handle
+        handle = GameHandle(game_id, session)
+        if self._store is not None:
+            handle.journal = self._store.create(game_id, session.setup.to_dict())
+        self._games[game_id] = handle
+        return handle
+
+    def _active_count(self) -> int:
+        return sum(1 for h in self._games.values() if not h.session.terminal())
+
+    def _prune_tickets(self, now: float) -> None:
+        self._queue = [t for t in self._queue if t.last_seen >= now - _TICKET_TTL_S]
+
+    def _position(self, ticket: _Ticket) -> QueuePosition:
+        return QueuePosition(ticket.id, self._queue.index(ticket) + 1, len(self._queue))
 
     def get(self, game_id: str) -> GameHandle | None:
         with self._lock:
@@ -175,11 +247,13 @@ class GameRegistry:
                 self._store.remove(victim.id)
 
 
-def restore_registry(store: GameStore, max_games: int = 32) -> GameRegistry:
+def restore_registry(
+    store: GameStore, max_games: int = 32, max_active: int = 16
+) -> GameRegistry:
     """Rebuild a registry from a store: replay each game's journal back into a
     live handle, so a restart resumes games in progress (callers restart bot
     drivers for the returned handles). Drivers are not started here."""
-    registry = GameRegistry(max_games=max_games, store=store)
+    registry = GameRegistry(max_games=max_games, max_active=max_active, store=store)
     for header, events in store.load():
         handle = _rebuild_handle(store, header, events)
         if handle is not None:
