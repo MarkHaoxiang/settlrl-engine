@@ -11,7 +11,7 @@ from typing import NamedTuple
 
 from catan_agents import POLICIES
 from catan_agents.shared.evaluate import evaluate
-from catan_agents.shared.policy import BeliefSpec, ObservationSpec
+from catan_agents.shared.policy import BeliefSpec, ObservationSpec, StatefulSpec
 from catan_agents.shared.value import make_heuristic
 
 
@@ -71,7 +71,7 @@ def compare(
     )
 
 
-def build_spec(text: str) -> ObservationSpec | BeliefSpec:
+def build_spec(text: str) -> ObservationSpec | BeliefSpec | StatefulSpec:
     """An agent spec from a registry name or a JSON configuration.
 
     JSON shape: ``{"kind": <name>, "params": {<make kwargs>},
@@ -136,7 +136,7 @@ def bench(
     wins_a = wins_b = episodes = 0
     by_position: list[tuple[int, int]] = []
     for pos in range(players):
-        agents: list[ObservationSpec | BeliefSpec] = [b] * players
+        agents: list[ObservationSpec | BeliefSpec | StatefulSpec] = [b] * players
         agents[pos] = a
         r = evaluate(
             agents,

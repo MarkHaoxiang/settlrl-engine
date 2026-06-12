@@ -18,6 +18,9 @@ install_import_hook(
         "catan_agents.shared.evaluate",
         "catan_agents.search.greedy",
         "catan_agents.search.mcts",
+        "catan_agents.planner.pov",
+        "catan_agents.planner.tree",
+        "catan_agents.planner.agent",
     ],
     "beartype.beartype",
 )

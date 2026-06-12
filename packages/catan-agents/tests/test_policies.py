@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from catan_agents import POLICIES, BeliefSpec, ObservationSpec, evaluate
+from catan_agents import POLICIES, BeliefSpec, ObservationSpec, StatefulSpec, evaluate
 from catan_engine.belief import BeliefState, BeliefView, belief_view
 from catan_engine.board import Board, give, make_board, to_main
 from catan_engine.env import (
@@ -54,20 +54,43 @@ def _acting_view(env: BatchedCatanEnv) -> BeliefView:
     )
 
 
-def _self_play(
-    spec: ObservationSpec | BeliefSpec, seed: int, n_steps: int
-) -> tuple[jax.Array, jax.Array]:
+Spec = ObservationSpec | BeliefSpec | StatefulSpec
+
+
+def _self_play(spec: Spec, seed: int, n_steps: int) -> tuple[jax.Array, jax.Array]:
     """Drive ``n_steps`` of self-play; return the per-step ``(masks, actions)``."""
+    n_players = max(spec.n_players)
     env = BatchedCatanEnv(
         batch_size=BATCH,
         seed=seed,
-        n_players=max(spec.n_players),
+        n_players=n_players,
         track_beliefs=isinstance(spec, BeliefSpec),
     )
     act: Callable[[jax.Array], jax.Array]
     if isinstance(spec, ObservationSpec):
         obs_act = jax.jit(jax.vmap(spec.policy))
         act = lambda keys: obs_act(keys, _acting_obs(env), env.flat_mask())  # noqa: E731
+    elif isinstance(spec, StatefulSpec):
+        # One stateful agent per (lane, seat), driven lane by lane in Python.
+        seats = [
+            {s: spec.policy(seed + lane * n_players + s) for s in range(n_players)}
+            for lane in range(BATCH)
+        ]
+
+        def stateful_act(keys: jax.Array) -> jax.Array:
+            mask = np.asarray(env.flat_mask())
+            sel = np.asarray(env.agent_selection)
+            picks = []
+            for lane in range(BATCH):
+                obs = cast(
+                    "dict[str, np.ndarray]",
+                    jax.device_get(env.observe(int(sel[lane]))),
+                )
+                obs_l = {k: v[lane] for k, v in obs.items()}
+                picks.append(seats[lane][int(sel[lane])].act(obs_l, mask[lane]))
+            return jnp.asarray(picks, jnp.int32)
+
+        act = stateful_act
     else:
         belief_act = jax.jit(jax.vmap(spec.policy))
         act = lambda keys: belief_act(  # noqa: E731
@@ -86,7 +109,7 @@ def _self_play(
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_picks_only_legal_actions(spec: ObservationSpec | BeliefSpec) -> None:
+def test_picks_only_legal_actions(spec: Spec) -> None:
     masks, actions = _self_play(spec, seed=0, n_steps=100)
     # Whenever a lane has any legal move, the pick must be one of them.
     legal = jnp.take_along_axis(masks, actions[..., None], axis=2)[..., 0]
@@ -94,7 +117,7 @@ def test_picks_only_legal_actions(spec: ObservationSpec | BeliefSpec) -> None:
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_same_seed_reproduces_rollout(spec: ObservationSpec | BeliefSpec) -> None:
+def test_same_seed_reproduces_rollout(spec: Spec) -> None:
     _, first = _self_play(spec, seed=3, n_steps=40)
     _, second = _self_play(spec, seed=3, n_steps=40)
     assert bool(jnp.all(first == second))
@@ -142,6 +165,7 @@ def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
         )
         flat = spec.policy(key, obs, mask)
     else:
+        assert isinstance(spec, BeliefSpec)  # the parametrized names
         res = state0.player_resources  # exact public knowledge: lo == hi == truth
         belief = BeliefState(
             res_lo=jnp.broadcast_to(res, (3, *res.shape)),
@@ -154,7 +178,7 @@ def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_self_play_rollouts_complete_games(spec: ObservationSpec | BeliefSpec) -> None:
+def test_self_play_rollouts_complete_games(spec: Spec) -> None:
     # The episode budget stops as soon as two games finish (instead of a fixed
     # step count), which is what bounds the expensive search agents' runtime.
     # Three seats so domestic trade is live: a proposer stuck re-offering a

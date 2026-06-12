@@ -1,11 +1,14 @@
-"""The seat interfaces: pure decision functions over one game's view.
+"""The seat interfaces: decision functions over one game's view.
 
-Two protocols, split by what a seat consumes — neither sees anything the
+Three protocols, split by what a seat consumes — none sees anything the
 player wouldn't: :class:`Policy` reads the acting player's partial
 observation; :class:`BeliefPolicy` reads the engine's honest
 :class:`~catan_engine.belief.BeliefView` (model-based agents rebuild a
-concrete world with ``sample_world`` and search there). Both are valid at any
-player count; belief sharpness, not the API, varies with the seat count.
+concrete world with ``sample_world`` and search there); :class:`GameAgent`
+reads the same partial observation but is a *stateful per-game object*,
+driven step-by-step in Python (plans and memories persist across its own
+moves; not traceable, so it never enters a jit/vmap). All are valid at any
+player count.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import functools
 from collections.abc import Callable, Mapping
 from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
+import numpy as np
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import BoardState, IntScalar, KeyScalar
@@ -26,6 +30,14 @@ FlatMask = Bool[Array, f"flat={N_FLAT}"]
 
 FlatAction = Int[Array, ""]
 """A chosen flat action index in ``[0, N_FLAT)``."""
+
+HostFlatMask = Bool[np.ndarray, f"flat={N_FLAT}"]
+"""``FlatMask`` fetched to the host (the stateful agents' form)."""
+
+HostObservation = Mapping[str, np.ndarray]
+"""An :class:`~catan_engine.env.Observation` fetched to the host: the same
+keys with single-game numpy leaves (one ``jax.device_get``, no per-field
+device syncs in agent logic)."""
 
 
 @runtime_checkable
@@ -79,7 +91,32 @@ class BeliefPolicy(Protocol):
     ) -> FlatAction: ...
 
 
-P = TypeVar("P", Policy, BeliefPolicy)
+@runtime_checkable
+class GameAgent(Protocol):
+    """One seat of one game, driven step-by-step in Python.
+
+    ``obs`` is the agent's partial observation (one game, host numpy),
+    ``mask`` the flat legality of its moves. Returns the chosen flat action
+    index, legal whenever any legal move exists (same no-legal-move
+    convention as :class:`Policy`). Calls arrive in game order, so the agent
+    may keep state across them; it is never shared between games.
+    """
+
+    def act(self, obs: HostObservation, mask: HostFlatMask) -> int: ...
+
+
+@runtime_checkable
+class StatefulPolicy(Protocol):
+    """Builds a fresh :class:`GameAgent` for one game.
+
+    ``seed`` makes the agent's tie-breaking deterministic; drivers derive a
+    distinct seed per (game, seat).
+    """
+
+    def __call__(self, seed: int) -> GameAgent: ...
+
+
+P = TypeVar("P", Policy, BeliefPolicy, StatefulPolicy)
 # `for_tests` returns the spec's own class; a bound TypeVar instead of Self
 # because the tests' beartype hook can't check PEP 673 on hook-decorated
 # methods (and only resolves unsubscripted forward-ref bounds).
@@ -95,9 +132,9 @@ class AgentSpec(Generic[P]):
     overrides applied on top of ``defaults`` for a cheaper member of the same
     family (see :attr:`for_tests`). The subclass is the protocol tag —
     :class:`ObservationSpec` families build a :class:`Policy`,
-    :class:`BeliefSpec` families a :class:`BeliefPolicy` — so consumers
-    dispatch with ``isinstance``. ``n_players`` holds the player counts the
-    agent may be seated at.
+    :class:`BeliefSpec` a :class:`BeliefPolicy`, :class:`StatefulSpec` a
+    :class:`StatefulPolicy` — so consumers dispatch with ``isinstance``.
+    ``n_players`` holds the player counts the agent may be seated at.
     """
 
     make: Callable[..., P]
@@ -131,3 +168,11 @@ class ObservationSpec(AgentSpec[Policy]):
 
 class BeliefSpec(AgentSpec[BeliefPolicy]):
     """A family of belief-driven seats."""
+
+
+class StatefulSpec(AgentSpec[StatefulPolicy]):
+    """A family of stateful per-game seats (``policy`` is the agent factory).
+
+    Not traceable: drivers seat these through a per-step Python loop
+    (``evaluate`` switches to one automatically), never a fused scan.
+    """

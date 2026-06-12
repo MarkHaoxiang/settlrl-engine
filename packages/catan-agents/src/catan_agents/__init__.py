@@ -1,7 +1,9 @@
-"""Catan-playing agents: pure-JAX policies over catan-engine's flat action space."""
+"""Catan-playing agents over catan-engine's flat action space: pure-JAX
+policies plus stateful plain-Python planners."""
 
 from catan_engine.board.resources import N_PLAYERS
 
+from catan_agents.planner import make_planner
 from catan_agents.search import (
     lookahead_policy,
     make_greedy,
@@ -15,9 +17,12 @@ from catan_agents.shared import (
     EvalResult,
     FlatAction,
     FlatMask,
+    GameAgent,
     ObservationSpec,
     Policy,
     PolicyPrior,
+    StatefulPolicy,
+    StatefulSpec,
     Value,
     ValueFunction,
     evaluate,
@@ -30,9 +35,10 @@ from catan_agents.shared import (
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 
-POLICIES: dict[str, ObservationSpec | BeliefSpec] = {
+POLICIES: dict[str, ObservationSpec | BeliefSpec | StatefulSpec] = {
     "random": ObservationSpec(lambda: random_policy, _ANY_COUNT),
     "greedy": ObservationSpec(lambda: greedy_policy, _ANY_COUNT),
+    "planner": StatefulSpec(make_planner, _ANY_COUNT),
     "lookahead": BeliefSpec(
         make_greedy, _ANY_COUNT, defaults={"value": heuristic_value}
     ),
@@ -60,9 +66,12 @@ __all__ = [
     "EvalResult",
     "FlatAction",
     "FlatMask",
+    "GameAgent",
     "ObservationSpec",
     "Policy",
     "PolicyPrior",
+    "StatefulPolicy",
+    "StatefulSpec",
     "Value",
     "ValueFunction",
     "evaluate",
@@ -72,6 +81,7 @@ __all__ = [
     "make_greedy",
     "make_heuristic",
     "make_mcts",
+    "make_planner",
     "mcts_policy",
     "random_policy",
     "sample_world",

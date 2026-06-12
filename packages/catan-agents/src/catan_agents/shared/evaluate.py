@@ -3,19 +3,32 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from catan_engine.belief import BeliefState, belief_view
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import BoardState, KeyScalar
-from catan_engine.env import ActionParams, BatchedCatanEnv, flat_to_action, observe_for
+from catan_engine.env import (
+    ActionParams,
+    BatchedCatanEnv,
+    flat_to_action,
+    observe_for,
+)
 from catan_engine.env.batched import Actor, AgentSelectionArray
 from catan_engine.mechanics.flat import FlatMaskArray
 from jaxtyping import Array, Float, Int
 
-from catan_agents.shared.policy import AgentSpec, BeliefSpec, ObservationSpec, Policy
+from catan_agents.shared.policy import (
+    AgentSpec,
+    BeliefSpec,
+    GameAgent,
+    ObservationSpec,
+    Policy,
+    StatefulSpec,
+)
 
 
 class EvalResult(NamedTuple):
@@ -100,6 +113,93 @@ def _actor(pickers: Sequence[_Picker]) -> Actor:
     return actor
 
 
+def _evaluate_stepwise(
+    agents: Sequence[ObservationSpec | BeliefSpec | StatefulSpec | Policy],
+    *,
+    n_steps: int | None,
+    n_episodes: int | None,
+    batch_size: int,
+    seed: int,
+    number_placement: Literal["random", "spiral"],
+) -> EvalResult:
+    """The per-step Python driver behind :func:`evaluate` when a stateful
+    seat is present: same seating and budget semantics, but each step calls
+    the acting stateful agents lane by lane (their state lives across calls),
+    so nothing fuses into a scan. Auto-reset lanes get fresh agents."""
+    n = len(agents)
+    env = BatchedCatanEnv(
+        batch_size=batch_size,
+        seed=seed,
+        reward="sparse",
+        n_players=n,
+        number_placement=number_placement,
+        track_beliefs=any(isinstance(a, BeliefSpec) for a in agents),
+    )
+    factories: dict[int, Callable[[int], GameAgent]] = {}
+    pickers: dict[int, _Picker] = {}
+    for i, a in enumerate(agents):
+        if isinstance(a, StatefulSpec):
+            if n not in a.n_players:
+                raise ValueError(f"seat {i} does not support {n}-player games")
+            factories[i] = a.policy
+        else:
+            # Jitted here: the fused path traces pickers inside its scan, but
+            # this loop calls them step by step (eager greedy is ~450x).
+            pickers[i] = cast(_Picker, jax.jit(_picker(a, n, i)))
+
+    next_episode = 0
+
+    def fresh_seats() -> dict[int, GameAgent]:
+        nonlocal next_episode
+        next_episode += 1
+        return {i: f(seed + (next_episode - 1) * n + i) for i, f in factories.items()}
+
+    lanes_agents = [fresh_seats() for _ in range(batch_size)]
+    key = jax.random.key(seed)
+    wins = np.zeros((n,), np.float64)
+    total = (
+        n_steps
+        if n_steps is not None
+        else _MAX_STEPS_PER_EPISODE * ((n_episodes or 0) // batch_size + 1)
+    )
+    for _ in range(total):
+        # Re-read the board every step: an auto-reset lane regenerates it.
+        layout, state = env.board
+        mask = env.flat_mask()
+        sel = np.asarray(env.agent_selection)
+        flat = np.zeros((batch_size,), np.int32)
+        key, k = jax.random.split(key)
+        seat_keys = jax.random.split(k, n)
+        mask_host: np.ndarray | None = None
+        for i in range(n):
+            lanes = np.flatnonzero(sel == i)
+            if lanes.size == 0:
+                continue
+            if i in pickers:
+                belief = env.beliefs if env.track_beliefs else None
+                picks = pickers[i](seat_keys[i], layout, state, belief, mask)
+                flat[lanes] = np.asarray(picks)[lanes]
+            else:
+                # One host fetch per seat-step; agents see numpy lane slices.
+                obs = cast("dict[str, np.ndarray]", jax.device_get(env.observe(i)))
+                if mask_host is None:
+                    mask_host = np.asarray(mask)
+                for lane in lanes:
+                    obs_l = {k: v[lane] for k, v in obs.items()}
+                    flat[lane] = lanes_agents[int(lane)][i].act(
+                        obs_l, mask_host[int(lane)]
+                    )
+        env.step(*flat_to_action(jnp.asarray(flat)))
+        wins += np.asarray(env.rewards).sum(axis=0)
+        for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)):
+            lanes_agents[int(lane)] = fresh_seats()
+        if n_episodes is not None and int(wins.sum()) >= n_episodes:
+            break
+    return EvalResult(
+        wins=jnp.asarray(wins, jnp.float32), episodes=round(float(wins.sum()))
+    )
+
+
 # Step cap per requested episode in n_episodes mode, guarding against agents
 # that never finish a game (a full game is well under this many steps).
 _MAX_STEPS_PER_EPISODE = 5_000
@@ -110,7 +210,7 @@ _SYNC_WINDOW = 64
 
 
 def evaluate(
-    agents: Sequence[ObservationSpec | BeliefSpec | Policy],
+    agents: Sequence[ObservationSpec | BeliefSpec | StatefulSpec | Policy],
     *,
     n_steps: int | None = None,
     n_episodes: int | None = None,
@@ -126,11 +226,23 @@ def evaluate(
     auto-reset, so ``episodes`` counts every game completed within the budget
     (games still running at the end are discarded; lanes finishing within the
     same sync window can overshoot ``n_episodes``). Deterministic for a given
-    configuration and ``seed``.
+    configuration and ``seed``. A :class:`StatefulSpec` seat switches the run
+    to the per-step Python driver (same semantics, no fused scan, win counts
+    sync every step so the overshoot is at most a batch).
     """
     if (n_steps is None) == (n_episodes is None):
         raise ValueError("provide exactly one of n_steps / n_episodes")
+    if any(isinstance(a, StatefulSpec) for a in agents):
+        return _evaluate_stepwise(
+            agents,
+            n_steps=n_steps,
+            n_episodes=n_episodes,
+            batch_size=batch_size,
+            seed=seed,
+            number_placement=number_placement,
+        )
     n = len(agents)
+    pure = cast("Sequence[ObservationSpec | BeliefSpec | Policy]", agents)
     env = BatchedCatanEnv(
         batch_size=batch_size,
         seed=seed,
@@ -139,7 +251,7 @@ def evaluate(
         number_placement=number_placement,
         track_beliefs=any(isinstance(a, BeliefSpec) for a in agents),
     )
-    actor = _actor([_picker(agent, n, i) for i, agent in enumerate(agents)])
+    actor = _actor([_picker(agent, n, i) for i, agent in enumerate(pure)])
     key = jax.random.key(seed)
     wins = jnp.zeros((n,), jnp.float32)
     total = (

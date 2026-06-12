@@ -9,9 +9,12 @@ from catan_agents.shared.policy import (
     BeliefSpec,
     FlatAction,
     FlatMask,
+    GameAgent,
     ObservationSpec,
     Policy,
     PolicyPrior,
+    StatefulPolicy,
+    StatefulSpec,
 )
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import (
@@ -28,9 +31,12 @@ __all__ = [
     "EvalResult",
     "FlatAction",
     "FlatMask",
+    "GameAgent",
     "ObservationSpec",
     "Policy",
     "PolicyPrior",
+    "StatefulPolicy",
+    "StatefulSpec",
     "Value",
     "ValueFunction",
     "evaluate",

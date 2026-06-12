@@ -1,6 +1,8 @@
 # catan-agents — internal notes
 
-Pure-JAX Catan agents over `catan-engine`'s public flat-action seam.
+Catan agents over `catan-engine`'s public flat-action seam: pure-JAX
+policies (`shared/`, `search/`) plus stateful plain-Python planners
+(`planner/`).
 
 **No agent assumes full observability.** Model-based agents consume the
 engine's honest `BeliefView` (see the engine's `belief.py` notes); hidden
@@ -17,8 +19,14 @@ agents run at 2–4 players with beliefs of varying sharpness.
   `for_testing` parameter overrides — `spec.for_tests` is the cheap family
   member the protocol tests run (the tested properties are
   parameter-independent). `AgentSpec` is generic over its protocol and the
-  subclass is the tag (`ObservationSpec` / `BeliefSpec`), so consumers
-  dispatch with `isinstance` and `spec.policy` is precisely typed — no casts.
+  subclass is the tag (`ObservationSpec` / `BeliefSpec` / `StatefulSpec`), so
+  consumers dispatch with `isinstance` and `spec.policy` is precisely typed —
+  no casts. A `StatefulSpec`'s `policy` is a *factory* (`seed -> GameAgent`):
+  the agent object holds per-game state, so drivers build one per (game,
+  seat) and replace it when the lane auto-resets. `GameAgent.act` takes
+  *host* data (`HostObservation` / `HostFlatMask`, numpy): handing device
+  arrays to host-side logic cost ~10 ms per decision in thirty per-field
+  syncs; one `jax.device_get` of the batched observation costs ~0.1 ms/lane.
   The generic cannot type `defaults` itself: `make(**mapping)` is uncheckable
   (ParamSpec doesn't apply to dynamic unpacking). `PolicyPrior` is the
   learned-policy-head seam: `make_mcts` / `make_smcts` take one in place of
@@ -73,6 +81,12 @@ agents run at 2–4 players with beliefs of varying sharpness.
   Caveat: the scan retraces per `evaluate` call (the actor closure is fresh
   each time) — ~12 s per call for mcts-sized bodies, amortised over 200-game
   matches, noticeable on ≤ 20-game probes.
+  A `StatefulSpec` seat switches `evaluate` to `_evaluate_stepwise`: the same
+  seating/budget semantics through a per-step Python loop (stateful seats act
+  lane by lane on host-fetched observations; pure seats keep their `_picker`,
+  but jitted — eagerly the vmapped greedy alone is 46 ms/step vs 0.1 jitted).
+  ~18 ms/step at B=16 on GPU, dominated by the per-step env dispatch; win
+  counts sync every step, so the `n_episodes` overshoot is at most a batch.
 
 ## search/
 
@@ -180,6 +194,47 @@ draws (true chance nodes); the second is inherent to PIMC.
   budgets. Becomes interesting only with a learned value function whose
   error shrinks under search; kept as the working scaffold for that.
 
+## planner/
+
+The stateful decision-tree class: per-game plain-Python agents (no value
+function, no search, no JAX in the decision path). `pov.py` is the host-side
+toolkit — one `Pov` per decision wrapping the host-fetched observation, the
+static board graph re-stated as numpy/python tables (`VERTEX_*`,
+`EDGE_ENDPOINTS`, `TILE_CORNERS`), and the flat table's host decode
+(`flat_row`, `ROWS_OF_TYPE`). `tree.py` is the framework (`Node` /
+`Selector` / `Plan` / `Blackboard`); `agent.py` the shipped `planner` family.
+
+Design invariants:
+
+- **Legality only ever comes from the mask.** Leaves pick among legal rows
+  (or build a row with `flat_row` and check it); no rule is re-implemented,
+  so engine rule changes can't silently desync the agent. If the whole tree
+  declines, a fixed-priority fallback picks some legal row (PROPOSE_TRADE
+  deliberately absent there — an unmanaged offer could re-propose forever).
+- **Plan steps are declarative targets, not queued actions.** Every tick the
+  plan reports its first step missing from the board and the agent re-checks
+  the rest; a step gone impossible (spot taken, path edge claimed) triggers a
+  replan. That re-validation is what makes state safe across opponents'
+  moves *and* auto-reset (a stale plan against a fresh board just invalidates).
+- **Memory covers what the engine forgets.** The engine keeps no record of
+  rejected trade offers, so the blackboard does: a proposal is remembered
+  with the hand that made it, marked rejected if the next MAIN tick shows no
+  trace of it, and never re-offered that turn (`max_proposals_per_turn` caps
+  the rest). This is the stall-guard the completing-games test exercises.
+- Gotchas: the observation has no dev-deck size or `free_roads` field, so a
+  dev-buy plan can be starved invisibly — `_PLAN_PATIENCE` abandons any plan
+  with no step realized for 12 own turns and excludes that goal from the
+  immediate replan; ROAD_BUILDING is only played with ≥ 2 unrealized road
+  steps so both free roads land inside the plan. A dev-buy step's "realized"
+  check is a baseline comparison on the public dev count (the hand count
+  drops again when cards are played, but the plan completes on the next tick,
+  before that can happen).
+
+Strength (seat-swapped, June 12): 78% vs greedy (n=101), 10% vs lookahead
+(n=60) — code-only planning clears the scripted tier table but not search.
+Move latency is ~0.1 ms/lane at B=32 (cuda benchmark), so the stepwise
+driver's cost is the env dispatch, not the agent.
+
 ## cli.py
 
 `compare` is a seat-swapped head-to-head: two `n_episodes` evaluate runs
@@ -199,8 +254,11 @@ agents, consumed by both the protocol tests and catan-render's bot seam
 Tests are protocol-level only (`tests/test_policies.py`), parametrized over
 every agent in `POLICIES` at its `for_testing` parameters: legality through
 self-play, seed reproducibility, and episode-budgeted rollouts that must
-complete games. No per-agent internal-logic
-tests — a new agent just registers in `POLICIES`. `sample_world` is
+complete games (`_self_play` drives stateful specs lane by lane, mirroring
+`_evaluate_stepwise`). No per-agent internal-logic
+tests — a new agent just registers in `POLICIES`. catan-render's bot seam
+skips `StatefulSpec` families (its `bot_act` is per-move and stateless; a
+stateful seat there needs a per-session agent cache that doesn't exist yet). `sample_world` is
 infrastructure, not a policy, so it gets unit tests (`tests/test_sample.py`).
 `tests/conftest.py` installs the jaxtyping/beartype hook for all
 `catan_agents` modules.

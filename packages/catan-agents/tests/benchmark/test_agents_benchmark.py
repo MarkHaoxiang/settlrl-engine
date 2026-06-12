@@ -27,7 +27,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from catan_agents import POLICIES, BeliefSpec, ObservationSpec, sample_world
+from catan_agents import (
+    POLICIES,
+    BeliefSpec,
+    ObservationSpec,
+    StatefulSpec,
+    sample_world,
+)
 from catan_agents.shared.evaluate import _actor, _picker
 from catan_engine.belief import BeliefView
 from catan_engine.env import BatchedCatanEnv, Observation
@@ -90,11 +96,27 @@ def _acting_view(env: BatchedCatanEnv) -> BeliefView:
 
 
 def _move(
-    spec: ObservationSpec | BeliefSpec, env: BatchedCatanEnv
+    spec: ObservationSpec | BeliefSpec | StatefulSpec, env: BatchedCatanEnv
 ) -> Callable[[], jax.Array]:
-    """One jitted batched decision on the env's current position."""
+    """One batched decision on the env's current position (jitted for the
+    pure policies; the per-lane Python loop a stateful seat actually costs)."""
     keys = jax.random.split(jax.random.key(1), env.batch_size)
     mask = env.flat_mask()
+    if isinstance(spec, StatefulSpec):
+        agents = [spec.policy(lane) for lane in range(env.batch_size)]
+        obs = _acting_obs(env)
+
+        def stateful() -> jax.Array:
+            # The fetch is in the timed region: the stepwise driver pays it.
+            obs_h = cast("dict[str, np.ndarray]", jax.device_get(obs))
+            mask_h = np.asarray(mask)
+            picks = [
+                agents[lane].act({k: v[lane] for k, v in obs_h.items()}, mask_h[lane])
+                for lane in range(env.batch_size)
+            ]
+            return jnp.asarray(picks, jnp.int32)
+
+        return stateful
     if isinstance(spec, ObservationSpec):
         obs_act = jax.jit(jax.vmap(spec.policy))
         obs = _acting_obs(env)
@@ -146,8 +168,10 @@ def test_selfplay_window(benchmark: Any, name: str, device: str) -> None:
     ``rollout(actor=...)`` seam -- the ``evaluate`` hot loop (every seat picks
     in every lane each step; lanes auto-reset, so rounds stay mid-game)."""
     benchmark.group = f"selfplay_window[{device}]"
+    spec = POLICIES[name]
+    if isinstance(spec, StatefulSpec):
+        pytest.skip("stateful seats run the per-step Python driver, not the scan")
     with jax.default_device(jax.devices(device)[0]):
-        spec = POLICIES[name]
         env = BatchedCatanEnv(
             batch_size=_EVAL_BATCH,
             seed=0,

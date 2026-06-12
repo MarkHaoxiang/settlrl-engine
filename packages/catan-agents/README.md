@@ -2,23 +2,25 @@
 
 Catan-playing agents for [catan-engine](../catan-engine).
 
-Agents are pure JAX functions (`jit` / `vmap` compatible, so they can drive whole batches of games on device) that consume the engine's flat action space; decode a chosen index with `catan_engine.env.flat_to_action`. They come in two kinds, split by what a seat consumes — neither sees anything the player wouldn't:
+Agents consume the engine's flat action space (decode a chosen index with `catan_engine.env.flat_to_action`) and come in three kinds, split by what a seat consumes and how it runs — none sees anything the player wouldn't:
 
-- **Observation agents** (`(key, observation, flat_mask) -> flat action`) read the acting player's partial view.
-- **Belief agents** (`(key, layout, view, player, flat_mask) -> flat action`) read the engine's honest world model: a `BeliefView` holding the public board fields plus provable bounds on what opponents hold (the engine's belief tracking — `BatchedCatanEnv(track_beliefs=True)`). The view has no field for anything hidden, so an agent can't even represent what the seat couldn't see; it rebuilds a concrete world by sampling (`sample_world`) and searches in the sample.
+- **Observation agents** (`(key, observation, flat_mask) -> flat action`) are pure JAX functions (`jit` / `vmap` compatible, so they drive whole batches of games on device) reading the acting player's partial view.
+- **Belief agents** (`(key, layout, view, player, flat_mask) -> flat action`) are pure JAX functions reading the engine's honest world model: a `BeliefView` holding the public board fields plus provable bounds on what opponents hold (the engine's belief tracking — `BatchedCatanEnv(track_beliefs=True)`). The view has no field for anything hidden, so an agent can't even represent what the seat couldn't see; it rebuilds a concrete world by sampling (`sample_world`) and searches in the sample.
+- **Stateful agents** (`agent.act(observation, flat_mask) -> flat action`) are plain-Python objects, one per seat per game, that keep state across their own moves — plans held over many turns, offers remembered as rejected. No value function or search: the decision logic is written directly in code. `evaluate` seats them through a per-step Python driver instead of the fused scan.
 
-Both kinds work at any player count. `POLICIES` maps every shipped agent by name to an `AgentSpec` (its function, which kind it is, and the player counts it supports).
+All kinds work at any player count. `POLICIES` maps every shipped agent by name to an `AgentSpec` (its family, which kind it is, and the player counts it supports).
 
 ## Agents
 
 - `random` — uniform over the legal actions.
 - `greedy` — scripted priorities (city > settlement > dev card > road), pip-weighted placement and robber moves.
+- `planner` — a stateful decision tree: adopts a build goal (city upgrade, road-path-plus-settlement expansion, dev buy), saves toward it across turns, and spends each turn closing its resource gap (dev-card plays, port trades, domestic offers it won't re-propose once rejected). Replans when the board invalidates the goal.
 - `lookahead` — one-step lookahead: applies every legal action to a sampled world and picks the successor the value function scores best.
 - `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator, the value function at the leaves, and the one-step value sweep as its root prior; searches an ensemble of sampled worlds and averages their action weights.
 
 The search agents act on a sampled world consistent with everything the seat knows: stochastic outcomes are their own samples (not the environment's), opponents' hidden cards are dealt from the player's honest belief — they never act on information the seat could not know. With two players the belief pins the opponent's resources exactly, so only dev-card identities are ever sampled.
 
-Two-player strength (200+ game seat-swapped matches): `mcts` > `lookahead` > `greedy` > `random` — mcts beats lookahead 57%, lookahead beats greedy 90%, greedy beats random 85%. The ladder holds at every count (seat-rotated): one mcts wins 62% against two lookaheads at three players (chance 33%) and 36% against three at four players (chance 25%); one lookahead wins 77% against three greedies.
+Two-player strength (200+ game seat-swapped matches): `mcts` > `lookahead` > `greedy` > `random` — mcts beats lookahead 57%, lookahead beats greedy 90%, greedy beats random 85%. The ladder holds at every count (seat-rotated): one mcts wins 62% against two lookaheads at three players (chance 33%) and 36% against three at four players (chance 25%); one lookahead wins 77% against three greedies. `planner` slots between greedy and the search agents: 78% against greedy, 10% against lookahead (~100 / 60 games).
 
 ## Value functions
 
@@ -63,3 +65,4 @@ Future tools (tournaments, ...) will hang off the same entry point as subcommand
 
 - `catan_agents.shared` — the seat protocols, value functions, world sampling, observation baselines, and `evaluate`.
 - `catan_agents.search` — the model-based agents (`lookahead`, `mcts`).
+- `catan_agents.planner` — the stateful decision-tree toolkit (nodes, plans, the numpy point of view) and the `planner` agent built on it.
