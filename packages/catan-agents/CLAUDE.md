@@ -231,7 +231,13 @@ caches one 662-wide successor-value sweep per decision (`values`), and
 `combo_best` runs the own-turn second ply: apply an enabler, re-sweep
 legality (`flat_available_for`), and value the follow-ups — the structural
 edge over `lookahead`, which is one-ply and provably weak exactly there
-(the June 11 END_TURN→BUY_DEV/TRADE flip diagnosis).
+(the June 11 END_TURN→BUY_DEV/TRADE flip diagnosis). `best_paranoid` is the
+opponent reply: my candidates within 1.0 of the top are tie-broken by the
+opponents' best answer — apply my row, fabricate their MAIN turn on the
+result, max over their *grounded* options (builds/bank trades; their dev
+plays are masked out because the reconstructed dev hand is fiction).
+Measured neutral on the lookahead rung; kept as the principled tie-break
+(robber/knight targets, surplus builds).
 
 Design invariants:
 
@@ -253,7 +259,12 @@ Design invariants:
 - **Goals are scored in economic time, switched on clear margins.** A goal's
   score is quality-weighted pips (`_RES_WEIGHT`: wheat/ore premium) minus
   0.35 × the bottleneck rounds production needs to afford it, plus
-  closing-urgency near 10 VP (a goal that wins outright dominates at 25/builds).
+  closing-urgency near 10 VP (a goal that wins outright dominates at
+  25/builds). Settlement goals carry the spot-race model (+3.4 vs lookahead,
+  the largest opponent-integration win): an opponent road already touching
+  the spot beats any multi-road path of ours (−2·len−1), one edge away is a
+  reason to hurry (+0.5), and each path edge adjacent to their network risks
+  being cut (−0.4).
   Candidates include the two award races: a Longest Road grab when within two
   trail extensions of taking the card (`my_longest_trail` DFS), and dev buys
   boosted while Largest Army is live. A healthy plan is re-scored against
@@ -280,19 +291,23 @@ Design invariants:
   annotations at test time — `sum()` of an empty generator is `int`, not
   `float`.
 
-Strength (seat-swapped, June 12 night, hybrid): 85.0% vs greedy (n=200),
-**52.3% vs lookahead** and **50.3% vs mcts** (both n=300) — jointly top of
-the ladder, from 42% / 10% / — that morning. The scripted push alone reached
-75% / 45% / 40% (biggest wins: SpendDown, the goal-switching margin,
-time-to-afford scoring); the tactic hybrid added the rest, with the
-value-arbitrated `OpportunisticBuild` (+4.5) and the own-turn combos (+2-3)
-carrying it and the leaf-pick delegation alone measuring neutral. Gate
-planner tweaks at n ≥ 200 — n=100 probes swung ±6 points around the n=300
-truth. The one measured trap: letting plain maritime sales dip into
-plan-reserved cards (47% → 29% vs lookahead, reverted; combos may, because
-the pair value prices the whole exchange). Move latency: the tactic sweep
-adds ~1 jit dispatch per decision on top of the ~0.1 ms/lane scripted tick;
-matches run ~1.5-2x slower than the pure-scripted planner.
+Strength (seat-swapped, June 12 night, hybrid + opponent model): 85.0% vs
+greedy (n=200), **~55% vs lookahead** (54.7% and 55.7% on n=300 runs) and
+**49.5% vs mcts pooled** (396/800 over the final configs) — tied with mcts
+at the top, clearly over lookahead; from 42% / 10% / — that morning. The
+arc: scripted push 75/45/40 (SpendDown, goal-switching margin,
+time-to-afford), tactic hybrid to 52/50 (value-arbitrated
+`OpportunisticBuild` +4.5, own-turn combos +2-3, leaf-pick delegation
+neutral), opponent integration to 55 vs lookahead (spot-race model +3.4;
+best-reply tie-break neutral). Gate planner tweaks at n ≥ 200 — n=100
+probes swung ±6 points around the n=300 truth. The one measured trap:
+letting plain maritime sales dip into plan-reserved cards (47% → 29% vs
+lookahead, reverted; combos may, because the pair value prices the whole
+exchange). Move latency: the tactic sweep adds ~1 jit dispatch per decision
+on top of the ~0.1 ms/lane scripted tick; matches run ~1.5-2x slower than
+the pure-scripted planner. Next levers for outright #1: value-informed plan
+choice (multi-apply goal valuation), expectimax over the opponent's roll,
+or catan-learn's Stage 1 value dropped into tactic.py.
 
 ## cli.py
 

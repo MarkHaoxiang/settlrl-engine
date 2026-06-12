@@ -127,6 +127,45 @@ def _after(
     return mask2, _successor_values(layout, succ, player, mask2)
 
 
+# Rows an imagined opponent may not use in a reply: their reconstructed dev
+# hand is fiction, so their dev plays would be too.
+_NO_DEV_PLAYS = jnp.asarray(
+    ~np.isin(
+        np.asarray(_ROW_TYPE),
+        [
+            int(ActionType.PLAY_KNIGHT),
+            int(ActionType.PLAY_ROAD_BUILDING),
+            int(ActionType.PLAY_YEAR_OF_PLENTY),
+            int(ActionType.PLAY_MONOPOLY),
+        ],
+    )
+)
+
+
+@jax.jit
+def _best_reply(
+    layout: BoardLayout, state: BoardState, my_row: jax.Array, opp: jax.Array
+) -> jax.Array:
+    """The opponent's best answer to ``my_row``, valued from *their* seat:
+    apply my action, hand them a fabricated MAIN turn on the result, and take
+    the max over their grounded options (builds and bank trades — public
+    roads, real hand size, spread composition)."""
+    params = ActionParams(
+        idx=_ROW_PARAMS.idx[my_row], target=_ROW_PARAMS.target[my_row]
+    )
+    succ, _ = apply_action(layout, state, _ROW_TYPE[my_row], params, jnp.bool_(True))
+    theirs = succ._replace(
+        current_player=opp.astype(jnp.uint8),
+        phase=jnp.uint8(GamePhase.MAIN),
+        has_rolled=jnp.uint8(1),
+        dev_played=jnp.uint8(0),
+        free_roads=jnp.uint8(0),
+    )
+    mask = flat_available_for(layout, theirs) & _NO_DEV_PLAYS
+    vals = _successor_values(layout, theirs, opp.astype(jnp.int32), mask)
+    return jnp.max(jnp.where(mask, vals, -jnp.inf))
+
+
 class Tactic:
     """Per-decision successor values, computed lazily and cached per ``Pov``."""
 
@@ -154,6 +193,27 @@ class Tactic:
         """The row among ``rows`` whose successor scores best."""
         vals = self.values(pov)
         return int(rows[int(np.argmax(vals[rows]))])
+
+    def best_paranoid(self, pov: Pov, rows: np.ndarray, margin: float = 1.0) -> int:
+        """``best``, with near-ties (within ``margin`` of the top) broken by
+        the opponents' best reply: among moves equally good for us, prefer
+        the one that leaves them the worst answer."""
+        vals = self.values(pov)
+        top = float(np.max(vals[rows]))
+        short = [int(r) for r in rows if vals[r] >= top - margin]
+        if len(short) == 1:
+            return short[0]
+        assert self._board is not None
+        layout, state = self._board
+        opponents = [p for p in range(pov.n_players) if p != pov.me]
+
+        def reply(row: int) -> float:
+            return max(
+                float(_best_reply(layout, state, jnp.int32(row), jnp.int32(p)))
+                for p in opponents
+            )
+
+        return min(short, key=reply)
 
     def combo_best(
         self, pov: Pov, enablers: list[int], follow: np.ndarray

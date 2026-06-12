@@ -176,7 +176,7 @@ class MoveRobber(Node):
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.MOVE_ROBBER)
-        return self.tactic.best(pov, rows) if rows.size else None
+        return self.tactic.best_paranoid(pov, rows) if rows.size else None
 
 
 class PlayKnight(Node):
@@ -200,7 +200,7 @@ class PlayKnight(Node):
             and after >= 3
             and after > int(others.max())
         )
-        return self.tactic.best(pov, rows) if blocked or takes_army else None
+        return self.tactic.best_paranoid(pov, rows) if blocked or takes_army else None
 
 
 class RespondToTrade(Node):
@@ -311,17 +311,36 @@ def plan_candidates(pov: Pov, bb: Blackboard, depth: int) -> list[tuple[float, P
         score = 7.5 + _wprod(pov.vertex_production(int(v)))
         score += urgency(1, 1) - 0.35 * turns(steps)
         cands.append((score + _noise(bb), Plan(f"city@{int(v)}", steps)))
+
+    def their_road(edge: int) -> bool:
+        return int(pov.edge_road[edge]) not in (0, pov.me + 1)
+
     for v, path in pov.expansion_paths(depth):
         gain = pov.vertex_production(v)
         new_types = int(((gain > 0) & (pov.my_production == 0)).sum())
         steps = [Step(ActionType.BUILD_ROAD, e) for e in path]
         steps.append(Step(ActionType.BUILD_SETTLEMENT, v))
-        contested = any(
-            int(pov.edge_road[e]) not in (0, pov.me + 1) for e in VERTEX_EDGES[v]
-        )
         score = 5.5 + _wprod(gain) + 1.8 * new_types + _port_bonus(pov, v, gain)
-        score += -1.0 * len(path) + urgency(1, 1 + len(path)) + 0.8 * contested
+        score += -1.0 * len(path) + urgency(1, 1 + len(path))
         score += -0.35 * turns(steps)
+        # The race for the spot: an opponent road already touching it settles
+        # the moment they afford it, so a multi-road path of ours loses; one
+        # edge away, claiming first is worth a hurry. A path edge adjacent to
+        # their network can be cut under us either way.
+        if any(their_road(e) for e in VERTEX_EDGES[v]):
+            score -= 2.0 * len(path) - 1.0
+        elif any(their_road(e2) for n in VERTEX_NEIGHBORS[v] for e2 in VERTEX_EDGES[n]):
+            score += 0.5
+        cut_risk = sum(
+            1
+            for e in path
+            if any(
+                their_road(e2)
+                for vv in EDGE_ENDPOINTS[e]
+                for e2 in VERTEX_EDGES[int(vv)]
+            )
+        )
+        score -= 0.4 * cut_risk
         cands.append((score + _noise(bb), Plan(f"settle@{v}", steps)))
     if pov.longest_road_owner != pov.me:
         target = 5 if pov.longest_road_owner == _NO_OWNER else pov.longest_road_len + 1
@@ -436,8 +455,10 @@ class OpportunisticBuild(Node):
         if not rows:
             return None
         vals = self.tactic.values(pov)
-        best = max(rows, key=lambda r: float(vals[r]))
-        return best if vals[best] > vals[end_turn] else None
+        above = [r for r in rows if vals[r] > vals[end_turn]]
+        if not above:
+            return None
+        return self.tactic.best_paranoid(pov, np.asarray(above))
 
 
 _ROW_IS_BUILDISH = np.zeros(int(ROW_IDX.shape[0]), dtype=bool)
