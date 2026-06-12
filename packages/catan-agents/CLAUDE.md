@@ -64,7 +64,16 @@ agents run at 2–4 players with beliefs of varying sharpness.
   1/(1+production)) prices cards the player cannot produce, so port/domestic
   conversions toward them read as gains — 57.3% (n=205) over `w_scarce=0` on
   the lookahead rung at the adopted 1.0 (0.5 measured 52.2%; 1.5 lost to 1.0
-  head-to-head 43.1%). Value-as-win-prob
+  head-to-head 43.1%). June 12 night feature round (gated
+  lookahead-vs-lookahead ablations, n=200 probes → n=400 confirms): adopted
+  `w_numbers=0.3` (distinct dice numbers collected on — income smoothness)
+  + `w_kheld=0.8` (held knights toward the army race), 56.1% ± 2.4% (n=415)
+  over without; the full triple with `w_spots=0.6` measured *worse* (53.2%
+  — spots overlaps the best-spot term) and a summed-completeness `w_fill`
+  was outright negative (43.1% at 1.0: it rewards hoarding toward several
+  builds, i.e. discard exposure) — both knobs kept at 0. Ladder re-checked
+  on the new defaults: relative rungs unchanged (every top agent shares the
+  leaf), absolute level up. Value-as-win-prob
   calibration (183k self-play positions): P(win) = σ(0.053·v), phase-stable —
   but the calibrated `value_scale≈38` *lost* to the sharper hand-picked 20 in
   mcts (44.5%, n=200): honest calibration is not the best search temperature.

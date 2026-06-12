@@ -87,6 +87,10 @@ def make_heuristic(
     w_port: float = 0.0,
     w_wheat_ore: float = 0.25,
     w_race: float = 0.8,
+    w_numbers: float = 0.3,
+    w_spots: float = 0.0,
+    w_fill: float = 0.0,
+    w_kheld: float = 0.8,
 ) -> ValueFunction:
     """Build a weighted heuristic value function (see :func:`heuristic_value`).
 
@@ -95,7 +99,8 @@ def make_heuristic(
     (robber-aware, city double), distinct resource types produced, hand
     diversity (sqrt per type, plus a production-scarcity-weighted copy that
     prices cards the player cannot produce) with a discard-risk penalty per
-    card over seven,
+    card over seven, distinct dice numbers collected on (income smoothness),
+    held knights toward the army race,
     held dev cards, expansion (pips of the best settlement spot buildable right
     now, and own roads), completeness of the closest affordable build, knights
     played toward Largest Army, a wheat/ore production premium, and a
@@ -159,17 +164,31 @@ def make_heuristic(
             return jnp.minimum(res, cost).sum() / cost.sum()
 
         deck_left = state.dev_deck.astype(jnp.int32).sum() > 0
-        progress = jnp.max(
-            jnp.stack(
-                [
-                    completeness(_SETTLEMENT_COST_ARR) * jnp.any(spot),
-                    completeness(_CITY_COST_ARR) * jnp.any(is_settlement),
-                    completeness(_DEV_COST_ARR) * deck_left,
-                ]
-            )
+        each = jnp.stack(
+            [
+                completeness(_SETTLEMENT_COST_ARR) * jnp.any(spot),
+                completeness(_CITY_COST_ARR) * jnp.any(is_settlement),
+                completeness(_DEV_COST_ARR) * deck_left,
+            ]
         )
+        progress = jnp.max(each)
+        fill = each.sum()
 
         knights = jnp.minimum(state.knights_played[p].astype(jnp.float32), 3.0)
+        held_knights = jnp.minimum(
+            state.dev_hand[p, DevCard.KNIGHT].astype(jnp.float32), 2.0
+        )
+
+        # Income smoothness: distinct dice numbers our buildings collect on.
+        numbers = (
+            jnp.zeros((13,), jnp.bool_)
+            .at[layout.tile_number.astype(jnp.int32)]
+            .max(weight > 0)[2:]
+            .sum()
+            .astype(jnp.float32)
+        )
+        # Expansion optionality: how many spots are buildable, not just the best.
+        n_spots = jnp.sqrt(spot.sum().astype(jnp.float32))
 
         # Ports: a 2:1 port is worth the production it can convert; a 3:1
         # port a fraction of all production.
@@ -199,6 +218,10 @@ def make_heuristic(
             + w_port * ports
             + w_wheat_ore * (per_res[1] + per_res[4])
             + w_race * race
+            + w_numbers * numbers
+            + w_spots * n_spots
+            + w_fill * fill
+            + w_kheld * held_knights
         )
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
