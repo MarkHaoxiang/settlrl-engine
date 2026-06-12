@@ -152,6 +152,7 @@ def create_app(
     max_body_bytes: int = 2 * 1024 * 1024,
     state_dir: str | None = None,
     turn_timeout: float = 0.0,
+    warm: bool = True,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -167,6 +168,8 @@ def create_app(
     games are journalled there and replayed back on the next startup (ignored
     when ``games`` is passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a
     human turn that has gone idle that long, so an abandoned game still finishes.
+    ``warm`` pre-compiles the engine at startup (off in tests, which compile
+    lazily and don't want the background contention).
     """
     registry = _build_registry(games, state_dir)
     replays = _ReplaySlot()
@@ -176,7 +179,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        threading.Thread(target=_warm_jit_cache, daemon=True).start()
+        if warm:
+            threading.Thread(target=_warm_jit_cache, daemon=True).start()
         # Each event-stream subscriber occupies a threadpool thread for its
         # whole connection; the anyio default (40) would cap concurrent clients
         # and then starve ordinary requests.

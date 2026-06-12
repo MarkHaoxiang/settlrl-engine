@@ -186,7 +186,10 @@ def _live_server(app: FastAPI) -> Iterator[int]:
     SSE streams need this: TestClient buffers whole responses and would block
     on an open stream forever.
     """
-    server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
+    # A short graceful-shutdown timeout: an SSE generator parked in its keepalive
+    # wait() would otherwise hold teardown for the full keepalive interval.
+    config = uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=1)
+    server = uvicorn.Server(config)
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -198,7 +201,7 @@ def _live_server(app: FastAPI) -> Iterator[int]:
         yield port
     finally:
         server.should_exit = True
-        thread.join(timeout=10)
+        thread.join(timeout=5)
 
 
 def _next_event(lines: Iterator[str]) -> dict[str, object]:
@@ -212,44 +215,35 @@ def _next_event(lines: Iterator[str]) -> dict[str, object]:
 def test_events_stream_snapshot_now_then_on_every_change() -> None:
     # The never-ending stream needs a real server: TestClient buffers whole
     # responses, so it would block on the open stream forever.
-    config = uvicorn.Config(create_app(GameRegistry()), log_level="warning")
-    server = uvicorn.Server(config)
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    thread = threading.Thread(target=server.run, args=([sock],), daemon=True)
-    thread.start()
-    try:
-        while not server.started:
-            time.sleep(0.02)
-        with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http:
-            # All-human so no bot driver mutates the game mid-test.
-            doc = http.post(
-                "/api/games", json={"seed": 0, "seats": ["human"] * 4}
-            ).json()
-            game, hdr = doc["id"], _hdr(dict(doc["tokens"]))
-            with http.stream("GET", f"/api/games/{game}/events", headers=hdr) as resp:
-                lines = resp.iter_lines()
-                first = _next_event(lines)
-                assert first["status"]["your_turn"] is True  # type: ignore[index]
-                flat = first["actions"][0]["flat"]  # type: ignore[index]
-                http.post(f"/api/games/{game}/action", json={"flat": flat}, headers=hdr)
-                second = _next_event(lines)
-        assert second["version"] > first["version"]  # type: ignore[operator]
-        assert len(second["log"]) == len(first["log"]) + 1  # type: ignore[arg-type]
-    finally:
-        server.should_exit = True
-        thread.join(timeout=10)
+    with (
+        _live_server(create_app(GameRegistry(), warm=False)) as port,
+        httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http,
+    ):
+        # All-human so no bot driver mutates the game mid-test.
+        doc = http.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()
+        game, hdr = doc["id"], _hdr(dict(doc["tokens"]))
+        with http.stream("GET", f"/api/games/{game}/events", headers=hdr) as resp:
+            lines = resp.iter_lines()
+            first = _next_event(lines)
+            assert first["status"]["your_turn"] is True  # type: ignore[index]
+            flat = first["actions"][0]["flat"]  # type: ignore[index]
+            http.post(f"/api/games/{game}/action", json={"flat": flat}, headers=hdr)
+            second = _next_event(lines)
+    assert second["version"] > first["version"]  # type: ignore[operator]
+    assert len(second["log"]) == len(first["log"]) + 1  # type: ignore[arg-type]
 
 
 def test_event_stream_cap_rejects_extra_subscribers() -> None:
     # One permit: the first stream holds it, so a second subscriber is shed
     # with 503 instead of pinning another threadpool thread.
     with (
-        _live_server(create_app(GameRegistry(), max_streams=1)) as port,
+        _live_server(create_app(GameRegistry(), max_streams=1, warm=False)) as port,
         httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http,
     ):
-        game = http.post("/api/games", json={"seed": 0}).json()["id"]
+        # All-human: no bot driver to compile, so the test only measures the cap.
+        game = http.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
+            "id"
+        ]
         events = f"/api/games/{game}/events"
         with http.stream("GET", events) as first:
             _next_event(first.iter_lines())  # the permit is now held
@@ -260,7 +254,7 @@ def test_event_stream_cap_rejects_extra_subscribers() -> None:
 def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
     registry = GameRegistry()
     client = TestClient(create_app(registry, bot_delay=0.0))
-    game, _ = _create(client, seats=["random"] * 4)
+    game, _ = _create(client, n_players=2, seats=["random", "random"])
     handle = registry.get(game)
     assert handle is not None
     deadline = time.monotonic() + 120
@@ -276,7 +270,7 @@ def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
 def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
     # All human, but a turn timeout is set: nobody acts, so the driver auto-
     # plays the idle turn and the game advances on its own.
-    with TestClient(create_app(turn_timeout=0.2)) as c:
+    with TestClient(create_app(turn_timeout=0.2, warm=False)) as c:
         game = c.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
             "id"
         ]
@@ -292,7 +286,7 @@ def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
 
 def test_no_turn_timeout_leaves_an_idle_human_turn_alone() -> None:
     # Default (no timeout): an all-human game has no driver and never self-plays.
-    with TestClient(create_app()) as c:
+    with TestClient(create_app(warm=False)) as c:
         game = c.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
             "id"
         ]
@@ -364,7 +358,7 @@ def _finish(registry: GameRegistry, game: str) -> None:
 def test_record_and_replay_export_finished_games_only(
     client: TestClient, registry: GameRegistry
 ) -> None:
-    game, _ = _create(client, seats=["random"] * 4)
+    game, _ = _create(client, n_players=2, seats=["random", "random"])
     # A live game's record would reconstruct hidden hands when replayed.
     assert client.get(f"/api/games/{game}/record").status_code == 409
     assert client.post(f"/api/games/{game}/replay").status_code == 409
@@ -379,7 +373,7 @@ def test_record_and_replay_export_finished_games_only(
 
 
 def test_replay_upload_roundtrip(client: TestClient, registry: GameRegistry) -> None:
-    game, _ = _create(client, seats=["random"] * 4)
+    game, _ = _create(client, n_players=2, seats=["random", "random"])
     _finish(registry, game)
     doc = client.get(f"/api/games/{game}/record").json()
     assert client.post("/api/replay", json=doc).status_code == 200
@@ -418,7 +412,7 @@ def test_oversized_request_body_is_rejected_before_parsing() -> None:
 def test_replay_with_too_many_moves_is_rejected(
     client: TestClient, registry: GameRegistry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    game, _ = _create(client, seats=["random"] * 4)
+    game, _ = _create(client, n_players=2, seats=["random", "random"])
     _finish(registry, game)
     doc = client.get(f"/api/games/{game}/record").json()
     monkeypatch.setattr("catan_render.server._MAX_REPLAY_MOVES", len(doc["moves"]) - 1)

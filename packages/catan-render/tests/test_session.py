@@ -24,6 +24,23 @@ _TWO_ONLY_KINDS = sorted(
     if 2 in spec["counts"] and 4 not in spec["counts"]  # type: ignore[operator]
 )
 
+# Smallest search budgets that still exercise a kind's code path: these
+# full-game smoke tests check that a bot can play a game out, not how well, so
+# a heavy default (mcts at 32 simulations) would only burn time.
+_FAST_PARAMS: dict[str, dict[str, int]] = {
+    "mcts": {
+        "num_worlds": 1,
+        "num_futures": 1,
+        "num_simulations": 2,
+        "max_num_considered_actions": 2,
+    },
+}
+
+
+def _seat(kind: str) -> str | dict[str, object]:
+    params = _FAST_PARAMS.get(kind)
+    return {"kind": kind, "params": params} if params else kind
+
 
 def _drive_to_completion(sess: GameSession, seed: int = 0) -> None:
     """Random legal moves for the human seats, bots played out, until the end."""
@@ -89,26 +106,16 @@ def test_run_bots_is_idempotent_when_human_acting() -> None:
     assert sess.legal_flat().tolist() == before
 
 
-def test_game_drives_to_completion() -> None:
-    # The human also plays a random legal move each turn; the game must reach a
-    # terminal state with a real winner within a sane step budget.
-    sess = GameSession(seed=0)
-    _drive_to_completion(sess)
-    status = sess.status()
-    assert status.terminal
-    assert status.winner is not None
-    assert 0 <= status.winner < 4
-
-
 @pytest.mark.parametrize("kind", _FOUR_PLAYER_KINDS)
 def test_bot_opponents_drive_to_completion(kind: str) -> None:
-    # Every bot kind that seats four players can play a full game out.
-    sess = GameSession(seed=0, seats=[HUMAN, kind, kind, kind])
+    # Every bot kind that seats four players can play a full game out (this
+    # also covers the default human + random-bots game the renderer opens with).
+    sess = GameSession(seed=0, seats=[HUMAN, _seat(kind), _seat(kind), _seat(kind)])
     assert sess.status().seats == [HUMAN, kind, kind, kind]
     _drive_to_completion(sess)
     status = sess.status()
     assert status.terminal
-    assert status.winner is not None
+    assert status.winner is not None and 0 <= status.winner < 4
 
 
 @pytest.mark.parametrize("kind", _TWO_ONLY_KINDS)
@@ -231,7 +238,7 @@ def test_log_records_moves_and_chat() -> None:
 
 
 def test_log_rolls_and_win() -> None:
-    sess = GameSession(seed=0)
+    sess = GameSession(seed=0, n_players=2)  # 2p reaches a win the fastest
     _drive_to_completion(sess)
     entries = sess.log()
     # Rolls carry the rolled value...

@@ -37,7 +37,7 @@ def _play(handle: GameHandle, n: int) -> None:
 
 def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
     # First boot: create a game, play a move, leave a chat line.
-    with TestClient(create_app(state_dir=str(tmp_path))) as c1:
+    with TestClient(create_app(state_dir=str(tmp_path), warm=False)) as c1:
         doc = c1.post(
             "/api/games", json={"seed": 0, "seats": ["human"] * 4, "claim": "first"}
         ).json()
@@ -52,7 +52,7 @@ def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
         )
 
     # Second boot from the same dir: the game is back, at the same position.
-    with TestClient(create_app(state_dir=str(tmp_path))) as c2:
+    with TestClient(create_app(state_dir=str(tmp_path), warm=False)) as c2:
         after = c2.get(f"/api/games/{game}", headers=hdr).json()
         assert after["id"] == game
         assert after["board"] == before["board"]  # replayed to the same state
@@ -113,7 +113,9 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
 
     # A fresh app restores the position and its startup restarts the driver,
     # which plays the game out to the end.
-    with TestClient(create_app(state_dir=str(tmp_path), bot_delay=0.0)) as c:
+    with TestClient(
+        create_app(state_dir=str(tmp_path), bot_delay=0.0, warm=False)
+    ) as c:
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             if c.get(f"/api/games/{handle.id}").json()["status"]["terminal"]:
