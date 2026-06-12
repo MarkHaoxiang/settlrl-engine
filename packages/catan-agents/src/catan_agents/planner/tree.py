@@ -130,6 +130,9 @@ class Blackboard:
     rejected: set[tuple[int, int, int]] = dataclasses.field(default_factory=set)
     pending_proposal: tuple[int, int, int, np.ndarray] | None = None
     proposals_this_turn: int = 0
+    forced_row: int | None = None
+    """A committed follow-up (the second half of an own-turn combo): played
+    the next tick it is legal, dropped the moment it is not."""
 
     def set_plan(self, plan: Plan | None) -> None:
         self.plan = plan
@@ -139,6 +142,7 @@ class Blackboard:
         self.rejected.clear()
         self.pending_proposal = None
         self.proposals_this_turn = 0
+        self.forced_row = None
         self.plan_age += 1
 
 

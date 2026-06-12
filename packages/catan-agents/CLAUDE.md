@@ -209,13 +209,29 @@ draws (true chance nodes); the second is inherent to PIMC.
 
 ## planner/
 
-The stateful decision-tree class: per-game plain-Python agents (no value
-function, no search, no JAX in the decision path). `pov.py` is the host-side
-toolkit — one `Pov` per decision wrapping the host-fetched observation, the
-static board graph re-stated as numpy/python tables (`VERTEX_*`,
-`EDGE_ENDPOINTS`, `TILE_CORNERS`), and the flat table's host decode
-(`flat_row`, `ROWS_OF_TYPE`). `tree.py` is the framework (`Node` /
-`Selector` / `Plan` / `Blackboard`); `agent.py` the shipped `planner` family.
+The stateful decision-tree class: per-game plain-Python agents whose
+*strategy* is code (plans, saving, award races, trade memory) and whose
+*tactics* consult a one-step lookahead (hybrid sanctioned June 12; it was
+value-free before). `pov.py` is the host-side toolkit — one `Pov` per
+decision wrapping the host-fetched observation, the static board graph
+re-stated as numpy/python tables (`VERTEX_*`, `EDGE_ENDPOINTS`,
+`TILE_CORNERS`), and the flat table's host decode (`flat_row`,
+`ROWS_OF_TYPE`). `tree.py` is the framework (`Node` / `Selector` / `Plan` /
+`Blackboard`); `tactic.py` the lookahead seam; `agent.py` the shipped
+`planner` family.
+
+`tactic.py`: `reconstruct` rebuilds a single-game engine board from the
+observation — public fields exactly; hidden ones neutrally (opponent hands
+spread evenly, their dev cards as knights since only the count enters the
+opponent strength term, the dev deck scaled to the unseen remainder,
+`free_roads` inferred from an unaffordable-but-legal BUILD_ROAD). The env's
+own mask is passed through as the availability `apply_action` trusts, so
+reconstruction gaps can't make an illegal action look applied. `Tactic`
+caches one 662-wide successor-value sweep per decision (`values`), and
+`combo_best` runs the own-turn second ply: apply an enabler, re-sweep
+legality (`flat_available_for`), and value the follow-ups — the structural
+edge over `lookahead`, which is one-ply and provably weak exactly there
+(the June 11 END_TURN→BUY_DEV/TRADE flip diagnosis).
 
 Design invariants:
 
@@ -245,15 +261,18 @@ Design invariants:
   tie-break noise, so no thrash); `_PLAN_PATIENCE` (8) remains only as the
   starvation backstop for invisibly-starved goals (no dev-deck size or
   `free_roads` in the observation).
-- Turn shape after the plan step: `OpportunisticBuild` (pure surplus covering
-  an extra city/settlement builds it now), `Acquire` (YOP/monopoly toward
-  need — monopoly also fires on a ≥ 4-card mass grab — maritime from
-  surplus, capped 1:1 proposals), `SpendDown` (ending a turn above seven
-  cards banks the excess in a dev card, reservations or not — half-a-hand of
-  robber exposure beats any plan), `DenialKnight` (a robber denying nobody is
-  relocated onto opponents' best production; knights also fire any time they
-  take Largest Army outright). The robber pick weights opponents by visible
-  VP (buildings + held awards).
+- Turn shape after the plan step: `OpportunisticBuild` (any build/dev buy
+  fundable from pure surplus, argmaxed by successor value against END_TURN's
+  as the do-nothing baseline), `EnablerCombo` (a maritime trade or YOP whose
+  *pair* value with an immediate build beats ending the turn; the follow-up
+  is committed via `Blackboard.forced_row` and played next tick),
+  `Acquire` (YOP/monopoly toward need — monopoly also fires on a ≥ 4-card
+  mass grab — maritime from surplus, capped 1:1 proposals), `SpendDown`
+  (ending a turn above seven cards banks the excess in a dev card,
+  reservations or not), `DenialKnight` (value-timed end-of-turn knight).
+  Setup spots, robber/knight targets, discards, and trade responses all pick
+  by successor value (setup keeps scripted new-resource/expansion bonuses the
+  one-ply value can't see).
 - Gotchas: A dev-buy step's "realized"
   check is a baseline comparison on the public dev count (the hand count
   drops again when cards are played, but the plan completes on the next tick,
@@ -261,16 +280,19 @@ Design invariants:
   annotations at test time — `sum()` of an empty generator is `int`, not
   `float`.
 
-Strength (seat-swapped, June 12 evening, after the goal-economics /
-award-race / spend-down work): 75.0% vs greedy (n=200), 44–45% vs lookahead
-(n=300), 40.0% vs mcts (n=200) — up from 42% / 10% / — that morning; the
-ladder reads mcts > lookahead > planner > greedy. The n=100 probes used
-while iterating swung ±6 points around the n=300 truth — gate planner tweaks
-at n ≥ 200. The two single biggest wins were SpendDown and the
-goal-switching margin; the one measured trap: letting maritime sales dip
-into plan-reserved cards (47% → 29% vs lookahead, reverted). Move latency is
-~0.1 ms/lane at B=32 (cuda benchmark), so the stepwise driver's cost is the
-env dispatch, not the agent.
+Strength (seat-swapped, June 12 night, hybrid): 85.0% vs greedy (n=200),
+**52.3% vs lookahead** and **50.3% vs mcts** (both n=300) — jointly top of
+the ladder, from 42% / 10% / — that morning. The scripted push alone reached
+75% / 45% / 40% (biggest wins: SpendDown, the goal-switching margin,
+time-to-afford scoring); the tactic hybrid added the rest, with the
+value-arbitrated `OpportunisticBuild` (+4.5) and the own-turn combos (+2-3)
+carrying it and the leaf-pick delegation alone measuring neutral. Gate
+planner tweaks at n ≥ 200 — n=100 probes swung ±6 points around the n=300
+truth. The one measured trap: letting plain maritime sales dip into
+plan-reserved cards (47% → 29% vs lookahead, reverted; combos may, because
+the pair value prices the whole exchange). Move latency: the tactic sweep
+adds ~1 jit dispatch per decision on top of the ~0.1 ms/lane scripted tick;
+matches run ~1.5-2x slower than the pure-scripted planner.
 
 ## cli.py
 

@@ -25,16 +25,19 @@ from catan_engine.mechanics.trade import pack_trade_single
 from catan_agents.planner.pov import (
     COST_CITY,
     COST_DEV,
+    COST_ROAD,
     COST_SETTLEMENT,
     EDGE_ENDPOINTS,
     ROW_IDX,
     ROW_TARGET,
+    ROWS_OF_TYPE,
     TILE_CORNERS,
     VERTEX_EDGES,
     VERTEX_NEIGHBORS,
     Pov,
     flat_row,
 )
+from catan_agents.planner.tactic import Tactic
 from catan_agents.planner.tree import Blackboard, Node, Plan, Selector, Step
 from catan_agents.shared.policy import (
     GameAgent,
@@ -77,13 +80,20 @@ def _port_bonus(pov: Pov, vertex: int, prod: np.ndarray) -> float:
 
 
 class SetupSettlement(Node):
-    """Best legal starting spot: quality-weighted pips, new resource types,
-    and the port underneath."""
+    """Best legal starting spot: production value plus a tactical tie-break.
+
+    The successor value sees pips, ports and the two-sided position; the
+    scripted terms add what one ply cannot — new-resource coverage and the
+    surrounding expansion room."""
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.SETUP_SETTLEMENT)
         if rows.size == 0:
             return None
+        vals = self.tactic.values(pov)
         best, best_score = int(rows[0]), -np.inf
         for row in rows:
             v = int(ROW_IDX[row])
@@ -97,8 +107,7 @@ class SetupSettlement(Node):
                 ),
                 default=0.0,
             )
-            score = _wprod(prod) + 2.0 * new_types + _port_bonus(pov, v, prod)
-            score += 0.2 * around + _noise(bb)
+            score = float(vals[row]) + 2.0 * new_types + 0.2 * around + _noise(bb)
             if score > best_score:
                 best, best_score = int(row), score
         bb.last_setup_vertex = int(ROW_IDX[best])
@@ -137,24 +146,16 @@ class SetupRoad(Node):
 
 
 class DiscardSurplus(Node):
-    """Give up the card the current plan can spare most."""
+    """Give up the card whose loss the successor value minds least."""
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.DISCARD)
         if rows.size == 0:
             return None
-        reserved = bb.plan.reserved(pov) if bb.plan else np.zeros(5, dtype=np.int64)
-        surplus = pov.hand - reserved
-        return int(
-            max(
-                rows,
-                key=lambda r: (
-                    surplus[ROW_IDX[r]],
-                    pov.hand[ROW_IDX[r]],
-                    -_RES_WEIGHT[ROW_IDX[r]],  # spare wheat/ore on ties
-                ),
-            )
-        )
+        return self.tactic.best(pov, rows)
 
 
 def _opponent_blocked_pips(pov: Pov, tile: int) -> float:
@@ -169,48 +170,21 @@ def _opponent_blocked_pips(pov: Pov, tile: int) -> float:
     )
 
 
-def _visible_vp(pov: Pov, player: int) -> int:
-    """Buildings plus held awards — what we can see of a player's total."""
-    return int(pov.victory_points[player]) + 2 * (
-        (pov.longest_road_owner == player) + (pov.largest_army_owner == player)
-    )
-
-
-def _robber_pick(pov: Pov, bb: Blackboard, rows: np.ndarray) -> int:
-    """Best (tile, victim) among legal robber rows: block the most opponent
-    production (weighted toward the VP leader), avoid our own tiles, prefer
-    rows that steal — and among those, the fattest hand."""
-    best, best_score = int(rows[0]), -np.inf
-    for row in rows:
-        t, victim = int(ROW_IDX[row]), int(ROW_TARGET[row])
-        pips = float(pov.tile_pips[t])
-        score = 0.0
-        for c in TILE_CORNERS[t]:
-            owner = int(pov.vertex_owner[c])
-            if owner == 0:
-                continue
-            weight = pips * int(pov.vertex_type[c])
-            if owner == pov.me + 1:
-                score -= 1.5 * weight
-            else:
-                score += weight * (1.0 + 0.25 * _visible_vp(pov, owner - 1))
-        if victim >= 0:
-            score += 2.0 + 0.2 * float(pov.hand_size[victim])
-        score += _noise(bb)
-        if score > best_score:
-            best, best_score = int(row), score
-    return best
-
-
 class MoveRobber(Node):
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
+
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.MOVE_ROBBER)
-        return _robber_pick(pov, bb, rows) if rows.size else None
+        return self.tactic.best(pov, rows) if rows.size else None
 
 
 class PlayKnight(Node):
     """Play a knight to unblock our own production (legal pre-roll too,
     rulebook p.7), or whenever the play takes Largest Army outright."""
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.PLAY_KNIGHT)
@@ -226,30 +200,39 @@ class PlayKnight(Node):
             and after >= 3
             and after > int(others.max())
         )
-        return _robber_pick(pov, bb, rows) if blocked or takes_army else None
+        return self.tactic.best(pov, rows) if blocked or takes_army else None
 
 
 class RespondToTrade(Node):
-    """Accept exactly the offers that advance the plan: every card we pay is
-    plan-surplus and at least one card we get is plan-needed."""
+    """Accept exactly the offers whose successor values better than refusing."""
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         accept = pov.legal(ActionType.ACCEPT_TRADE)
         reject = pov.legal(ActionType.REJECT_TRADE)
         if accept is None and reject is None:
             return None
-        get, pay = pov.trade_give, pov.trade_receive
-        if accept is not None and bb.plan is not None:
-            reserved = bb.plan.reserved(pov)
-            need = bb.plan.need(pov)
-            if bool(np.all(pay <= pov.hand - reserved)) and int(need @ get) >= 1:
-                return accept
-        return reject if reject is not None else accept
+        if accept is None or reject is None:
+            return accept if reject is None else reject
+        vals = self.tactic.values(pov)
+        return accept if vals[accept] > vals[reject] else reject
 
 
 class RollDice(Node):
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         return pov.legal(ActionType.ROLL_DICE)
+
+
+class PlayForced(Node):
+    """The committed second half of a combo, played while it is still legal."""
+
+    def tick(self, pov: Pov, bb: Blackboard) -> int | None:
+        row, bb.forced_row = bb.forced_row, None
+        if row is not None and pov.mask[row]:
+            return row
+        return None
 
 
 def _extension_edge(pov: Pov) -> int | None:
@@ -423,28 +406,74 @@ class ExecutePlan(Node):
 
 
 class OpportunisticBuild(Node):
-    """Spend pure surplus on a build the plan is not waiting for: an extra
-    city (best pips) or settlement — banked VP beats robber bait."""
+    """Spend pure surplus on anything the plan is not waiting for — an extra
+    city, settlement, road, or dev buy — when its successor value clears the
+    do-nothing baseline (END_TURN's successor). Banked progress beats robber
+    bait, and the value sees what a static rank cannot (breaking an
+    opponent's road, opening a spot, the award races)."""
+
+    _COSTS = (
+        (COST_CITY, ActionType.BUILD_CITY),
+        (COST_SETTLEMENT, ActionType.BUILD_SETTLEMENT),
+        (COST_ROAD, ActionType.BUILD_ROAD),
+        (COST_DEV, ActionType.BUY_DEVELOPMENT_CARD),
+    )
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         if not pov.my_turn_main or bb.plan is None:
             return None
+        end_turn = pov.legal(ActionType.END_TURN)
+        if end_turn is None:
+            return None
         surplus = pov.hand - bb.plan.reserved(pov)
-        for cost, atype in (
-            (COST_CITY, ActionType.BUILD_CITY),
-            (COST_SETTLEMENT, ActionType.BUILD_SETTLEMENT),
-        ):
-            if not bool(np.all(surplus >= cost)):
-                continue
-            rows = pov.legal_rows(atype)
-            if rows.size:
-                return int(
-                    max(
-                        rows,
-                        key=lambda r: _wprod(pov.vertex_production(int(ROW_IDX[r]))),
-                    )
-                )
-        return None
+        rows: list[int] = []
+        for cost, atype in self._COSTS:
+            if bool(np.all(surplus >= cost)):
+                rows.extend(int(r) for r in pov.legal_rows(atype))
+        if not rows:
+            return None
+        vals = self.tactic.values(pov)
+        best = max(rows, key=lambda r: float(vals[r]))
+        return best if vals[best] > vals[end_turn] else None
+
+
+_ROW_IS_BUILDISH = np.zeros(int(ROW_IDX.shape[0]), dtype=bool)
+for _t in (
+    ActionType.BUILD_CITY,
+    ActionType.BUILD_SETTLEMENT,
+    ActionType.BUY_DEVELOPMENT_CARD,
+):
+    _ROW_IS_BUILDISH[ROWS_OF_TYPE[int(_t)]] = True
+
+
+class EnablerCombo(Node):
+    """Own-turn two-ply tactic lookahead alone cannot see: a maritime trade
+    or Year of Plenty that *enables* a city / settlement / dev buy this same
+    turn, judged by the pair's final value against just ending the turn. The
+    follow-up is committed on the blackboard and played next tick."""
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
+
+    def tick(self, pov: Pov, bb: Blackboard) -> int | None:
+        if not pov.my_turn_main:
+            return None
+        end_turn = pov.legal(ActionType.END_TURN)
+        enablers = [int(r) for r in pov.legal_rows(ActionType.MARITIME_TRADE)]
+        enablers += [int(r) for r in pov.legal_rows(ActionType.PLAY_YEAR_OF_PLENTY)]
+        if end_turn is None or not enablers:
+            return None
+        pair = self.tactic.combo_best(pov, enablers, _ROW_IS_BUILDISH)
+        if pair is None:
+            return None
+        enabler, follow, value = pair
+        if value <= self.tactic.values(pov)[end_turn] + 0.5:
+            return None
+        bb.forced_row = follow
+        return enabler
 
 
 class Acquire(Node):
@@ -549,19 +578,23 @@ class SpendDown(Node):
 
 
 class DenialKnight(Node):
-    """End-of-turn knight: a robber that is denying nobody is wasted, so
-    relocate it onto the opponents' best production — the steal and the
-    Largest Army progress come free."""
+    """End-of-turn knight, value-timed: play it when the best relocation's
+    successor (denial, the steal, the Largest Army resolve — all inside one
+    apply) clearly beats just ending the turn."""
+
+    def __init__(self, tactic: Tactic) -> None:
+        self.tactic = tactic
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         if not pov.my_turn_main:
             return None
         rows = pov.legal_rows(ActionType.PLAY_KNIGHT)
-        if rows.size == 0:
+        end_turn = pov.legal(ActionType.END_TURN)
+        if rows.size == 0 or end_turn is None:
             return None
-        current = _opponent_blocked_pips(pov, pov.robber)
-        best = max(_opponent_blocked_pips(pov, int(ROW_IDX[r])) for r in rows)
-        return _robber_pick(pov, bb, rows) if best >= current + 6.0 else None
+        vals = self.tactic.values(pov)
+        best = int(rows[int(np.argmax(vals[rows]))])
+        return best if vals[best] > vals[end_turn] + 0.3 else None
 
 
 class EndTurn(Node):
@@ -612,19 +645,22 @@ class PlannerAgent:
     ) -> None:
         self._bb = Blackboard(rng=random.Random(seed))
         self._was_my_roll = False
+        tactic = Tactic(seed)
         self._root = Selector(
-            SetupSettlement(),
+            SetupSettlement(tactic),
             SetupRoad(),
-            DiscardSurplus(),
-            MoveRobber(),
-            RespondToTrade(),
-            PlayKnight(),
+            DiscardSurplus(tactic),
+            MoveRobber(tactic),
+            RespondToTrade(tactic),
+            PlayKnight(tactic),
             RollDice(),
+            PlayForced(),
             ExecutePlan(expansion_depth),
-            OpportunisticBuild(),
+            OpportunisticBuild(tactic),
+            EnablerCombo(tactic),
             Acquire(max_proposals_per_turn),
             SpendDown(),
-            DenialKnight(),
+            DenialKnight(tactic),
             EndTurn(),
         )
 
