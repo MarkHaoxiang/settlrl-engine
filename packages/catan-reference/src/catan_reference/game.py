@@ -14,6 +14,7 @@ realised outcome to the reference and compare deterministically.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from catan_reference import board
@@ -750,6 +751,10 @@ class Game:
     # Legal-action enumeration
     # ===================================================================
 
+    def _enum(self, ctor: Callable[[int], Action], n: int) -> list[Action]:
+        """The legal actions among ``ctor(0..n-1)`` (one index parameter)."""
+        return [a for i in range(n) if self.is_legal(a := ctor(i))]
+
     def legal_actions(self) -> list[Action]:
         """Every legal action in the current state.
 
@@ -761,19 +766,9 @@ class Game:
             return []
         out: list[Action] = []
         if self.phase is Phase.SETUP_SETTLEMENT:
-            out += [
-                SetupSettlement(v)
-                for v in range(board.N_VERTICES)
-                if self._legal_setup_settlement(SetupSettlement(v))
-            ]
-            return out
+            return self._enum(SetupSettlement, board.N_VERTICES)
         if self.phase is Phase.SETUP_ROAD:
-            out += [
-                SetupRoad(e)
-                for e in range(board.N_EDGES)
-                if self._legal_setup_road(SetupRoad(e))
-            ]
-            return out
+            return self._enum(SetupRoad, board.N_EDGES)
         if self.phase is Phase.DISCARD:
             return self._legal_discards()
         if self.phase is Phase.TRADE_RESPONSE:
@@ -782,34 +777,15 @@ class Game:
             out.append(RejectTrade())
             return out
         if self.phase is Phase.MOVE_ROBBER:
-            out += self._robber_actions(MoveRobber)
-            return out
+            return self._robber_actions(MoveRobber)
         if self.phase is Phase.ROLL:
-            out.append(Roll())
             # Road Building's free roads may be placed before rolling.
-            out += [
-                BuildRoad(e)
-                for e in range(board.N_EDGES)
-                if self._legal_build_road(BuildRoad(e))
-            ]
-            out += self._dev_plays()
-            return out
+            roads = self._enum(BuildRoad, board.N_EDGES)
+            return [Roll(), *roads, *self._dev_plays()]
         # MAIN
-        out += [
-            BuildRoad(e)
-            for e in range(board.N_EDGES)
-            if self._legal_build_road(BuildRoad(e))
-        ]
-        out += [
-            BuildSettlement(v)
-            for v in range(board.N_VERTICES)
-            if self._legal_build_settlement(BuildSettlement(v))
-        ]
-        out += [
-            BuildCity(v)
-            for v in range(board.N_VERTICES)
-            if self._legal_build_city(BuildCity(v))
-        ]
+        out += self._enum(BuildRoad, board.N_EDGES)
+        out += self._enum(BuildSettlement, board.N_VERTICES)
+        out += self._enum(BuildCity, board.N_VERTICES)
         if self._legal_buy_dev(BuyDevelopmentCard()):
             out.append(BuyDevelopmentCard())
         out += [

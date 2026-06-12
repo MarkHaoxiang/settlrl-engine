@@ -30,7 +30,8 @@ import random
 import catan_reference as ref
 import jax.numpy as jnp
 import numpy as np
-from catan_engine.board import Board, make_board
+from catan_engine.board import Board, make_board, to_main
+from catan_engine.board.dev_cards import DevCard
 from catan_engine.board.state import BoardState
 from catan_engine.env import step
 from catan_engine.mechanics.action import ActionParams, ActionResult
@@ -41,30 +42,22 @@ _INVALID = int(ActionResult.INVALID)
 _GAME_COMPLETE = int(ActionResult.GAME_COMPLETE)
 
 
-def _params(idx: int, target: int) -> ActionParams:
-    return ActionParams(
-        idx=jnp.asarray([idx], jnp.int32),
-        target=jnp.asarray([target], jnp.int32),
-    )
-
-
 def _inject_outcome(
-    action: ref.Action, old: Board, new_state: object, current_player: int
+    action: ref.Action, old: Board, new_state: BoardState, current_player: int
 ) -> ref.Action:
     """Fill a reference action's stochastic field from the engine's realised step."""
     if isinstance(action, ref.Roll):
-        return ref.Roll(value=int(np.asarray(new_state.dice_roll[0])))  # type: ignore[attr-defined]
+        return ref.Roll(value=int(np.asarray(new_state.dice_roll[0])))
     if isinstance(action, ref.BuyDevelopmentCard):
         before = np.asarray(old[1].dev_hand[0, current_player]).astype(int)
-        after = np.asarray(new_state.dev_hand[0, current_player]).astype(int)  # type: ignore[attr-defined]
-        drawn = int(np.argmax(after - before))
-        return ref.BuyDevelopmentCard(card=ref.DevCard(drawn))
+        after = np.asarray(new_state.dev_hand[0, current_player]).astype(int)
+        return ref.BuyDevelopmentCard(card=ref.DevCard(int(np.argmax(after - before))))
     if (
         isinstance(action, (ref.MoveRobber, ref.PlayKnight))
         and action.victim is not None
     ):
         before = np.asarray(old[1].player_resources[0, current_player]).astype(int)
-        after = np.asarray(new_state.player_resources[0, current_player]).astype(int)  # type: ignore[attr-defined]
+        after = np.asarray(new_state.player_resources[0, current_player]).astype(int)
         stolen = ref.Resource(int(np.argmax(after - before)))
         # dataclasses.replace would also work; reconstruct to keep mypy simple.
         return type(action)(action.tile, action.victim, stolen)
@@ -74,7 +67,10 @@ def _inject_outcome(
 def _try_engine(board: Board, action: ref.Action) -> tuple[BoardState, int]:
     """Apply one reference action to the engine; ``(new_state, result code)``."""
     atype, idx, target = conv.to_engine_action(action)
-    new_state, code = step(board, jnp.asarray([atype], jnp.int32), _params(idx, target))
+    params = ActionParams(
+        idx=jnp.asarray([idx], jnp.int32), target=jnp.asarray([target], jnp.int32)
+    )
+    new_state, code = step(board, jnp.asarray([atype], jnp.int32), params)
     return new_state, int(np.asarray(code[0]))
 
 
@@ -109,6 +105,28 @@ def _draw_legal_bundle(rng: random.Random, game: ref.Game) -> ref.ProposeTrade |
     return proposal if game.is_legal(proposal) else None
 
 
+def _fuzz_bundles(
+    rng: random.Random, board: Board, game: ref.Game, seed: int
+) -> tuple[ref.ProposeTrade, BoardState, int] | None:
+    """Probe the packed bundle domain, which the flat table (and so the
+    per-step legality cross-check) only samples at 1:1: arbitrary bundles are
+    checked against both engines, and sometimes a legal one is dealt for
+    injection into the stream (returned with its applied engine step)."""
+    for _ in range(3):
+        probe = _random_bundle(rng, game)
+        _, code = _try_engine(board, probe)
+        legal = game.is_legal(probe)
+        assert (code != _INVALID) == legal, (
+            f"seed={seed}: bundle legality mismatch on {probe!r}: "
+            f"engine={code != _INVALID} reference={legal}"
+        )
+    if rng.random() < 0.25 and (bundle := _draw_legal_bundle(rng, game)):
+        state, result = _try_engine(board, bundle)
+        assert result != _INVALID, f"seed={seed}: engine rejected {bundle!r}"
+        return bundle, state, result
+    return None
+
+
 def _play_one_game(
     seed: int, max_steps: int = 300, n_players: int = 4, bundles: bool = False
 ) -> None:
@@ -128,22 +146,13 @@ def _play_one_game(
 
         applied: ref.Action | None = None
         result = _INVALID
-        if bundles and game.phase is ref.Phase.MAIN and game.has_rolled:
-            # The flat table (and so the cross-check above) only names 1:1
-            # proposals: probe the packed bundle domain directly, both ways.
-            for _probe in range(3):
-                probe = _random_bundle(rng, game)
-                _, code = _try_engine(board, probe)
-                assert (code != _INVALID) == game.is_legal(probe), (
-                    f"seed={seed}: bundle legality mismatch on {probe!r}: "
-                    f"engine={code != _INVALID} reference={game.is_legal(probe)}"
-                )
-            if rng.random() < 0.25 and (bundle := _draw_legal_bundle(rng, game)):
-                new_state, result = _try_engine(board, bundle)
-                assert result != _INVALID, (
-                    f"seed={seed}: engine rejected legal bundle {bundle!r}"
-                )
-                applied = bundle
+        if (
+            bundles
+            and game.phase is ref.Phase.MAIN
+            and game.has_rolled
+            and (injected := _fuzz_bundles(rng, board, game, seed))
+        ):
+            applied, new_state, result = injected
         if applied is None:
             for candidate in legal:
                 new_state, result = _try_engine(board, candidate)
@@ -197,9 +206,6 @@ def test_turn_start_win_claim_matches_reference() -> None:
     # Rulebook p.5: a player at 10+ VP out of turn wins at the *start of their
     # own turn*, not immediately. Hand player 1 ten VP of dev cards mid player
     # 0's turn and walk the END_TURN claim through both engines.
-    from catan_engine.board import to_main
-    from catan_engine.board.dev_cards import DevCard
-
     layout, st = to_main(make_board(1, seed=2, n_players=3))
     st = st._replace(
         dev_hand=st.dev_hand.at[0, 1, DevCard.VICTORY_POINT].set(10),

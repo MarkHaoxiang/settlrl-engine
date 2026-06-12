@@ -25,6 +25,8 @@ This module exposes:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import catan_reference as ref
 import jax.numpy as jnp
 import numpy as np
@@ -429,6 +431,41 @@ def _unpack_counts(packed: int) -> tuple[int, ...]:
     )
 
 
+def _victim(target: int) -> int | None:
+    return None if target == -1 else target  # -1 = steal from no one
+
+
+# Row (idx, target) -> reference action, the inverse of ``to_engine_action``
+# (Discard is handled in ``flat_row_action``: it also needs the game).
+_ROW_DECODE: dict[int, Callable[[int, int], ref.Action]] = {
+    ActionType.SETUP_SETTLEMENT: lambda i, t: ref.SetupSettlement(_ENG2REF_VERTEX[i]),
+    ActionType.SETUP_ROAD: lambda i, t: ref.SetupRoad(_ENG2REF_EDGE[i]),
+    ActionType.ROLL_DICE: lambda i, t: ref.Roll(),
+    ActionType.MOVE_ROBBER: lambda i, t: ref.MoveRobber(_ENG2REF_TILE[i], _victim(t)),
+    ActionType.BUILD_ROAD: lambda i, t: ref.BuildRoad(_ENG2REF_EDGE[i]),
+    ActionType.BUILD_SETTLEMENT: lambda i, t: ref.BuildSettlement(_ENG2REF_VERTEX[i]),
+    ActionType.BUILD_CITY: lambda i, t: ref.BuildCity(_ENG2REF_VERTEX[i]),
+    ActionType.BUY_DEVELOPMENT_CARD: lambda i, t: ref.BuyDevelopmentCard(),
+    ActionType.PLAY_KNIGHT: lambda i, t: ref.PlayKnight(_ENG2REF_TILE[i], _victim(t)),
+    ActionType.PLAY_ROAD_BUILDING: lambda i, t: ref.PlayRoadBuilding(),
+    ActionType.PLAY_YEAR_OF_PLENTY: lambda i, t: ref.PlayYearOfPlenty(
+        ref.Resource(i), ref.Resource(t)
+    ),
+    ActionType.PLAY_MONOPOLY: lambda i, t: ref.PlayMonopoly(ref.Resource(i)),
+    ActionType.MARITIME_TRADE: lambda i, t: ref.MaritimeTrade(
+        ref.Resource(i), ref.Resource(t)
+    ),
+    ActionType.PROPOSE_TRADE: lambda i, t: ref.ProposeTrade(
+        partner=t & ((1 << _PARTNER_BITS) - 1),
+        give=_unpack_counts(i),
+        receive=_unpack_counts(t >> _PARTNER_BITS),
+    ),
+    ActionType.ACCEPT_TRADE: lambda i, t: ref.AcceptTrade(),
+    ActionType.REJECT_TRADE: lambda i, t: ref.RejectTrade(),
+    ActionType.END_TURN: lambda i, t: ref.EndTurn(),
+}
+
+
 def flat_row_action(row: int, game: ref.Game) -> ref.Action:
     """The reference action named by flat-table row ``row``.
 
@@ -437,55 +474,15 @@ def flat_row_action(row: int, game: ref.Game) -> ref.Action:
     player during DISCARD (player 0 when nobody owes: the phase gate makes the
     row illegal on both sides regardless).
     """
-    atype = ActionType(int(_FLAT_ATYPE[row]))
-    idx = int(_FLAT_IDX[row])
-    target = int(_FLAT_TARGET[row])
-    victim = None if target == -1 else target  # -1 = steal from no one
-    match atype:
-        case ActionType.SETUP_SETTLEMENT:
-            return ref.SetupSettlement(_ENG2REF_VERTEX[idx])
-        case ActionType.SETUP_ROAD:
-            return ref.SetupRoad(_ENG2REF_EDGE[idx])
-        case ActionType.ROLL_DICE:
-            return ref.Roll()
-        case ActionType.DISCARD:
-            owing = next(
-                (p for p in range(game.n_players) if game.pending_discard[p] > 0), 0
-            )
-            return ref.Discard(owing, ref.Resource(idx))
-        case ActionType.MOVE_ROBBER:
-            return ref.MoveRobber(_ENG2REF_TILE[idx], victim)
-        case ActionType.BUILD_ROAD:
-            return ref.BuildRoad(_ENG2REF_EDGE[idx])
-        case ActionType.BUILD_SETTLEMENT:
-            return ref.BuildSettlement(_ENG2REF_VERTEX[idx])
-        case ActionType.BUILD_CITY:
-            return ref.BuildCity(_ENG2REF_VERTEX[idx])
-        case ActionType.BUY_DEVELOPMENT_CARD:
-            return ref.BuyDevelopmentCard()
-        case ActionType.PLAY_KNIGHT:
-            return ref.PlayKnight(_ENG2REF_TILE[idx], victim)
-        case ActionType.PLAY_ROAD_BUILDING:
-            return ref.PlayRoadBuilding()
-        case ActionType.PLAY_YEAR_OF_PLENTY:
-            return ref.PlayYearOfPlenty(ref.Resource(idx), ref.Resource(target))
-        case ActionType.PLAY_MONOPOLY:
-            return ref.PlayMonopoly(ref.Resource(idx))
-        case ActionType.MARITIME_TRADE:
-            return ref.MaritimeTrade(ref.Resource(idx), ref.Resource(target))
-        case ActionType.PROPOSE_TRADE:
-            return ref.ProposeTrade(
-                partner=target & ((1 << _PARTNER_BITS) - 1),
-                give=_unpack_counts(idx),
-                receive=_unpack_counts(target >> _PARTNER_BITS),
-            )
-        case ActionType.ACCEPT_TRADE:
-            return ref.AcceptTrade()
-        case ActionType.REJECT_TRADE:
-            return ref.RejectTrade()
-        case ActionType.END_TURN:
-            return ref.EndTurn()
-    raise AssertionError(f"unhandled action type: {atype!r}")  # pragma: no cover
+    atype, idx, target = (
+        int(_FLAT_ATYPE[row]),
+        int(_FLAT_IDX[row]),
+        int(_FLAT_TARGET[row]),
+    )
+    if atype == ActionType.DISCARD:
+        owing = (p for p in range(game.n_players) if game.pending_discard[p] > 0)
+        return ref.Discard(next(owing, 0), ref.Resource(idx))
+    return _ROW_DECODE[atype](idx, target)
 
 
 def assert_legality_match(board: Board, game: ref.Game, b: int = 0) -> None:

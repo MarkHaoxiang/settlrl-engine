@@ -818,9 +818,8 @@ def _env_step_core(
     # Longest Road by a settlement break keeps playing until their turn starts;
     # END_TURN's rotation makes this the turn-start claim). Mirrors
     # ``awards.current_player_won``, which upgrades the result code.
-    lanes = jnp.arange(batch_size)
-    cur_after = applied.current_player.astype(jnp.int32)  # (B,)
-    done_lane = vps_after[lanes, cur_after] >= VICTORY_POINTS_TO_WIN  # (B,)
+    is_current = applied.current_player[:, None] == jnp.arange(n_players)  # (B, P)
+    done_lane = jnp.any(is_current & (vps_after >= VICTORY_POINTS_TO_WIN), axis=1)
 
     if belief is not None:
         # Diff the pre-reset transition (sound for every lane); auto-reset
@@ -835,10 +834,7 @@ def _env_step_core(
     if reward_mode == "vp_delta":
         reward = (vps_after - vps_before).astype(jnp.float32)
     else:  # "sparse": +1 to the winner (the done lane's current player).
-        winner = (
-            jnp.zeros((batch_size, n_players), jnp.bool_).at[lanes, cur_after].set(True)
-        )
-        reward = (winner & done_lane[:, None]).astype(jnp.float32)
+        reward = (is_current & done_lane[:, None]).astype(jnp.float32)
     terminations = jnp.broadcast_to(done_lane[:, None], (batch_size, n_players))
 
     if auto_reset:
