@@ -405,8 +405,10 @@ _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 # The uvicorn entry point (catan_render.server:app). ROOT_PATH is the proxy
 # prefix when served under a path (e.g. /catan behind Caddy's handle_path).
+# An empty CATAN_RENDER_CREATE_KEY means "no key" (compose substitutes an empty
+# string for an unset value), not a key that happens to be the empty string.
 app = create_app(
-    create_key=os.environ.get("CATAN_RENDER_CREATE_KEY"),
+    create_key=os.environ.get("CATAN_RENDER_CREATE_KEY") or None,
     root_path=os.environ.get("ROOT_PATH", ""),
     max_streams=int(os.environ.get("CATAN_RENDER_MAX_STREAMS", "64")),
 )

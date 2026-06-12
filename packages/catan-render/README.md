@@ -104,7 +104,9 @@ empty games can't pin every slot) to make room.
 For a public deployment, set `CATAN_RENDER_CREATE_KEY` so strangers can't fill
 the registry, and front the server with a proxy that rate-limits — the built-in
 caps (stream cap, a 2 MB request-body limit, a replay move-count cap, and
-high-entropy game ids) bound resource use but are not a substitute for one.
+high-entropy game ids) bound resource use but are not a substitute for one. A
+production run (`RELOAD=0`) with no key set logs a startup warning to that
+effect.
 
 The repo-root `Dockerfile` builds a self-contained image (frontend compiled
 in, CPU JAX):
