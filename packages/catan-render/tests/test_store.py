@@ -3,7 +3,7 @@
 import time
 from pathlib import Path
 
-from catan_render.games import GameHandle, GameRegistry, restore_registry
+from catan_render.games import GameRegistry, restore_registry
 from catan_render.server import create_app
 from catan_render.session import GameSession, GameSetup
 from catan_render.store import GameStore
@@ -24,15 +24,6 @@ def test_game_setup_round_trips_through_a_dict() -> None:
 def test_session_setup_captures_its_seats() -> None:
     session = GameSession(seed=5, n_players=2, seats=["human", "random"])
     assert session.setup == GameSetup(5, 2, "random", ["human", "random"])
-
-
-def _play(handle: GameHandle, n: int) -> None:
-    """Apply ``n`` legal moves to a handle, journalling each (as a route would)."""
-    for _ in range(n):
-        with handle.lock:
-            flat = int(handle.session.legal_flat()[0])
-            handle.session.apply(flat)
-            handle.bump()
 
 
 def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
@@ -74,32 +65,16 @@ def test_restore_preserves_seat_kinds(tmp_path: Path) -> None:
     assert restored.owned_seats([token]) == {0}
 
 
-def test_eviction_deletes_the_journal(tmp_path: Path) -> None:
+def test_eviction_drops_the_game_from_the_store(tmp_path: Path) -> None:
     store = GameStore(tmp_path)
     reg = GameRegistry(max_games=1, store=store)
     a = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
-    path = tmp_path / f"{a.id}.jsonl"
-    assert path.exists()
     # Idle well past the TTL (relative to monotonic(), which need not be large).
     a.touched = time.monotonic() - 100_000
     b = reg.create(GameSession(seed=1, n_players=2, seats=["human", "human"]))
-    assert not path.exists()
-    assert (tmp_path / f"{b.id}.jsonl").exists()
-
-
-def test_torn_final_write_is_dropped_on_load(tmp_path: Path) -> None:
-    store = GameStore(tmp_path)
-    reg = GameRegistry(store=store)
-    handle = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
-    _play(handle, 1)
-    handle.journal.close()  # type: ignore[union-attr]
-    # A crash mid-append leaves a partial last line.
-    path = tmp_path / f"{handle.id}.jsonl"
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write('{"t":"move","fl')
-    restored = restore_registry(store).get(handle.id)
-    assert restored is not None
-    assert restored.session.moves_played == 1  # the good move kept, the torn one gone
+    # A fresh store on the same db (as a restart would open) no longer has a.
+    stored = {header["id"] for header, _ in GameStore(tmp_path).load()}
+    assert a.id not in stored and b.id in stored
 
 
 def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
@@ -110,7 +85,6 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
         with handle.lock:
             if handle.session.bot_step() is not None:
                 handle.bump()
-    handle.journal.close()  # type: ignore[union-attr]
 
     # A fresh app restores the position and its startup restarts the driver,
     # which plays the game out to the end.

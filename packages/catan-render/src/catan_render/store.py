@@ -1,118 +1,133 @@
-"""On-disk persistence so live games survive a restart.
+"""Persistence so live games survive a restart, backed by SQLite.
 
-Each game is one append-only JSONL file under the store root: the first line
-is a header (the immutable ``(seed, n_players, number_placement, seats)`` a
-game is fully determined by, per ``catan_engine.record``), and every later
-line is an event -- a move, a seat claim, or a chat line -- in the order it
-happened. Appending is crash-safe: a torn final line is simply dropped on
-load, and the moves before it still replay into the same position.
+A game is recorded as a header row -- the immutable ``(seed, n_players,
+number_placement, seats)`` it is fully determined by, per
+``catan_engine.record`` -- plus an ordered event log (a move, seat claim, or
+chat line per row). SQLite gives the durability for free: each write is its own
+committed transaction, so a crash can lose at most the last uncommitted event,
+never corrupt the rest. One connection, serialised by a lock (writes are tiny
+and infrequent), shared by every game's journal.
 
-The store is pure I/O; reconstructing a live ``GameSession`` from a loaded
-file (replaying its moves through the engine) lives in ``games`` and ``server``,
+The store is pure I/O; reconstructing a live ``GameSession`` from a loaded game
+(replaying its moves through the engine) lives in ``games`` and ``server``,
 which already own the engine and the bot drivers.
 """
 
 from __future__ import annotations
 
 import json
-import os
+import sqlite3
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import os
+
     from catan_engine.record import Move
 
 
 class GameJournal:
-    """An open append-only file for one game's events.
+    """The append point for one game's events.
 
-    Mutators append under the game's lock, so a single journal's writes are
-    serialised; different games write different files. ``sync_moves`` appends
-    only the moves not yet written, so a single hook on every state change
-    captures human and bot moves alike.
+    Mutators append under the game's lock; ``sync_moves`` writes only the moves
+    not yet recorded, so a single hook on every state change captures human and
+    bot moves alike. The store owns the connection, so ``close`` is a no-op.
     """
 
-    def __init__(self, file: "os.PathLike[str] | str", moves_written: int) -> None:
-        # Held open for the game's lifetime (append-only); closed on eviction.
-        self._fh = open(file, "a", encoding="utf-8")  # noqa: SIM115
+    def __init__(self, store: GameStore, game_id: str, moves_written: int) -> None:
+        self._store = store
+        self._game_id = game_id
         self._moves_written = moves_written
-
-    def _append(self, event: dict[str, object]) -> None:
-        self._fh.write(json.dumps(event) + "\n")
-        self._fh.flush()
-
-    def header(self, game_id: str, setup: Mapping[str, object]) -> None:
-        self._append({"t": "header", "id": game_id, **setup})
 
     def sync_moves(self, moves: Sequence["Move"]) -> None:
         for move in moves[self._moves_written :]:
-            self._append(
+            self._store._append(
+                self._game_id,
                 {
                     "t": "move",
                     "player": move.player,
                     "flat": move.flat,
                     "dice": move.dice,
-                }
+                },
             )
         self._moves_written = len(moves)
 
     def claim(self, seat: int, token: str) -> None:
-        self._append({"t": "claim", "seat": seat, "token": token})
+        self._store._append(self._game_id, {"t": "claim", "seat": seat, "token": token})
 
     def chat(self, player: int | None, text: str) -> None:
-        self._append({"t": "chat", "player": player, "text": text})
+        self._store._append(
+            self._game_id, {"t": "chat", "player": player, "text": text}
+        )
 
     def close(self) -> None:
-        self._fh.close()
+        pass
 
 
 class GameStore:
-    """A directory of per-game journals. Game ids must be filesystem-safe
-    (the registry mints url-safe base64 ids, which are)."""
+    """A SQLite database of games and their event logs. Thread-safe."""
 
     def __init__(self, root: "os.PathLike[str] | str") -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-
-    def _path(self, game_id: str) -> Path:
-        return self.root / f"{game_id}.jsonl"
+        self._lock = threading.Lock()
+        self._db = sqlite3.connect(self.root / "games.db", check_same_thread=False)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS games(id TEXT PRIMARY KEY, header TEXT)"
+        )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS events("
+            "seq INTEGER PRIMARY KEY, game_id TEXT NOT NULL, payload TEXT NOT NULL)"
+        )
+        self._db.commit()
 
     def create(self, game_id: str, setup: Mapping[str, object]) -> GameJournal:
-        """Start a journal for a new game, writing its header line."""
-        journal = GameJournal(self._path(game_id), moves_written=0)
-        journal.header(game_id, setup)
-        return journal
+        """Record a new game's header and return its journal."""
+        with self._lock:
+            self._db.execute(
+                "INSERT OR REPLACE INTO games(id, header) VALUES(?, ?)",
+                (game_id, json.dumps({"id": game_id, **setup})),
+            )
+            self._db.commit()
+        return GameJournal(self, game_id, moves_written=0)
 
     def reopen(self, game_id: str, moves_written: int) -> GameJournal:
-        """Re-open a loaded game's journal to keep appending after a restart."""
-        return GameJournal(self._path(game_id), moves_written=moves_written)
+        """A journal for a game already loaded from the store (after a restart)."""
+        return GameJournal(self, game_id, moves_written)
 
     def remove(self, game_id: str) -> None:
-        """Delete a game's file (on eviction)."""
-        self._path(game_id).unlink(missing_ok=True)
+        """Drop a game and its events (on eviction)."""
+        with self._lock:
+            self._db.execute("DELETE FROM games WHERE id = ?", (game_id,))
+            self._db.execute("DELETE FROM events WHERE game_id = ?", (game_id,))
+            self._db.commit()
+
+    def _append(self, game_id: str, event: dict[str, object]) -> None:
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO events(game_id, payload) VALUES(?, ?)",
+                (game_id, json.dumps(event)),
+            )
+            self._db.commit()
 
     def load(self) -> Iterator[tuple[dict[str, object], list[dict[str, object]]]]:
-        """Yield ``(header, events)`` for every stored game.
-
-        A file whose header is unreadable is skipped; within a file, parsing
-        stops at the first malformed line (a crash mid-append), keeping the
-        events before it.
-        """
-        for path in sorted(self.root.glob("*.jsonl")):
-            lines = path.read_text(encoding="utf-8").splitlines()
-            if not lines:
-                continue
-            try:
-                header = json.loads(lines[0])
-            except json.JSONDecodeError:
-                continue
-            if header.get("t") != "header":
-                continue
-            events: list[dict[str, object]] = []
-            for line in lines[1:]:
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    break  # torn final write; the rest of the game is intact
-            yield header, events
+        """``(header, events)`` for every stored game, events in order."""
+        with self._lock:
+            games = self._db.execute("SELECT id, header FROM games").fetchall()
+            loaded = [
+                (
+                    json.loads(header),
+                    [
+                        json.loads(payload)
+                        for (payload,) in self._db.execute(
+                            "SELECT payload FROM events WHERE game_id = ? ORDER BY seq",
+                            (game_id,),
+                        )
+                    ],
+                )
+                for game_id, header in games
+            ]
+        yield from loaded
