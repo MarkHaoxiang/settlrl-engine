@@ -80,7 +80,8 @@ def test_eviction_deletes_the_journal(tmp_path: Path) -> None:
     a = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
     path = tmp_path / f"{a.id}.jsonl"
     assert path.exists()
-    a.touched = 0.0  # unstarted and idle -> evictable
+    # Idle well past the TTL (relative to monotonic(), which need not be large).
+    a.touched = time.monotonic() - 100_000
     b = reg.create(GameSession(seed=1, n_players=2, seats=["human", "human"]))
     assert not path.exists()
     assert (tmp_path / f"{b.id}.jsonl").exists()

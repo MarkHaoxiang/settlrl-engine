@@ -1,10 +1,16 @@
 """Unit tests for the game registry and seat claims (no engine, no HTTP)."""
 
+import time
 from typing import cast
 
 import pytest
 from catan_render.games import GameHandle, GameRegistry, RegistryFullError
 from catan_render.session import GameSession
+
+# A touch time well past every eviction TTL. Relative to ``monotonic()`` rather
+# than 0.0, which is only "ancient" when the clock's origin is far in the past
+# (it isn't on a freshly booted CI runner).
+_LONG_AGO = time.monotonic() - 100_000
 
 
 class _FakeSession:
@@ -80,7 +86,7 @@ def test_eviction_prefers_finished_then_abandoned() -> None:
     assert registry.get(running.id) is running
 
     # A running game idle past the TTL counts as abandoned and goes next.
-    running.touched = 0.0
+    running.touched = _LONG_AGO
     registry.create(_session())
     assert registry.get(running.id) is None
 
@@ -99,7 +105,7 @@ def test_unstarted_idle_game_is_reclaimed_before_a_played_one() -> None:
     registry = GameRegistry(max_games=2)
     started = registry.create(_session(moves_played=3))
     unstarted = registry.create(_session(moves_played=0))
-    unstarted.touched = 0.0  # idle well past the unstarted grace
+    unstarted.touched = _LONG_AGO  # idle well past the unstarted grace
     registry.create(_session())
     assert registry.get(unstarted.id) is None
     assert registry.get(started.id) is started
