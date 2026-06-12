@@ -43,7 +43,9 @@ Claiming a human seat (creating or joining a game) issues a bearer token, and ev
 proves its seats via the `X-Seat-Tokens` header: snapshots are per-seat views — your own
 hand arrives in full, everyone else's only as public counts, and the legal-move list only
 ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
-link, and opening it claims a free human seat (or spectates when none is left). The server
+link, and opening it claims a free human seat (or spectates when none is left); the 🔑 button
+copies a resume link that carries your seat tokens, so you can restore the exact seats you
+hold on another device or after clearing storage. The server
 pushes state: each client holds an event stream (`GET /api/games/{id}/events`, SSE) and
 receives its per-seat snapshot on every change, and bot seats are played by a server-side
 driver pacing one move at a time so each lands as its own pushed snapshot — games advance

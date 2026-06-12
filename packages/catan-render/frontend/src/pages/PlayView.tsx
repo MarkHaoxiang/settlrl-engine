@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import BoardView, {
   type BoardInteraction,
   type BoardTargetPoint,
@@ -15,7 +15,14 @@ import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import { createGame, joinGame, type GameAction, type NewGameConfig } from "../lib/game";
-import { rememberGame, saveTokens, tokensFor, type SeatTokens } from "../lib/seats";
+import {
+  parseTokens,
+  rememberGame,
+  resumeLink,
+  saveTokens,
+  tokensFor,
+  type SeatTokens,
+} from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
 import { ACCENT, DIVIDER, buttonStyle, overlayMsgStyle, panelStyle, smallButtonStyle } from "../lib/ui";
@@ -47,6 +54,7 @@ const PHASE_LABEL: Record<string, string> = {
 export default function PlayView() {
   const { id: gameId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   // The seats this browser owns in this game (multiplayer identity).
   const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
   const [joinFailed, setJoinFailed] = useState(false);
@@ -54,6 +62,21 @@ export default function PlayView() {
   // One join request at a time: the token effect above re-fires this one
   // before the first claim resolves, and a double-join would grab two seats.
   const joining = useRef(false);
+  // A resume link (?tokens=seat:token,...) restores held seats, then is
+  // stripped from the URL so it isn't re-applied or shared on. Declared before
+  // the auto-join effect so storage holds the seat before that effect's guard.
+  useEffect(() => {
+    if (!gameId) return;
+    const raw = searchParams.get("tokens");
+    if (!raw) return;
+    const incoming = parseTokens(raw);
+    if (Object.keys(incoming).length > 0) {
+      saveTokens(gameId, incoming);
+      setTokens(tokensFor(gameId));
+    }
+    searchParams.delete("tokens");
+    setSearchParams(searchParams, { replace: true });
+  }, [gameId, searchParams, setSearchParams]);
   useEffect(() => {
     setTokens(gameId ? tokensFor(gameId) : {});
     setJoinFailed(false);
@@ -311,6 +334,15 @@ export default function PlayView() {
           >
             🔗
           </button>
+          {gameId && mySeats.length > 0 && (
+            <button
+              style={smallButtonStyle}
+              title="Copy a link that restores your seat on another device or after clearing storage"
+              onClick={() => void navigator.clipboard.writeText(resumeLink(gameId, tokens))}
+            >
+              🔑
+            </button>
+          )}
           <button style={smallButtonStyle} onClick={() => setConfiguring(true)}>
             New game
           </button>
