@@ -14,7 +14,7 @@ from __future__ import annotations
 import functools
 
 import numpy as np
-from catan_engine.board.dev_cards import DEV_CARD_COST
+from catan_engine.board.dev_cards import DEV_CARD_COST, DevCard
 from catan_engine.board.layout import (
     EDGE_V,
     N_VERTICES,
@@ -120,6 +120,10 @@ class Pov:
         self.edge_road: np.ndarray = o["edge_road"]
         self.robber: int = int(o["robber"])
         self.victory_points: np.ndarray = o["victory_points"].astype(np.int64)
+        self.knights_played: np.ndarray = o["knights_played"].astype(np.int64)
+        self.longest_road_owner: int = int(o["longest_road_owner"])
+        self.largest_army_owner: int = int(o["largest_army_owner"])
+        self.longest_road_len: int = int(o["longest_road_len"])
         self.hand_size: np.ndarray = o["hand_size"].astype(np.int64)
         self.dev_card_count: np.ndarray = o["dev_card_count"].astype(np.int64)
         self.phase: int = int(o["phase"])
@@ -173,6 +177,13 @@ class Pov:
         """Pips per tile, robber-blind."""
         return _pips(self.tile_number)
 
+    def port_kind(self, vertex: int) -> int | None:
+        """The port kind on ``vertex`` (a ``Port`` value), or None off-port."""
+        for p, (a, b) in enumerate(_PORTS):
+            if vertex in (int(a), int(b)):
+                return int(self.port_allocation[p])
+        return None
+
     def vertex_production(self, vertex: int) -> np.ndarray:
         """Per-resource pips one building at ``vertex`` would earn."""
         out = np.zeros(N_RESOURCES, dtype=np.int64)
@@ -203,6 +214,51 @@ class Pov:
                 else:
                     ratio[kind] = 2
         return ratio
+
+    @property
+    def my_total_vp(self) -> int:
+        """Building VP + held awards + own (hidden) Victory Point cards."""
+        total = int(self.victory_points[self.me])
+        total += 2 * (self.longest_road_owner == self.me)
+        total += 2 * (self.largest_army_owner == self.me)
+        return total + int(self.dev_hand[DevCard.VICTORY_POINT])
+
+    def my_longest_trail(self) -> tuple[int, set[int]]:
+        """Our longest road's length and the end vertices it can grow from
+        (ends sitting on an opponent's building are excluded: a road cannot
+        continue through one). DFS over our <= 15 edges, as the rules count
+        a trail: no edge reused, no passing through an opponent's building."""
+        adj: dict[int, list[int]] = {}
+        for e in self.my_edges:
+            for v in EDGE_ENDPOINTS[int(e)]:
+                adj.setdefault(int(v), []).append(int(e))
+        if not adj:
+            return 0, set()
+        mine = self.me + 1
+        best, ends = 0, set()
+
+        def dfs(v: int, used: set[int], length: int) -> None:
+            nonlocal best, ends
+            if length > best:
+                best, ends = length, {v}
+            elif length == best:
+                ends.add(v)
+            if self.vertex_owner[v] not in (0, mine):  # may end here, not pass
+                return
+            for e in adj.get(v, []):
+                if e in used:
+                    continue
+                a, b = int(EDGE_ENDPOINTS[e, 0]), int(EDGE_ENDPOINTS[e, 1])
+                used.add(e)
+                dfs(b if a == v else a, used, length + 1)
+                used.discard(e)
+
+        for e in self.my_edges:
+            a, b = int(EDGE_ENDPOINTS[int(e), 0]), int(EDGE_ENDPOINTS[int(e), 1])
+            dfs(a, {int(e)}, 1)
+            dfs(b, {int(e)}, 1)
+        grow = {v for v in ends if int(self.vertex_owner[v]) in (0, self.me + 1)}
+        return best, grow
 
     # -- Expansion search ------------------------------------------------------
 

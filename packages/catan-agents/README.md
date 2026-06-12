@@ -14,13 +14,13 @@ All kinds work at any player count. `POLICIES` maps every shipped agent by name 
 
 - `random` — uniform over the legal actions.
 - `greedy` — scripted priorities (city > settlement > dev card > road), pip-weighted placement and robber moves; trades with intent — ports surplus into whatever its next build is missing and accepts offers paid from surplus that advance it (it never proposes).
-- `planner` — a stateful decision tree: adopts a build goal (city upgrade, road-path-plus-settlement expansion, dev buy), saves toward it across turns, and spends each turn closing its resource gap (dev-card plays, port trades, domestic offers it won't re-propose once rejected). Replans when the board invalidates the goal.
+- `planner` — a stateful decision tree: adopts a build goal (city upgrade, road-path-plus-settlement expansion, a Longest Road grab, dev buy) scored by production-weighted value against the rounds it takes to afford, saves toward it across turns, and switches only when a rival goal clearly outscores it. Each turn it closes the resource gap (dev-card plays, port trades, domestic offers it won't re-propose once rejected), banks overflow hands into dev cards, and spends spare knights relocating an idle robber onto opponents' production.
 - `lookahead` — one-step lookahead: applies every legal action to a sampled world and picks the successor the value function scores best.
 - `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator, the value function at the leaves, and the one-step value sweep as its root prior; searches an ensemble of sampled worlds and averages their action weights.
 
 The search agents act on a sampled world consistent with everything the seat knows: stochastic outcomes are their own samples (not the environment's), opponents' hidden cards are dealt from the player's honest belief — they never act on information the seat could not know. With two players the belief pins the opponent's resources exactly, so only dev-card identities are ever sampled.
 
-Two-player strength (seat-swapped, 100–300-game matches): `mcts` > `lookahead` > `greedy` > `planner` > `random` — mcts beats lookahead 56%, lookahead beats greedy 87%, greedy beats planner 58% and random 99%. The ladder holds with seats rotated: one lookahead wins 65% against two greedies at three players (chance 33%), and one mcts wins 62% against two lookaheads (36% against three at four players, chance 25% — measured before the June 12 trade/value upgrade, which both sides share).
+Two-player strength (seat-swapped, 200–300-game matches): `mcts` > `lookahead` > `planner` > `greedy` > `random` — mcts beats lookahead 56% and planner 60%, lookahead beats planner 55% and greedy 87%, planner beats greedy 75%, greedy beats random 99%. The ladder holds with seats rotated: one lookahead wins 65% against two greedies at three players (chance 33%), and one mcts wins 62% against two lookaheads (36% against three at four players, chance 25% — measured before the June 12 trade/value upgrade, which both sides share).
 
 ## Value functions
 

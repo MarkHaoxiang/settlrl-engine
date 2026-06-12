@@ -23,10 +23,14 @@ from catan_engine.env import ActionType
 from catan_engine.mechanics.trade import pack_trade_single
 
 from catan_agents.planner.pov import (
+    COST_CITY,
+    COST_DEV,
+    COST_SETTLEMENT,
     EDGE_ENDPOINTS,
     ROW_IDX,
     ROW_TARGET,
     TILE_CORNERS,
+    VERTEX_EDGES,
     VERTEX_NEIGHBORS,
     Pov,
     flat_row,
@@ -41,8 +45,15 @@ from catan_agents.shared.policy import (
 
 # Own turns a plan may sit with no step realized before it is abandoned
 # (covers goals starved by piece limits or an empty dev deck, which the
-# observation cannot rule out up front).
-_PLAN_PATIENCE = 12
+# observation cannot rule out up front; routine adaptation is the rival-goal
+# switch in ExecutePlan, so this is only the starvation backstop).
+_PLAN_PATIENCE = 8
+
+# Resource quality in pip terms [sheep, wheat, wood, brick, ore]: wheat/ore
+# feed cities and dev cards (the late game), wood/brick only expansion.
+_RES_WEIGHT = np.asarray([0.9, 1.3, 1.0, 1.1, 1.3])
+
+_NO_OWNER = 255  # NO_INDEX as stored in the award-owner observation fields
 
 
 def _noise(bb: Blackboard) -> float:
@@ -50,8 +61,24 @@ def _noise(bb: Blackboard) -> float:
     return bb.rng.random() * 0.3
 
 
+def _wprod(prod: np.ndarray) -> float:
+    """Production pips weighted by resource quality."""
+    return float(prod @ _RES_WEIGHT)
+
+
+def _port_bonus(pov: Pov, vertex: int, prod: np.ndarray) -> float:
+    """Value of the port under a prospective settlement at ``vertex``."""
+    kind = pov.port_kind(vertex)
+    if kind is None:
+        return 0.0
+    if kind >= N_RESOURCES:  # generic 3:1
+        return 0.6
+    return 0.3 + 0.35 * float(prod[kind])  # 2:1 ports want matching production
+
+
 class SetupSettlement(Node):
-    """Best legal starting spot: production pips plus a new-resource bonus."""
+    """Best legal starting spot: quality-weighted pips, new resource types,
+    and the port underneath."""
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.SETUP_SETTLEMENT)
@@ -61,8 +88,17 @@ class SetupSettlement(Node):
         for row in rows:
             v = int(ROW_IDX[row])
             prod = pov.vertex_production(v)
-            new_types = int(((prod > 0) & (pov.my_production == 0)).sum())
-            score = float(prod.sum()) + 1.5 * new_types + _noise(bb)
+            new_types = float(_RES_WEIGHT[(prod > 0) & (pov.my_production == 0)].sum())
+            around = max(
+                (
+                    _wprod(pov.vertex_production(n))
+                    for n in VERTEX_NEIGHBORS[v]
+                    if int(pov.vertex_owner[n]) == 0
+                ),
+                default=0.0,
+            )
+            score = _wprod(prod) + 2.0 * new_types + _port_bonus(pov, v, prod)
+            score += 0.2 * around + _noise(bb)
             if score > best_score:
                 best, best_score = int(row), score
         bb.last_setup_vertex = int(ROW_IDX[best])
@@ -81,15 +117,19 @@ class SetupRoad(Node):
             e = int(ROW_IDX[row])
             a, b = int(EDGE_ENDPOINTS[e, 0]), int(EDGE_ENDPOINTS[e, 1])
             far = b if a == bb.last_setup_vertex else a
+            # Aim at the best spot within two further roads of the far end.
+            ring = {far} | set(VERTEX_NEIGHBORS[far])
+            ring |= {m for n in ring.copy() for m in VERTEX_NEIGHBORS[n]}
             potential = max(
                 (
-                    float(pov.vertex_production(n).sum())
-                    for n in VERTEX_NEIGHBORS[far]
+                    _wprod(pov.vertex_production(n))
+                    * (1.0 if n in VERTEX_NEIGHBORS[far] else 0.6)
+                    for n in ring
                     if pov.settleable(n)
                 ),
                 default=0.0,
             )
-            score = potential + 0.3 * float(pov.vertex_production(far).sum())
+            score = potential + 0.3 * _wprod(pov.vertex_production(far))
             score += _noise(bb)
             if score > best_score:
                 best, best_score = int(row), score
@@ -105,7 +145,35 @@ class DiscardSurplus(Node):
             return None
         reserved = bb.plan.reserved(pov) if bb.plan else np.zeros(5, dtype=np.int64)
         surplus = pov.hand - reserved
-        return int(max(rows, key=lambda r: (surplus[ROW_IDX[r]], pov.hand[ROW_IDX[r]])))
+        return int(
+            max(
+                rows,
+                key=lambda r: (
+                    surplus[ROW_IDX[r]],
+                    pov.hand[ROW_IDX[r]],
+                    -_RES_WEIGHT[ROW_IDX[r]],  # spare wheat/ore on ties
+                ),
+            )
+        )
+
+
+def _opponent_blocked_pips(pov: Pov, tile: int) -> float:
+    """Opponent production pips the robber on ``tile`` is denying."""
+    pips = float(pov.tile_pips[tile])
+    return float(
+        sum(
+            pips * int(pov.vertex_type[c])
+            for c in TILE_CORNERS[tile]
+            if int(pov.vertex_owner[c]) not in (0, pov.me + 1)
+        )
+    )
+
+
+def _visible_vp(pov: Pov, player: int) -> int:
+    """Buildings plus held awards — what we can see of a player's total."""
+    return int(pov.victory_points[player]) + 2 * (
+        (pov.longest_road_owner == player) + (pov.largest_army_owner == player)
+    )
 
 
 def _robber_pick(pov: Pov, bb: Blackboard, rows: np.ndarray) -> int:
@@ -125,7 +193,7 @@ def _robber_pick(pov: Pov, bb: Blackboard, rows: np.ndarray) -> int:
             if owner == pov.me + 1:
                 score -= 1.5 * weight
             else:
-                score += weight * (1.0 + 0.15 * float(pov.victory_points[owner - 1]))
+                score += weight * (1.0 + 0.25 * _visible_vp(pov, owner - 1))
         if victim >= 0:
             score += 2.0 + 0.2 * float(pov.hand_size[victim])
         score += _noise(bb)
@@ -141,17 +209,24 @@ class MoveRobber(Node):
 
 
 class PlayKnight(Node):
-    """Unblock our own production: play a knight whenever the robber sits on
-    a tile we build on (legal pre-roll too, rulebook p.7)."""
+    """Play a knight to unblock our own production (legal pre-roll too,
+    rulebook p.7), or whenever the play takes Largest Army outright."""
 
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         rows = pov.legal_rows(ActionType.PLAY_KNIGHT)
-        if rows.size == 0 or pov.tile_pips[pov.robber] == 0:
+        if rows.size == 0:
             return None
-        blocked = any(
+        blocked = pov.tile_pips[pov.robber] > 0 and any(
             int(pov.vertex_owner[c]) == pov.me + 1 for c in TILE_CORNERS[pov.robber]
         )
-        return _robber_pick(pov, bb, rows) if blocked else None
+        after = int(pov.knights_played[pov.me]) + 1
+        others = np.delete(pov.knights_played, pov.me)
+        takes_army = (
+            pov.largest_army_owner != pov.me
+            and after >= 3
+            and after > int(others.max())
+        )
+        return _robber_pick(pov, bb, rows) if blocked or takes_army else None
 
 
 class RespondToTrade(Node):
@@ -198,35 +273,89 @@ def _extension_edge(pov: Pov) -> int | None:
     return best
 
 
-def choose_plan(
-    pov: Pov, bb: Blackboard, depth: int, exclude: str | None
-) -> Plan | None:
-    """Score every candidate goal and adopt the best.
+def _trail_extension_steps(pov: Pov, needed: int) -> list[Step] | None:
+    """``needed`` empty edges growing our longest trail from one of its free
+    ends (so each realized step lengthens the trail by one)."""
+    _, ends = pov.my_longest_trail()
+    for v in sorted(ends):
+        for e in VERTEX_EDGES[v]:
+            if int(pov.edge_road[e]) != 0:
+                continue
+            if needed == 1:
+                return [Step(ActionType.BUILD_ROAD, e)]
+            a, b = int(EDGE_ENDPOINTS[e, 0]), int(EDGE_ENDPOINTS[e, 1])
+            far = b if a == v else a
+            if int(pov.vertex_owner[far]) not in (0, pov.me + 1):
+                continue  # cannot continue through an opponent's building
+            for e2 in VERTEX_EDGES[far]:
+                if e2 != e and int(pov.edge_road[e2]) == 0:
+                    return [
+                        Step(ActionType.BUILD_ROAD, e),
+                        Step(ActionType.BUILD_ROAD, e2),
+                    ]
+    return None
+
+
+def plan_candidates(pov: Pov, bb: Blackboard, depth: int) -> list[tuple[float, Plan]]:
+    """Every candidate goal, scored.
 
     Candidates: a city on each own settlement, a settlement on each spot
-    reachable within ``depth`` new roads (paths from BFS), a dev-card buy,
-    and a single road extending the network. ``exclude`` skips the plan just
-    abandoned for staleness so a starved goal cannot be re-adopted forever.
+    reachable within ``depth`` new roads (paths from BFS), a Longest Road
+    grab when within two roads of taking the card, a dev-card buy, and a
+    single road extending the network. Scores are quality-weighted pips
+    discounted by the bottleneck rounds our production needs to afford the
+    goal, plus a closing-urgency bonus near 10 VP (any goal that wins
+    outright dominates everything).
     """
+    vp = pov.my_total_vp
+
+    def urgency(vp_gain: int, builds: int) -> float:
+        if vp + vp_gain >= 10:
+            return 25.0 / builds  # a winning goal, fastest first
+        return 1.5 * max(vp - 6, 0) * vp_gain / builds
+
+    income = pov.my_production * pov.n_players / 36.0 + 0.04  # cards per round
+
+    def turns(steps: list[Step]) -> float:
+        """Bottleneck rounds until our production affords the whole goal."""
+        total = sum((s.cost for s in steps), np.zeros(N_RESOURCES, dtype=np.int64))
+        missing = np.clip(total - pov.hand, 0, None).astype(np.float64)
+        return float(min(np.max(missing / income), 20.0))
+
     cands: list[tuple[float, Plan]] = []
     for v in pov.my_settlements:
-        prod = float(pov.vertex_production(int(v)).sum())
-        cands.append(
-            (
-                8.0 + prod + _noise(bb),
-                Plan(f"city@{int(v)}", [Step(ActionType.BUILD_CITY, int(v))]),
-            )
-        )
+        steps = [Step(ActionType.BUILD_CITY, int(v))]
+        score = 7.5 + _wprod(pov.vertex_production(int(v)))
+        score += urgency(1, 1) - 0.35 * turns(steps)
+        cands.append((score + _noise(bb), Plan(f"city@{int(v)}", steps)))
     for v, path in pov.expansion_paths(depth):
         gain = pov.vertex_production(v)
         new_types = int(((gain > 0) & (pov.my_production == 0)).sum())
-        score = 6.0 + float(gain.sum()) + 1.5 * new_types - 2.5 * len(path)
         steps = [Step(ActionType.BUILD_ROAD, e) for e in path]
         steps.append(Step(ActionType.BUILD_SETTLEMENT, v))
+        contested = any(
+            int(pov.edge_road[e]) not in (0, pov.me + 1) for e in VERTEX_EDGES[v]
+        )
+        score = 5.5 + _wprod(gain) + 1.8 * new_types + _port_bonus(pov, v, gain)
+        score += -1.0 * len(path) + urgency(1, 1 + len(path)) + 0.8 * contested
+        score += -0.35 * turns(steps)
         cands.append((score + _noise(bb), Plan(f"settle@{v}", steps)))
+    if pov.longest_road_owner != pov.me:
+        target = 5 if pov.longest_road_owner == _NO_OWNER else pov.longest_road_len + 1
+        length, _ = pov.my_longest_trail()
+        needed = target - length
+        if 1 <= needed <= 2:
+            steps_or_none = _trail_extension_steps(pov, needed)
+            if steps_or_none is not None:
+                score = 10.0 - 2.5 * needed + urgency(2, needed)
+                score += -0.35 * turns(steps_or_none)
+                cands.append((score + _noise(bb), Plan("longroad", steps_or_none)))
+    army_live = pov.largest_army_owner != pov.me and int(pov.knights_played[pov.me])
+    dev_score = 3.0 + 0.8 * bool(army_live) + 1.2 * (vp >= 8)
+    dev_score -= 0.35 * turns([Step(ActionType.BUY_DEVELOPMENT_CARD)])
     cands.append(
         (
-            3.0 + _noise(bb),
+            dev_score + _noise(bb),
             Plan(
                 "dev",
                 [
@@ -243,7 +372,15 @@ def choose_plan(
         cands.append(
             (1.0 + _noise(bb), Plan(f"road@{ext}", [Step(ActionType.BUILD_ROAD, ext)]))
         )
-    cands = [c for c in cands if c[1].name != exclude]
+    return cands
+
+
+def choose_plan(
+    pov: Pov, bb: Blackboard, depth: int, exclude: str | None
+) -> Plan | None:
+    """The best candidate goal. ``exclude`` skips the plan just abandoned for
+    staleness so a starved goal cannot be re-adopted forever."""
+    cands = [c for c in plan_candidates(pov, bb, depth) if c[1].name != exclude]
     if not cands:
         return None
     return max(cands, key=lambda c: c[0])[1]
@@ -267,6 +404,14 @@ class ExecutePlan(Node):
         ):
             exclude = bb.plan.name if stale and bb.plan is not None else None
             bb.set_plan(choose_plan(pov, bb, self.depth, exclude))
+        elif bb.plan_age >= 1:
+            # Stay adaptive without thrashing: a freshly-scored rival goal
+            # replaces the incumbent only on a clear margin (>> the noise).
+            cands = plan_candidates(pov, bb, self.depth)
+            current = next((s for s, p in cands if p.name == bb.plan.name), None)
+            best_score, best_plan = max(cands, key=lambda c: c[0])
+            if current is not None and best_score > current + 2.5:
+                bb.set_plan(best_plan)
         if bb.plan is None:
             return None
         step = bb.plan.next_step(pov)
@@ -275,6 +420,31 @@ class ExecutePlan(Node):
         if step.kind == ActionType.BUY_DEVELOPMENT_CARD:
             return pov.legal(ActionType.BUY_DEVELOPMENT_CARD)
         return pov.legal(step.kind, step.idx)
+
+
+class OpportunisticBuild(Node):
+    """Spend pure surplus on a build the plan is not waiting for: an extra
+    city (best pips) or settlement — banked VP beats robber bait."""
+
+    def tick(self, pov: Pov, bb: Blackboard) -> int | None:
+        if not pov.my_turn_main or bb.plan is None:
+            return None
+        surplus = pov.hand - bb.plan.reserved(pov)
+        for cost, atype in (
+            (COST_CITY, ActionType.BUILD_CITY),
+            (COST_SETTLEMENT, ActionType.BUILD_SETTLEMENT),
+        ):
+            if not bool(np.all(surplus >= cost)):
+                continue
+            rows = pov.legal_rows(atype)
+            if rows.size:
+                return int(
+                    max(
+                        rows,
+                        key=lambda r: _wprod(pov.vertex_production(int(ROW_IDX[r]))),
+                    )
+                )
+        return None
 
 
 class Acquire(Node):
@@ -287,10 +457,16 @@ class Acquire(Node):
     def tick(self, pov: Pov, bb: Blackboard) -> int | None:
         if not pov.my_turn_main or bb.plan is None:
             return None
+        surplus = pov.hand - bb.plan.reserved(pov)
+        # Pure surplus covering a whole dev card buys one on the spot: it
+        # never starves the plan, and idle cards are robber bait.
+        if bool(np.all(surplus >= COST_DEV)):
+            row = pov.legal(ActionType.BUY_DEVELOPMENT_CARD)
+            if row is not None:
+                return row
         need = bb.plan.need(pov)
         if need.sum() == 0:
             return None
-        surplus = pov.hand - bb.plan.reserved(pov)
         by_need = [int(r) for r in np.argsort(-need) if need[r] > 0]
 
         rows = pov.legal_rows(ActionType.PLAY_YEAR_OF_PLENTY)
@@ -303,10 +479,13 @@ class Acquire(Node):
         if rows.size:
             opp = (19 - pov.bank) - pov.hand  # cards of each type in other hands
             best = max(
-                rows, key=lambda r: int(opp[ROW_IDX[r]] * (need[ROW_IDX[r]] > 0))
+                rows,
+                key=lambda r: int(opp[ROW_IDX[r]]) + 2 * (need[ROW_IDX[r]] > 0),
             )
             r = int(ROW_IDX[best])
-            if need[r] > 0 and opp[r] >= 2:
+            # Worth the dev-play slot when it feeds the plan or is a mass
+            # grab (excess converts at the bank).
+            if (need[r] > 0 and opp[r] >= 2) or opp[r] >= 4:
                 return int(best)
 
         road_steps = sum(
@@ -314,7 +493,7 @@ class Acquire(Node):
             for s in bb.plan.steps
             if s.kind == ActionType.BUILD_ROAD and not s.realized(pov)
         )
-        if road_steps >= 2:
+        if road_steps >= 1:
             row = pov.legal(ActionType.PLAY_ROAD_BUILDING)
             if row is not None:
                 return row
@@ -357,6 +536,32 @@ class Acquire(Node):
                         bb.proposals_this_turn += 1
                         return row
         return None
+
+
+class SpendDown(Node):
+    """Ending the turn with more than seven cards is half-a-hand of robber
+    exposure: bank the excess in a dev card first, plan reservations or not."""
+
+    def tick(self, pov: Pov, bb: Blackboard) -> int | None:
+        if not pov.my_turn_main or int(pov.hand.sum()) <= 7:
+            return None
+        return pov.legal(ActionType.BUY_DEVELOPMENT_CARD)
+
+
+class DenialKnight(Node):
+    """End-of-turn knight: a robber that is denying nobody is wasted, so
+    relocate it onto the opponents' best production — the steal and the
+    Largest Army progress come free."""
+
+    def tick(self, pov: Pov, bb: Blackboard) -> int | None:
+        if not pov.my_turn_main:
+            return None
+        rows = pov.legal_rows(ActionType.PLAY_KNIGHT)
+        if rows.size == 0:
+            return None
+        current = _opponent_blocked_pips(pov, pov.robber)
+        best = max(_opponent_blocked_pips(pov, int(ROW_IDX[r])) for r in rows)
+        return _robber_pick(pov, bb, rows) if best >= current + 6.0 else None
 
 
 class EndTurn(Node):
@@ -416,7 +621,10 @@ class PlannerAgent:
             PlayKnight(),
             RollDice(),
             ExecutePlan(expansion_depth),
+            OpportunisticBuild(),
             Acquire(max_proposals_per_turn),
+            SpendDown(),
+            DenialKnight(),
             EndTurn(),
         )
 

@@ -234,20 +234,43 @@ Design invariants:
   with the hand that made it, marked rejected if the next MAIN tick shows no
   trace of it, and never re-offered that turn (`max_proposals_per_turn` caps
   the rest). This is the stall-guard the completing-games test exercises.
-- Gotchas: the observation has no dev-deck size or `free_roads` field, so a
-  dev-buy plan can be starved invisibly — `_PLAN_PATIENCE` abandons any plan
-  with no step realized for 12 own turns and excludes that goal from the
-  immediate replan; ROAD_BUILDING is only played with ≥ 2 unrealized road
-  steps so both free roads land inside the plan. A dev-buy step's "realized"
+- **Goals are scored in economic time, switched on clear margins.** A goal's
+  score is quality-weighted pips (`_RES_WEIGHT`: wheat/ore premium) minus
+  0.35 × the bottleneck rounds production needs to afford it, plus
+  closing-urgency near 10 VP (a goal that wins outright dominates at 25/builds).
+  Candidates include the two award races: a Longest Road grab when within two
+  trail extensions of taking the card (`my_longest_trail` DFS), and dev buys
+  boosted while Largest Army is live. A healthy plan is re-scored against
+  fresh rivals each turn and replaced only on a > 2.5 margin (≫ the 0.3
+  tie-break noise, so no thrash); `_PLAN_PATIENCE` (8) remains only as the
+  starvation backstop for invisibly-starved goals (no dev-deck size or
+  `free_roads` in the observation).
+- Turn shape after the plan step: `OpportunisticBuild` (pure surplus covering
+  an extra city/settlement builds it now), `Acquire` (YOP/monopoly toward
+  need — monopoly also fires on a ≥ 4-card mass grab — maritime from
+  surplus, capped 1:1 proposals), `SpendDown` (ending a turn above seven
+  cards banks the excess in a dev card, reservations or not — half-a-hand of
+  robber exposure beats any plan), `DenialKnight` (a robber denying nobody is
+  relocated onto opponents' best production; knights also fire any time they
+  take Largest Army outright). The robber pick weights opponents by visible
+  VP (buildings + held awards).
+- Gotchas: A dev-buy step's "realized"
   check is a baseline comparison on the public dev count (the hand count
   drops again when cards are played, but the plan completes on the next tick,
-  before that can happen).
+  before that can happen). The jaxtyping hook enforces `pov.py`/`agent.py`
+  annotations at test time — `sum()` of an empty generator is `int`, not
+  `float`.
 
-Strength (seat-swapped, June 12): 78% vs the *pre-trade* greedy (n=101), 10%
-vs lookahead (n=60); the same day's trade-aware greedy overtook it (planner
-42%, n=100) — the planner's own trade/robber play is now the weak rung.
-Move latency is ~0.1 ms/lane at B=32 (cuda benchmark), so the stepwise
-driver's cost is the env dispatch, not the agent.
+Strength (seat-swapped, June 12 evening, after the goal-economics /
+award-race / spend-down work): 75.0% vs greedy (n=200), 44–45% vs lookahead
+(n=300), 40.0% vs mcts (n=200) — up from 42% / 10% / — that morning; the
+ladder reads mcts > lookahead > planner > greedy. The n=100 probes used
+while iterating swung ±6 points around the n=300 truth — gate planner tweaks
+at n ≥ 200. The two single biggest wins were SpendDown and the
+goal-switching margin; the one measured trap: letting maritime sales dip
+into plan-reserved cards (47% → 29% vs lookahead, reverted). Move latency is
+~0.1 ms/lane at B=32 (cuda benchmark), so the stepwise driver's cost is the
+env dispatch, not the agent.
 
 ## cli.py
 
