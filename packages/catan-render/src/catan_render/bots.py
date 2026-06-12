@@ -51,11 +51,24 @@ def _knobs(
     return out
 
 
-def bot_catalog() -> dict[str, dict[str, object]]:
-    """Every bot kind with its supported seat counts and configurable knobs.
+# Short user-facing blurbs for the new-game bot picker. Kept here (the UI
+# adapter) rather than on the catan-agents policies; a kind without a blurb
+# just shows none.
+_DESCRIPTIONS: dict[str, str] = {
+    "random": "Plays a random legal move — the gentle baseline.",
+    "greedy": "Grabs the best move it can see right now; fast, no planning ahead.",
+    "lookahead": "Looks a move ahead and weighs trades — a solid intermediate.",
+    "mcts": "Monte-Carlo tree search: the strongest, but slower. "
+    "Raise the simulation budget for tougher play.",
+}
 
-    Shape: ``{kind: {"counts": [2, ...], "params": {name: {"type": "int" |
-    "float" | "bool", "default": value}}}}``.
+
+def bot_catalog() -> dict[str, dict[str, object]]:
+    """Every bot kind with its supported seat counts, configurable knobs, and a
+    short description.
+
+    Shape: ``{kind: {"counts": [2, ...], "description": str, "params": {name:
+    {"type": "int" | "float" | "bool", "default": value}}}}``.
     """
     catalog: dict[str, dict[str, object]] = {}
     for name, spec in POLICIES.items():
@@ -74,7 +87,11 @@ def bot_catalog() -> dict[str, dict[str, object]]:
             }
             for k, v in _knobs(spec).items()
         }
-        catalog[name] = {"counts": sorted(spec.n_players), "params": params}
+        catalog[name] = {
+            "counts": sorted(spec.n_players),
+            "description": _DESCRIPTIONS.get(name, ""),
+            "params": params,
+        }
     return catalog
 
 

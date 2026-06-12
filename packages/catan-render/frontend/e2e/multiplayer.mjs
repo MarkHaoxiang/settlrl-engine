@@ -100,7 +100,8 @@ check(
 const E = await page();
 await E.goto(`${BASE}/play`);
 await E.waitForTimeout(800);
-await E.getByRole("button", { name: "human", exact: true }).nth(1).click();
+// Seat 1 defaults to a bot; click its Human button to make a 2-human game.
+await E.getByRole("button", { name: "Human", exact: true }).nth(1).click();
 await E.getByRole("button", { name: "online", exact: true }).click();
 await E.getByRole("button", { name: "Start", exact: true }).click();
 await E.waitForTimeout(1500);

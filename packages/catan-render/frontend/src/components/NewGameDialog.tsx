@@ -1,5 +1,6 @@
-// Modal dialog configuring a new game: players, seat controllers (with
-// per-bot parameter overrides), number placement, seed.
+// Modal dialog configuring a new game: players, per-seat Human/Bot choice,
+// number placement, seed. Choosing Bot opens an in-dialog picker listing each
+// bot kind with a description and its tunable parameters.
 
 import { useEffect, useState } from "react";
 import {
@@ -22,6 +23,9 @@ const labelStyle: React.CSSProperties = {
   letterSpacing: 1,
   width: 80,
 };
+
+const botLabel = (kind: string) =>
+  kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1);
 
 // A labelled row of toggle buttons, one per option.
 function Toggle<T extends string | number>({
@@ -72,10 +76,10 @@ function SeatParams({
     onChange(next);
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, margin: "0 0 4px 86px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, margin: "2px 0 6px 12px" }}>
       {Object.entries(spec.params).map(([name, p]) => (
         <div key={name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ ...labelStyle, width: 170, textTransform: "none" }}>{name}</span>
+          <span style={{ ...labelStyle, width: 200, textTransform: "none" }}>{name}</span>
           {p.type === "bool" ? (
             <input
               type="checkbox"
@@ -120,7 +124,8 @@ export default function NewGameDialog({
     { kind: "random" },
     { kind: "random" },
   ]);
-  const [open, setOpen] = useState<boolean[]>([false, false, false, false]);
+  // The seat whose bot is being picked (the in-dialog bot page), or null.
+  const [pickerSeat, setPickerSeat] = useState<number | null>(null);
   const [bots, setBots] = useState<Record<string, BotSpec>>({});
 
   useEffect(() => {
@@ -132,6 +137,7 @@ export default function NewGameDialog({
   const botNames = Object.keys(bots)
     .filter((b) => bots[b].counts.includes(nPlayers))
     .sort();
+  const defaultBot = botNames.includes("random") ? "random" : (botNames[0] ?? "random");
   useEffect(() => {
     setSeats((prev) =>
       prev.map((s) =>
@@ -140,13 +146,26 @@ export default function NewGameDialog({
     );
   }, [nPlayers, bots]);
 
+  // Escape backs out of the bot picker first, then closes the dialog.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (pickerSeat !== null) setPickerSeat(null);
+      else onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, pickerSeat]);
 
   const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
+
+  const setSeat = (i: number, seat: SeatConfig) =>
+    setSeats((prev) => prev.map((p, j) => (j === i ? seat : p)));
+
+  const openPicker = (i: number) => {
+    if (seats[i].kind === HUMAN) setSeat(i, { kind: defaultBot });
+    setPickerSeat(i);
+  };
 
   const start = () => {
     onStart({
@@ -158,65 +177,95 @@ export default function NewGameDialog({
     });
   };
 
+  const panelInner: React.CSSProperties = {
+    ...panelStyle,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    padding: "20px 24px",
+    minWidth: 320,
+    maxWidth: 380,
+  };
+
+  // The bot-picker page for one seat.
+  if (pickerSeat !== null) {
+    const seat = seats[pickerSeat];
+    return (
+      <Overlay onClose={onClose}>
+        <div style={panelInner} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button style={{ ...buttonStyle, padding: "4px 10px", fontSize: 12 }} onClick={() => setPickerSeat(null)}>
+              ‹ Back
+            </button>
+            <span style={{ fontSize: 16, fontWeight: 700 }}>{playerName(pickerSeat)}'s bot</span>
+          </div>
+          {botNames.map((name) => {
+            const spec = bots[name];
+            const selected = seat.kind === name;
+            return (
+              <div key={name} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <button
+                  onClick={() =>
+                    setSeat(pickerSeat, { kind: name, params: seat.kind === name ? seat.params : {} })
+                  }
+                  style={{
+                    ...buttonStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 3,
+                    padding: "8px 12px",
+                    textAlign: "left",
+                    width: "100%",
+                    ...(selected ? selectedStyle : {}),
+                  }}
+                >
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{botLabel(name)}</span>
+                  <span style={{ fontSize: 11, opacity: 0.75, fontWeight: 400 }}>{spec.description}</span>
+                </button>
+                {selected && Object.keys(spec.params).length > 0 && (
+                  <SeatParams
+                    spec={spec}
+                    params={seat.params ?? {}}
+                    onChange={(params) => setSeat(pickerSeat, { ...seat, params })}
+                  />
+                )}
+              </div>
+            );
+          })}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button style={{ ...buttonStyle, ...selectedStyle }} onClick={() => setPickerSeat(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      </Overlay>
+    );
+  }
+
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 20,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{ ...panelStyle, display: "flex", flexDirection: "column", gap: 14, padding: "20px 24px", minWidth: 300 }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Overlay onClose={onClose}>
+      <div style={panelInner} onClick={(e) => e.stopPropagation()}>
         <span style={{ fontSize: 18, fontWeight: 700 }}>New game</span>
         <Toggle label="Players" options={[2, 4] as const} value={nPlayers} onChange={setNPlayers} />
         {seats.slice(0, nPlayers).map((seat, i) => {
-          const spec = bots[seat.kind];
-          const hasKnobs = spec && Object.keys(spec.params).length > 0;
-          const overridden = Object.keys(seat.params ?? {}).length > 0;
+          const isHuman = seat.kind === HUMAN;
           return (
-            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Toggle
-                label={playerName(i)}
-                options={[HUMAN, ...botNames]}
-                value={seat.kind}
-                onChange={(v) =>
-                  setSeats((prev) => prev.map((p, j) => (j === i ? { kind: v } : p)))
-                }
-                trailing={
-                  hasKnobs ? (
-                    <button
-                      title="Configure bot parameters"
-                      style={{
-                        ...buttonStyle,
-                        padding: "5px 9px",
-                        fontSize: 12,
-                        ...(open[i] || overridden ? selectedStyle : {}),
-                      }}
-                      onClick={() => setOpen((prev) => prev.map((o, j) => (j === i ? !o : o)))}
-                    >
-                      {"⚙"}
-                      {overridden ? "*" : ""}
-                    </button>
-                  ) : undefined
-                }
-              />
-              {hasKnobs && open[i] && (
-                <SeatParams
-                  spec={spec}
-                  params={seat.params ?? {}}
-                  onChange={(params) =>
-                    setSeats((prev) => prev.map((p, j) => (j === i ? { ...p, params } : p)))
-                  }
-                />
-              )}
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={labelStyle}>{playerName(i)}</span>
+              <button
+                style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12, ...(isHuman ? selectedStyle : {}) }}
+                onClick={() => setSeat(i, { kind: HUMAN })}
+              >
+                Human
+              </button>
+              <button
+                title="Choose and configure a bot"
+                style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12, ...(isHuman ? {} : selectedStyle) }}
+                onClick={() => openPicker(i)}
+              >
+                {isHuman ? "Bot" : `Bot · ${botLabel(seat.kind)}`}
+              </button>
             </div>
           );
         })}
@@ -258,6 +307,26 @@ export default function NewGameDialog({
           </button>
         </div>
       </div>
+    </Overlay>
+  );
+}
+
+// The shared modal backdrop; clicking it closes the dialog.
+function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 20,
+      }}
+      onClick={onClose}
+    >
+      {children}
     </div>
   );
 }

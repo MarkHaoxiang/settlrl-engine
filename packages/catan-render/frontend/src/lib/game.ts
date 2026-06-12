@@ -172,9 +172,11 @@ export interface BotParamSpec {
   default: BotParamValue;
 }
 
-// A bot kind's catalog entry: the player counts it supports and its knobs.
+// A bot kind's catalog entry: the player counts it supports, a short
+// description, and its tunable knobs.
 export interface BotSpec {
   counts: number[];
+  description: string;
   params: Record<string, BotParamSpec>;
 }
 

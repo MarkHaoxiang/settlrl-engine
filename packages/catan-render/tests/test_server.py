@@ -417,8 +417,11 @@ def test_replay_with_too_many_moves_is_rejected(
 
 def test_get_bots_lists_policies(client: TestClient) -> None:
     body = client.get("/api/bots").json()
-    assert "random" in body
-    assert all("counts" in spec and "params" in spec for spec in body.values())
+    assert "random" in body and body["random"]["description"]
+    assert all(
+        "counts" in spec and "params" in spec and "description" in spec
+        for spec in body.values()
+    )
 
 
 def test_openapi_schema_is_committed() -> None:
