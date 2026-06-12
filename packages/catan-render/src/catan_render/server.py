@@ -25,7 +25,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from .bots import bot_catalog
-from .driver import start_bot_driver
+from .driver import start_game_driver
 from .games import GameHandle, GameRegistry, RegistryFullError, restore_registry
 from .models import GameModel, ReplayStateModel
 from .replay import ReplaySession
@@ -50,11 +50,14 @@ def _warm_jit_cache() -> None:
         scratch.bot_step()  # compiles the default bot policy
 
 
-def _needs_driver(handle: GameHandle) -> bool:
-    """A non-terminal game with a bot seat needs the server-side bot driver
-    (restarted for restored games, started on create)."""
+def _needs_driver(handle: GameHandle, turn_timeout: float) -> bool:
+    """A non-terminal game needs the server-side driver when it has a bot seat
+    to pace, or a turn timeout to enforce on human seats (started on create,
+    restarted for restored games)."""
     session = handle.session
-    return not session.terminal() and any(k != HUMAN for k in session.seats)
+    if session.terminal():
+        return False
+    return turn_timeout > 0 or any(k != HUMAN for k in session.seats)
 
 
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
@@ -138,6 +141,7 @@ def create_app(
     max_streams: int = 64,
     max_body_bytes: int = 2 * 1024 * 1024,
     state_dir: str | None = None,
+    turn_timeout: float = 0.0,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -151,7 +155,8 @@ def create_app(
     streams starve ordinary requests); ``max_body_bytes`` rejects oversized
     request bodies before they are parsed. ``state_dir`` turns on persistence:
     games are journalled there and replayed back on the next startup (ignored
-    when ``games`` is passed).
+    when ``games`` is passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a
+    human turn that has gone idle that long, so an abandoned game still finishes.
     """
     if games is not None:
         registry = games
@@ -171,10 +176,10 @@ def create_app(
         # whole connection; the anyio default (40) would cap concurrent clients
         # and then starve ordinary requests.
         anyio.to_thread.current_default_thread_limiter().total_tokens = 160
-        # Resume bot pacing for any games replayed in from the store.
+        # Resume pacing/timeouts for any games replayed in from the store.
         for handle in registry.all_handles():
-            if _needs_driver(handle):
-                start_bot_driver(handle, bot_delay)
+            if _needs_driver(handle, turn_timeout):
+                start_game_driver(handle, bot_delay, turn_timeout)
         yield
 
     app = FastAPI(title="Catan Render", lifespan=lifespan, root_path=root_path)
@@ -228,8 +233,8 @@ def create_app(
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
         tokens = dict(handle.claim(seat) for seat in claiming)
-        if _needs_driver(handle):
-            start_bot_driver(handle, bot_delay)
+        if _needs_driver(handle, turn_timeout):
+            start_game_driver(handle, bot_delay, turn_timeout)
         return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
@@ -434,4 +439,5 @@ app = create_app(
     root_path=os.environ.get("ROOT_PATH", ""),
     max_streams=int(os.environ.get("CATAN_RENDER_MAX_STREAMS", "64")),
     state_dir=os.environ.get("CATAN_RENDER_STATE_DIR") or None,
+    turn_timeout=float(os.environ.get("CATAN_RENDER_TURN_TIMEOUT_S", "0")),
 )

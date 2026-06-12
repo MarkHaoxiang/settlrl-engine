@@ -273,6 +273,34 @@ def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
     assert body["status"]["terminal"] and body["status"]["winner"] is not None
 
 
+def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
+    # All human, but a turn timeout is set: nobody acts, so the driver auto-
+    # plays the idle turn and the game advances on its own.
+    with TestClient(create_app(turn_timeout=0.2)) as c:
+        game = c.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
+            "id"
+        ]
+        deadline = time.monotonic() + 30
+        body = c.get(f"/api/games/{game}").json()
+        while time.monotonic() < deadline:
+            body = c.get(f"/api/games/{game}").json()
+            if any(e["kind"] == "move" for e in body["log"]):
+                break
+            time.sleep(0.05)
+        assert any(e["kind"] == "move" for e in body["log"])
+
+
+def test_no_turn_timeout_leaves_an_idle_human_turn_alone() -> None:
+    # Default (no timeout): an all-human game has no driver and never self-plays.
+    with TestClient(create_app()) as c:
+        game = c.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
+            "id"
+        ]
+        time.sleep(0.5)
+        body = c.get(f"/api/games/{game}").json()
+        assert not any(e["kind"] == "move" for e in body["log"])
+
+
 def test_concurrent_duplicate_actions_apply_once(client: TestClient) -> None:
     game, tokens = _create(client)
     flat = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()["actions"][0][

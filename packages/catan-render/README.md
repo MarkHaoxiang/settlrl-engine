@@ -96,8 +96,11 @@ key" field; players joining or playing never need it), `CATAN_RENDER_MAX_STREAMS
 (default `64`; concurrent event-stream subscribers, capped below the threadpool
 size so idle streams can't starve ordinary requests — extras get `503`),
 `CATAN_RENDER_STATE_DIR` (a directory to persist games in — see below),
-and `ROOT_PATH` (the proxy prefix when served under a path). Run **one process,
-one worker**: live games are held in memory, so extra workers would split them.
+`CATAN_RENDER_TURN_TIMEOUT_S` (default `0` = off; after this many seconds of an
+idle human turn the server auto-plays a move, so an abandoned game still
+finishes instead of stalling), and `ROOT_PATH` (the proxy prefix when served
+under a path). Run **one process, one worker**: live games are held in memory,
+so extra workers would split them.
 The registry holds up to 32 games, evicting finished games, hour-idle ones, or
 unstarted ones idle past a few minutes (so a burst of empty games can't pin
 every slot) to make room.
@@ -220,7 +223,7 @@ packages/catan-render/
 ├── src/catan_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
 │   ├── server.py        # create_app + thin routes: auth, locking, status codes, SSE
-│   ├── driver.py        # Server-side bot pacing (one daemon thread per game)
+│   ├── driver.py        # Per-game daemon: bot pacing + idle-turn timeouts
 │   ├── views.py         # Per-seat snapshots: the hidden-information boundary
 │   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
 │   ├── store.py         # Crash-recovery journals: persist games, replay on boot

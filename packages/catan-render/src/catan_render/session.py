@@ -230,6 +230,19 @@ class GameSession:
         self._log_move(seat, flat)
         return flat
 
+    def auto_step(self) -> int | None:
+        """Play one legal move for the acting seat with the default policy,
+        whatever the seat's kind — used to advance a stalled or abandoned human
+        turn. Returns the flat played, or None when nothing is playable."""
+        if self.terminal() or self.legal_flat().size == 0:
+            return None
+        seat = self.acting_seat()
+        self._key, k = jax.random.split(self._key)
+        flat = bot_act("random", {}, k, self.env._env, seat)
+        self.env.step(flat)
+        self._log_move(seat, flat)
+        return flat
+
     def _run_bots(self) -> None:
         """Play bot moves until a human seat is acting (or the game ends)."""
         for _ in range(_MAX_BOT_STEPS):
