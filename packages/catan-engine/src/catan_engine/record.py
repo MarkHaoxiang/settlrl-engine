@@ -47,7 +47,7 @@ import numpy as np
 
 from catan_engine.board import Board
 from catan_engine.board.resources import N_RESOURCES
-from catan_engine.board.state import VICTORY_POINTS_TO_WIN, KeyScalar
+from catan_engine.board.state import KeyScalar
 from catan_engine.board.tile import Tile
 from catan_engine.env import (
     N_FLAT,
@@ -287,9 +287,11 @@ def _terminal(env: BatchedCatanEnv) -> bool:
 
 
 def _winner(env: BatchedCatanEnv) -> int | None:
-    vps = np.asarray(env._vps[0])
-    if _terminal(env) and bool((vps >= VICTORY_POINTS_TO_WIN).any()):
-        return int(np.argmax(vps))
+    # The winner is the terminal state's current player (a win happens only on
+    # the winner's own turn), not the VP argmax: an off-turn player may also
+    # sit at 10+ without having won.
+    if _terminal(env):
+        return int(np.asarray(env.board[1].current_player[0]))
     return None
 
 

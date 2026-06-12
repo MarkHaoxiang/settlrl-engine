@@ -56,6 +56,27 @@ def test_resets_turn_local_dev_and_road_state() -> None:
     assert int(state.free_roads[0]) == 0
 
 
+def test_turn_start_win_claim() -> None:
+    # Rulebook p.5: a player at 10+ VP out of turn (a settlement break handing
+    # them Longest Road) wins at the start of their own turn -- the EndTurn
+    # that rotates into them completes the game.
+    layout, st = to_main(make_board(n_players=3))
+    st = st._replace(victory_points=st.victory_points.at[0, 1].set(10))
+    state, result = end_turn_step((layout, st), None)
+    assert int(result[0]) == ActionResult.GAME_COMPLETE.value
+    assert int(state.current_player[0]) == 1
+
+
+def test_rotation_passes_an_off_turn_ten_vp_player() -> None:
+    # Player 2 sits at 10 VP but the rotation reaches player 1 first: the game
+    # continues (only the player whose turn begins can claim).
+    layout, st = to_main(make_board(n_players=3))
+    st = st._replace(victory_points=st.victory_points.at[0, 2].set(10))
+    state, result = end_turn_step((layout, st), None)
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert int(state.current_player[0]) == 1
+
+
 def test_invalid_setup_phase() -> None:
     board = make_board()  # fresh -> SETUP phase, cannot end turn
     before = np.asarray(board[1].current_player)

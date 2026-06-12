@@ -95,7 +95,12 @@ the standalone API stays fully resolved.
   tightened by `road_build_gate` (builder owns ≥ 5 roads) and
   `settlement_break_gate` (a single opponent owns ≥ 2 incident edges — one
   edge only makes the vertex a trail *endpoint*). Gated-off lanes keep their
-  stored holder/length at zero DFS cost.
+  stored holder/length at zero DFS cost. The win check (`current_player_won`)
+  reads the **post-step current player** only — rulebook p.5 lets a player win
+  only during their own turn, so a settlement break crowning a third party
+  with Longest Road (10+ VP) does not end the game; END_TURN's rotation makes
+  the same check the turn-start claim, which is why `end_turn_step` also
+  routes through `resolve_step_b`.
 - `robber.py` — Discard is **one card per action**, repeated until the owed
   count reaches zero: keeps the choice space flat instead of enumerating
   combinatorial whole-hand splits.
@@ -138,7 +143,13 @@ the standalone API stays fully resolved.
 **Testing.** Per-action tests live in `tests/mechanics/actions/`. The trusted
 differential oracle is the plain-Python `catan-reference` package, bridged by
 `tests/conversion.py`; `tests/test_reference_equivalence.py` drives both
-engines with the same action stream and asserts full-state agreement. Gotcha:
+engines with the same action stream and asserts full-state agreement — plus,
+each step, `conversion.assert_legality_match` compares the engine's flat mask
+against reference `is_legal` over the whole table, and the bundle games probe
+random multi-card proposals both ways (a reference-driven stream alone never
+plays a move only the engine thinks legal, and a shared misreading of the
+rulebook is invisible to any differential test — the dev-card play-window bug
+lived in both engines). Gotcha:
 seed expecttest inline expectations that hold board renders with a **raw**
 literal (`r""""""`) — `EXPECTTEST_ACCEPT=1` preserves the seed's rawness,
 while a non-raw seed gets every `\` doubled into unreadable hex art.
@@ -169,6 +180,10 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
   - Auto-reset is a device-side `lax.cond` on `any(done)` — no per-step
     device→host sync, and board generation is only paid when a lane finished.
     `auto_reset=False` freezes finished lanes instead (used by `aec.py`).
+  - A lane is done when its **post-step current player** is at 10 VP
+    (mirroring `awards.current_player_won`: only the turn's owner can win),
+    and the sparse reward credits exactly that player — an off-turn player
+    can sit at 10+ VP in a running lane, so `>= 10` is not "winner".
   - The flat table keeps the full 4-player victim domain at every `n_players`
     (rows naming unseated victims are simply never legal), so the flat action
     space is constant across player counts.

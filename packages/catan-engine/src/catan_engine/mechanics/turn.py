@@ -21,6 +21,7 @@ from catan_engine.board.state import (
     IntScalar,
     tree_select,
 )
+from catan_engine.mechanics import awards
 from catan_engine.mechanics.common import (
     INVALID,
     SUCCESS,
@@ -60,9 +61,16 @@ def end_turn_available(board: Board, params: None = None) -> Mask:
 
 
 def end_turn_step(board: Board, params: None = None) -> tuple[BoardState, ResultCode]:
-    """End the current player's turn per game. Advances to the next player."""
+    """End the current player's turn per game. Advances to the next player.
+
+    Resolves any win: a player who reached 10 VP out of turn claims victory at
+    the start of their own turn (see :func:`awards.current_player_won`).
+    """
     available = _end_turn_avail_b(board[0], board[1], None)
+    state, result = _end_turn_apply_b(board[0], board[1], None, available)
+    # No piece moved, so the award holders cannot change (the recompute inside
+    # is a cheap no-op); only the turn-start win claim is live here.
     return cast(
         "tuple[BoardState, ResultCode]",
-        _end_turn_apply_b(board[0], board[1], None, available),
+        awards.resolve_step_b(state, result, jnp.zeros_like(result, jnp.bool_)),
     )

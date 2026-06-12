@@ -1105,7 +1105,13 @@ class Game:
         self.players[self.current_player].dev_bought_this_turn = _zero_dev()
         self.current_player = (self.current_player + 1) % self.n_players
         self.phase = Phase.ROLL
+        # A player who reached 10 VP out of turn (a settlement break handing
+        # them Longest Road) claims victory at the start of their own turn
+        # (rulebook p.5: you can only win during your turn).
+        self._check_win()
 
     def _check_win(self) -> None:
+        """End the game if the *current* player is at the win threshold; an
+        opponent at 10+ VP keeps waiting (you only win during your own turn)."""
         if self.total_vp(self.current_player) >= VICTORY_POINTS_TO_WIN:
             self.phase = Phase.GAME_OVER

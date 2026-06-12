@@ -15,7 +15,7 @@ from typing import Literal
 import jax
 import numpy as np
 from catan_engine.board import Board
-from catan_engine.board.state import NO_INDEX, VICTORY_POINTS_TO_WIN, GamePhase
+from catan_engine.board.state import NO_INDEX, GamePhase
 from catan_engine.env.aec import CatanAECEnv
 from catan_engine.record import GameRecord, Move
 
@@ -296,10 +296,9 @@ class GameSession:
         """Winning seat once the game is over (None while it's still running)."""
         if not self.terminal():
             return None
-        vps = np.asarray(self.env._env._vps[0])
-        return (
-            int(np.argmax(vps)) if bool((vps >= VICTORY_POINTS_TO_WIN).any()) else None
-        )
+        # A win only happens on the winner's own turn, so the terminal state's
+        # current player is the winner (an off-turn player may also be at 10+).
+        return int(self.env._env._state.current_player[0])
 
     def status(self) -> GameStatusModel:
         """A snapshot of turn flow for the wire model."""

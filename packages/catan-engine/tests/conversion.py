@@ -15,6 +15,8 @@ This module exposes:
 - ``to_reference_single`` / ``state_to_game`` -- single-lane helpers.
 - ``assert_states_match`` -- a full structural comparison of one engine lane
   against its reference game, used by the equivalence test.
+- ``assert_legality_match`` -- engine flat legality vs reference ``is_legal``,
+  row for row over the whole flat table.
 - thin oracle wrappers (``distance_rule_ok``, ``longest_road_length``,
   ``port_ratio``, ``recompute_longest_road``, ...) preserving the names the old
   ``tests/reference.py`` exposed, so the existing differential tests only swap
@@ -40,7 +42,19 @@ from catan_engine.board.layout import (
 from catan_engine.board.resources import N_RESOURCES
 from catan_engine.board.state import NO_INDEX, BoardState, GamePhase
 from catan_engine.mechanics.action import ActionType
-from catan_engine.mechanics.trade import pack_trade
+from catan_engine.mechanics.flat import (
+    FLAT_ATYPE,
+    FLAT_IDX,
+    FLAT_TARGET,
+    N_FLAT,
+    flat_available_b,
+)
+from catan_engine.mechanics.trade import (
+    _COUNT_BITS,
+    _COUNT_MASK,
+    _PARTNER_BITS,
+    pack_trade,
+)
 from catan_reference import board as ref_board
 
 # --- index bridges (engine index -> reference index, via cube coords) -------
@@ -398,6 +412,101 @@ def to_engine_action(action: ref.Action) -> tuple[int, int, int]:
             return int(ActionType.END_TURN), 0, -1
         case _:  # pragma: no cover - the match above is exhaustive over Action
             raise AssertionError(f"unhandled reference action: {action!r}")
+
+
+# ===========================================================================
+# Flat-table row -> reference action, and the legality cross-check
+# ===========================================================================
+
+_FLAT_ATYPE = np.asarray(FLAT_ATYPE)
+_FLAT_IDX = np.asarray(FLAT_IDX)
+_FLAT_TARGET = np.asarray(FLAT_TARGET)
+
+
+def _unpack_counts(packed: int) -> tuple[int, ...]:
+    return tuple(
+        (packed >> (_COUNT_BITS * r)) & _COUNT_MASK for r in range(N_RESOURCES)
+    )
+
+
+def flat_row_action(row: int, game: ref.Game) -> ref.Action:
+    """The reference action named by flat-table row ``row``.
+
+    Stochastic outcome fields are left unset (``is_legal`` ignores them). A
+    Discard row names the first owing player, matching the engine's acting
+    player during DISCARD (player 0 when nobody owes: the phase gate makes the
+    row illegal on both sides regardless).
+    """
+    atype = ActionType(int(_FLAT_ATYPE[row]))
+    idx = int(_FLAT_IDX[row])
+    target = int(_FLAT_TARGET[row])
+    victim = None if target == -1 else target  # -1 = steal from no one
+    match atype:
+        case ActionType.SETUP_SETTLEMENT:
+            return ref.SetupSettlement(_ENG2REF_VERTEX[idx])
+        case ActionType.SETUP_ROAD:
+            return ref.SetupRoad(_ENG2REF_EDGE[idx])
+        case ActionType.ROLL_DICE:
+            return ref.Roll()
+        case ActionType.DISCARD:
+            owing = next(
+                (p for p in range(game.n_players) if game.pending_discard[p] > 0), 0
+            )
+            return ref.Discard(owing, ref.Resource(idx))
+        case ActionType.MOVE_ROBBER:
+            return ref.MoveRobber(_ENG2REF_TILE[idx], victim)
+        case ActionType.BUILD_ROAD:
+            return ref.BuildRoad(_ENG2REF_EDGE[idx])
+        case ActionType.BUILD_SETTLEMENT:
+            return ref.BuildSettlement(_ENG2REF_VERTEX[idx])
+        case ActionType.BUILD_CITY:
+            return ref.BuildCity(_ENG2REF_VERTEX[idx])
+        case ActionType.BUY_DEVELOPMENT_CARD:
+            return ref.BuyDevelopmentCard()
+        case ActionType.PLAY_KNIGHT:
+            return ref.PlayKnight(_ENG2REF_TILE[idx], victim)
+        case ActionType.PLAY_ROAD_BUILDING:
+            return ref.PlayRoadBuilding()
+        case ActionType.PLAY_YEAR_OF_PLENTY:
+            return ref.PlayYearOfPlenty(ref.Resource(idx), ref.Resource(target))
+        case ActionType.PLAY_MONOPOLY:
+            return ref.PlayMonopoly(ref.Resource(idx))
+        case ActionType.MARITIME_TRADE:
+            return ref.MaritimeTrade(ref.Resource(idx), ref.Resource(target))
+        case ActionType.PROPOSE_TRADE:
+            return ref.ProposeTrade(
+                partner=target & ((1 << _PARTNER_BITS) - 1),
+                give=_unpack_counts(idx),
+                receive=_unpack_counts(target >> _PARTNER_BITS),
+            )
+        case ActionType.ACCEPT_TRADE:
+            return ref.AcceptTrade()
+        case ActionType.REJECT_TRADE:
+            return ref.RejectTrade()
+        case ActionType.END_TURN:
+            return ref.EndTurn()
+    raise AssertionError(f"unhandled action type: {atype!r}")  # pragma: no cover
+
+
+def assert_legality_match(board: Board, game: ref.Game, b: int = 0) -> None:
+    """Assert the engine's flat legality mask equals reference ``is_legal``
+    row for row.
+
+    The differential playout only ever drives reference-legal actions, so on
+    its own it cannot see an engine that is *more* permissive than the
+    reference, nor one that rejects some reference-legal moves while accepting
+    another. This closes both directions for every move the flat table names
+    (arbitrary trade bundles, which the table cannot name, are probed by the
+    bundle fuzz in ``test_reference_equivalence``).
+    """
+    mask = np.asarray(flat_available_b(board[0], board[1])[b])
+    for row in range(N_FLAT):
+        action = flat_row_action(row, game)
+        expected = game.is_legal(action)
+        assert bool(mask[row]) == expected, (
+            f"legality mismatch on flat row {row} ({action!r}) in phase "
+            f"{game.phase}: engine={bool(mask[row])} reference={expected}"
+        )
 
 
 # ===========================================================================

@@ -185,12 +185,17 @@ def recompute_awards(
     return recompute_largest_army(recompute_longest_road(state, longest_road_needed))
 
 
-def _any_player_won(state: BoardState) -> BoolScalar:
-    """True if any player's total VP has reached the win threshold."""
-    vps = jnp.stack(
-        [player_total_vp(state, jnp.int32(p)) for p in range(state.n_players)]
-    )
-    return jnp.any(vps >= VICTORY_POINTS_TO_WIN)
+def current_player_won(state: BoardState) -> BoolScalar:
+    """True if the state's current player has reached the win threshold.
+
+    The rulebook (p.5) only lets a player win *during their own turn*: an
+    opponent crowned with Longest Road by a settlement break may sit at 10+ VP
+    while play continues. Checking the *post-step* current player implements
+    this exactly -- END_TURN's rotation makes it the turn-start claim of an
+    off-turn 10.
+    """
+    cur = state.current_player.astype(jnp.int32)
+    return player_total_vp(state, cur) >= VICTORY_POINTS_TO_WIN
 
 
 def resolve_step(
@@ -201,14 +206,16 @@ def resolve_step(
     """Stage 2 of an action: recompute awards, then resolve the win.
 
     Recomputes the Longest Road / Largest Army holders for the post-core state
-    and upgrades a ``SUCCESS`` result to ``GAME_COMPLETE`` when the move brought a
-    player to the win threshold (an ``INVALID`` move left the board unchanged, so
-    the recompute is a no-op and the code is preserved). ``longest_road_needed``
-    gates the Longest Road recompute (see :func:`recompute_longest_road`); pass
-    False for actions that cannot change any road length.
+    and upgrades a ``SUCCESS`` result to ``GAME_COMPLETE`` when the move left
+    the (post-step) current player at the win threshold (see
+    :func:`current_player_won`; an ``INVALID`` move left the board unchanged,
+    so the recompute is a no-op and the code is preserved).
+    ``longest_road_needed`` gates the Longest Road recompute (see
+    :func:`recompute_longest_road`); pass False for actions that cannot change
+    any road length.
     """
     state = recompute_awards(state, longest_road_needed)
-    won = _any_player_won(state)
+    won = current_player_won(state)
     upgraded = jnp.where((result == SUCCESS) & won, GAME_COMPLETE, result)
     return state, upgraded
 

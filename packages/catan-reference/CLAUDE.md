@@ -51,6 +51,11 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   pre-roll) but may also be *deferred* past the roll — the rulebook says
   place immediately, but forcing that could stall a game whose owner has no
   placeable edge, so rolling stays legal while free roads are owed.
+- **You can only win during your own turn** (rulebook p.5, `_check_win`): the
+  win check reads the *current* player only, and `_apply_end_turn` re-checks
+  after rotating — a player who reached 10 VP out of turn (a settlement break
+  handing them Longest Road) claims victory at the start of their next turn,
+  and play continues until then.
 - **Domestic trade carries arbitrary bundles**
   (`ProposeTrade(partner, give, receive)` with per-resource count tuples →
   `AcceptTrade` / `RejectTrade`, through `Phase.TRADE_RESPONSE`), matching

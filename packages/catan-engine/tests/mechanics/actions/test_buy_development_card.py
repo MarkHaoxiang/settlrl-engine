@@ -49,6 +49,16 @@ def test_forced_card_type(buy_board: Board) -> None:
     assert int(state.dev_deck[0, 1]) == before_deck[1] - 1
 
 
+def test_third_party_at_threshold_does_not_complete(buy_board: Board) -> None:
+    # Only the current player can win (rulebook p.5): an opponent already
+    # sitting at 10 VP (crowned by a settlement break on an earlier turn)
+    # leaves the buyer's successful action SUCCESS, and play continues.
+    layout, st = buy_board
+    st = st._replace(victory_points=st.victory_points.at[0, 1].set(10))
+    _, result = buy_development_card_step((layout, st), 2)  # a non-VP card
+    assert int(result[0]) == ActionResult.SUCCESS.value
+
+
 def test_forced_out_of_stock_is_invalid(buy_board: Board) -> None:
     layout, st = buy_board
     st = st._replace(dev_deck=st.dev_deck.at[0, 1].set(0))

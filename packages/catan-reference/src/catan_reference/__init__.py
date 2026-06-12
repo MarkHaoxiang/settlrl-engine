@@ -36,6 +36,7 @@ from catan_reference.game import (
     SetupSettlement,
 )
 from catan_reference.types import (
+    RESOURCES,
     Building,
     DevCard,
     Phase,
@@ -47,6 +48,7 @@ __all__ = [
     "N_EDGES",
     "N_TILES",
     "N_VERTICES",
+    "RESOURCES",
     "AcceptTrade",
     "Action",
     "BuildCity",

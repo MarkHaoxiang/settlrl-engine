@@ -111,17 +111,15 @@ def _codec(
 
 
 def _terminal(state: BoardState) -> BoolScalar:
-    """Whether any player has won (single game)."""
-    players = jnp.arange(state.n_players)
-    totals = jax.vmap(lambda p: player_total_vp(state, p))(players)
-    return jnp.any(totals >= VICTORY_POINTS_TO_WIN)
+    """Whether the game is over: its current player has won (only the turn's
+    owner can win — mirrors the engine's ``awards.current_player_won``)."""
+    cur = state.current_player.astype(jnp.int32)
+    return player_total_vp(state, cur) >= VICTORY_POINTS_TO_WIN
 
 
 def _winner(state: BoardState) -> IntScalar:
-    """The player with the highest VP total (single game)."""
-    players = jnp.arange(state.n_players)
-    totals = jax.vmap(lambda p: player_total_vp(state, p))(players)
-    return jnp.argmax(totals)
+    """The winner of a terminal state: its current player."""
+    return state.current_player.astype(jnp.int32)
 
 
 class _Transition(NamedTuple):
