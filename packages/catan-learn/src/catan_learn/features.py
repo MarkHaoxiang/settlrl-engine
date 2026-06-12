@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-from catan_agents.shared.value import tile_pips, vertex_pips
+from catan_agents.internal.feature_engineering import tile_pips, vertex_pips
 from catan_engine.board.layout import (
     EDGE_V,
     N_TILES,

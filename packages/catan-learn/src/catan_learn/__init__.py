@@ -1,8 +1,8 @@
 """Learned value and policy functions for catan-agents.
 
 Networks plug into the agents through their existing seams — a value model is
-a :class:`~catan_agents.shared.policy.ValueFunction` and a policy model a
-:class:`~catan_agents.shared.policy.PolicyPrior` — so every search agent
+a :class:`~catan_agents.policy.ValueFunction` and a policy model a
+:class:`~catan_agents.policy.PolicyPrior` — so every search agent
 consumes them unchanged.
 """
 

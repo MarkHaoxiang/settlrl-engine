@@ -3,18 +3,14 @@ policies plus stateful plain-Python planners."""
 
 from catan_engine.board.resources import N_PLAYERS
 
+from catan_agents.baselines import random_policy
+from catan_agents.evaluate import EvalResult, evaluate
+from catan_agents.greedy import greedy_policy
 from catan_agents.planner import make_planner
-from catan_agents.search import (
-    lookahead_policy,
-    make_greedy,
-    make_mcts,
-    mcts_policy,
-)
-from catan_agents.shared import (
+from catan_agents.policy import (
     AgentSpec,
     BeliefPolicy,
     BeliefSpec,
-    EvalResult,
     FlatAction,
     FlatMask,
     GameAgent,
@@ -23,15 +19,15 @@ from catan_agents.shared import (
     PolicyPrior,
     StatefulPolicy,
     StatefulSpec,
-    Value,
-    ValueFunction,
-    evaluate,
-    greedy_policy,
-    heuristic_value,
-    make_heuristic,
-    random_policy,
-    sample_world,
 )
+from catan_agents.sample import sample_world
+from catan_agents.search import (
+    lookahead_policy,
+    make_greedy,
+    make_mcts,
+    mcts_policy,
+)
+from catan_agents.value import Value, ValueFunction, heuristic_value, make_heuristic
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 

@@ -1,7 +1,7 @@
 """Plain-numpy point of view: one observation unpacked for host-side logic.
 
 ``Pov`` unpacks one seat's host-fetched observation (see
-:data:`~catan_agents.shared.policy.HostObservation`) plus its legality mask,
+:data:`~catan_agents.policy.HostObservation`) plus its legality mask,
 and the module-level tables
 restate the static board graph (vertex adjacency, incident tiles, the flat
 action table) in host-side form. Everything here is read-only convenience for
@@ -31,19 +31,19 @@ from catan_engine.board.resources import (
 from catan_engine.board.state import CITY, GamePhase
 from catan_engine.env import ActionType
 
-from catan_agents.shared.policy import HostFlatMask, HostObservation
-from catan_agents.shared.rows import (
+from catan_agents.internal.rows import (
     ROW_IDX as ROW_IDX,
 )
-from catan_agents.shared.rows import (
+from catan_agents.internal.rows import (
     ROW_TARGET as ROW_TARGET,
 )
-from catan_agents.shared.rows import (
+from catan_agents.internal.rows import (
     ROWS_OF_TYPE as ROWS_OF_TYPE,
 )
-from catan_agents.shared.rows import (
+from catan_agents.internal.rows import (
     flat_row as flat_row,
 )
+from catan_agents.policy import HostFlatMask, HostObservation
 
 # -- Static board graph, host-side ------------------------------------------
 
@@ -73,7 +73,7 @@ VERTEX_TILES: tuple[tuple[int, ...], ...] = tuple(
 """Tiles cornered by each vertex."""
 
 # The flat-action table's host decode (ROW_IDX / ROW_TARGET / ROWS_OF_TYPE /
-# flat_row) is re-exported above from ``catan_agents.shared.rows``.
+# flat_row) is re-exported above from ``catan_agents.internal.rows``.
 
 # Build costs in resource order [sheep, wheat, wood, brick, ore].
 COST_ROAD: np.ndarray = np.asarray(ROAD_COST, dtype=np.int64)

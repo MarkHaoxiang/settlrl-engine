@@ -39,7 +39,7 @@ from catan_agents.planner.pov import (
 )
 from catan_agents.planner.tactic import Tactic
 from catan_agents.planner.tree import Blackboard, Node, Selector
-from catan_agents.shared.policy import (
+from catan_agents.policy import (
     GameAgent,
     HostFlatMask,
     HostObservation,

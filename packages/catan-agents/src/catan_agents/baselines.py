@@ -5,7 +5,7 @@ from __future__ import annotations
 from catan_engine.board.state import KeyScalar
 from catan_engine.env import Observation, random_flat
 
-from catan_agents.shared.policy import FlatAction, FlatMask
+from catan_agents.policy import FlatAction, FlatMask
 
 
 def random_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatAction:

@@ -66,6 +66,7 @@ Future tools (tournaments, ...) will hang off the same entry point as subcommand
 
 ## Layout
 
-- `catan_agents.shared` — the seat protocols, value functions, world sampling, observation baselines, and `evaluate`.
+- Top level — the API: the seat protocols (`policy`), value functions (`value`), world sampling (`sample`), `evaluate`, and the scripted agents (`baselines`, `greedy`).
+- `catan_agents.internal` — the helpers behind them: the flat-table decode and the hand-engineered, weight-free board features (every agent's weights live with the agent).
 - `catan_agents.search` — the model-based agents (`lookahead`, `mcts`).
 - `catan_agents.planner` — the stateful decision-tree toolkit (nodes, plans, the numpy point of view) and the `planner` agent built on it.

@@ -10,14 +10,15 @@ from jaxtyping import install_import_hook
 
 install_import_hook(
     [
-        "catan_agents.shared.policy",
-        "catan_agents.shared.rows",
-        "catan_agents.shared.value",
-        "catan_agents.shared.baselines",
-        "catan_agents.shared.greedy",
-        "catan_agents.shared.sample",
-        "catan_agents.shared.evaluate",
-        "catan_agents.search.greedy",
+        "catan_agents.policy",
+        "catan_agents.internal.rows",
+        "catan_agents.internal.feature_engineering",
+        "catan_agents.value",
+        "catan_agents.baselines",
+        "catan_agents.greedy",
+        "catan_agents.sample",
+        "catan_agents.evaluate",
+        "catan_agents.search.lookahead",
         "catan_agents.search.mcts",
         "catan_agents.planner.pov",
         "catan_agents.planner.tree",

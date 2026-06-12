@@ -17,11 +17,11 @@ from catan_engine.mechanics.action import (
 )
 from catan_engine.mechanics.trade import _PARTNER_BITS
 
-from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
-from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
-from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
-from catan_agents.shared.sample import sample_world
-from catan_agents.shared.value import ValueFunction, heuristic_value
+from catan_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.internal.rows import ROW_TYPE as _ROW_TYPE
+from catan_agents.policy import BeliefPolicy, FlatAction, FlatMask
+from catan_agents.sample import sample_world
+from catan_agents.value import ValueFunction, heuristic_value
 
 # The ProposeTrade rows and their partners (the low bits of the packed
 # target — see trade.pack_trade): a proposal's successor is material-neutral
@@ -55,7 +55,7 @@ def make_greedy(
     """One-step lookahead: apply every legal action and argmax ``value``.
 
     The view is first made concrete with one
-    :func:`~catan_agents.shared.sample.sample_world` draw, so stochastic
+    :func:`~catan_agents.sample.sample_world` draw, so stochastic
     successors — dice, steals, dev-card draws — are the policy's own samples
     over a world consistent with what the player knows.
 

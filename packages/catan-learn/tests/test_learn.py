@@ -5,10 +5,10 @@ import pathlib
 import jax
 import jax.numpy as jnp
 import numpy as np
-from catan_agents.search.greedy import make_greedy
+from catan_agents.policy import PolicyPrior
+from catan_agents.search.lookahead import make_greedy
 from catan_agents.search.mcts import make_mcts
-from catan_agents.shared.policy import PolicyPrior
-from catan_agents.shared.value import ValueFunction
+from catan_agents.value import ValueFunction
 from catan_engine.board import Board, make_board
 from catan_engine.env import BatchedCatanEnv
 from catan_learn import (

@@ -35,6 +35,10 @@ from catan_engine.env import (
 from catan_engine.mechanics.action import ActionType, apply_action
 from catan_engine.mechanics.common import agent_selection_single
 
+from catan_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.internal.rows import ROW_TYPE as _ROW_TYPE
+from catan_agents.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
+from catan_agents.sample import sample_world
 from catan_agents.search.mcts import (
     _ILLEGAL,
     _NO_PROPOSE,
@@ -44,11 +48,7 @@ from catan_agents.search.mcts import (
     _terminal,
     _winner,
 )
-from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
-from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
-from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
-from catan_agents.shared.sample import sample_world
-from catan_agents.shared.value import Value, ValueFunction, heuristic_value
+from catan_agents.value import Value, ValueFunction, heuristic_value
 
 _N_OUTCOMES = 11  # two-dice sums 2..12
 

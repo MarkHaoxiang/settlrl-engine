@@ -14,8 +14,8 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-from catan_agents.shared.policy import PolicyPrior
-from catan_agents.shared.value import Value, ValueFunction
+from catan_agents.policy import PolicyPrior
+from catan_agents.value import Value, ValueFunction
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import BoardState, IntScalar, KeyScalar
 from catan_engine.env import N_FLAT

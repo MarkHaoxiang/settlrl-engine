@@ -19,7 +19,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 from catan_agents import POLICIES, AgentSpec, BeliefSpec, ObservationSpec
-from catan_agents.shared.policy import BeliefPolicy, Policy, StatefulPolicy
+from catan_agents.policy import BeliefPolicy, Policy, StatefulPolicy
 from catan_engine.board.state import KeyScalar
 from catan_engine.env import BatchedCatanEnv, Observation
 

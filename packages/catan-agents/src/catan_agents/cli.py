@@ -10,9 +10,9 @@ from collections.abc import Sequence
 from typing import NamedTuple
 
 from catan_agents import POLICIES
-from catan_agents.shared.evaluate import evaluate
-from catan_agents.shared.policy import BeliefSpec, ObservationSpec, StatefulSpec
-from catan_agents.shared.value import make_heuristic
+from catan_agents.evaluate import evaluate
+from catan_agents.policy import BeliefSpec, ObservationSpec, StatefulSpec
+from catan_agents.value import make_heuristic
 
 
 class CompareResult(NamedTuple):

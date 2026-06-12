@@ -1,13 +1,17 @@
-"""A scripted greedy baseline: fixed action-type priorities, pip-weighted targets."""
+"""The scripted greedy agent: a weighting of the hand-engineered features.
+
+The features (target build, needs/surplus, port ratios, pips) live in
+``internal.feature_engineering``; this module is the *weights* — the
+action-type tier table and the per-row bonus coefficients — and the argmax.
+"""
 
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-from catan_engine.board.dev_cards import DEV_CARD_COST
-from catan_engine.board.layout import EDGE_V, N_TILES, N_VERTICES, PORT_V
-from catan_engine.board.resources import CITY_COST, N_RESOURCES, SETTLEMENT_COST
-from catan_engine.board.state import SETTLEMENT, KeyScalar
+from catan_engine.board.layout import N_TILES, N_VERTICES
+from catan_engine.board.resources import N_RESOURCES
+from catan_engine.board.state import KeyScalar
 from catan_engine.env import (
     N_ACTION_TYPES,
     N_FLAT,
@@ -15,15 +19,15 @@ from catan_engine.env import (
     Observation,
 )
 
-from catan_agents.shared.policy import FlatAction, FlatMask
-from catan_agents.shared.rows import ROW_PARAMS, ROW_TYPE
-from catan_agents.shared.value import tile_pips, vertex_pips
+from catan_agents.internal.feature_engineering import (
+    maritime_ratio,
+    target_build,
+    tile_pips,
+    vertex_pips,
+)
+from catan_agents.internal.rows import ROW_PARAMS, ROW_TYPE
+from catan_agents.policy import FlatAction, FlatMask
 
-_SETTLEMENT_COST = jnp.asarray(SETTLEMENT_COST, jnp.float32)
-_CITY_COST = jnp.asarray(CITY_COST, jnp.float32)
-_DEV_COST = jnp.asarray(DEV_CARD_COST, jnp.float32)
-
-_ROW_TYPE = ROW_TYPE
 _ROW_IDX = ROW_PARAMS.idx
 _ROW_TARGET = ROW_PARAMS.target
 
@@ -56,24 +60,23 @@ _TIER: dict[ActionType, float] = {
     ActionType.PROPOSE_TRADE: 0.0,
 }
 TIER_SCORES = jnp.asarray([_TIER[ActionType(t)] for t in range(N_ACTION_TYPES)])[
-    _ROW_TYPE
+    ROW_TYPE
 ]
 """Per-row tier score — also mcts's root-prior table (scaled there)."""
-_BASE = TIER_SCORES
 
 # Row groups whose bonus is target-dependent.
 _VERTEX_BUILD = (
-    (_ROW_TYPE == ActionType.SETUP_SETTLEMENT)
-    | (_ROW_TYPE == ActionType.BUILD_SETTLEMENT)
-    | (_ROW_TYPE == ActionType.BUILD_CITY)
+    (ROW_TYPE == ActionType.SETUP_SETTLEMENT)
+    | (ROW_TYPE == ActionType.BUILD_SETTLEMENT)
+    | (ROW_TYPE == ActionType.BUILD_CITY)
 )
-_ROBBER_MOVE = (_ROW_TYPE == ActionType.MOVE_ROBBER) | (
-    _ROW_TYPE == ActionType.PLAY_KNIGHT
+_ROBBER_MOVE = (ROW_TYPE == ActionType.MOVE_ROBBER) | (
+    ROW_TYPE == ActionType.PLAY_KNIGHT
 )
-_DISCARD = _ROW_TYPE == ActionType.DISCARD
-_MARITIME = _ROW_TYPE == ActionType.MARITIME_TRADE
-_ACCEPT = _ROW_TYPE == ActionType.ACCEPT_TRADE
-_REJECT = _ROW_TYPE == ActionType.REJECT_TRADE
+_DISCARD = ROW_TYPE == ActionType.DISCARD
+_MARITIME = ROW_TYPE == ActionType.MARITIME_TRADE
+_ACCEPT = ROW_TYPE == ActionType.ACCEPT_TRADE
+_REJECT = ROW_TYPE == ActionType.REJECT_TRADE
 
 _RES_IDX = jnp.clip(_ROW_IDX, 0, N_RESOURCES - 1)
 _RES_TARGET = jnp.clip(_ROW_TARGET, 0, N_RESOURCES - 1)
@@ -84,9 +87,7 @@ def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatActio
 
     Priorities: city > settlement > dev card > road > play dev > everything
     forced (roll/setup road/discard/robber/trade response) > end turn. Trade
-    sense comes from a target build — city with a settlement to upgrade, else
-    a settlement with a spot buildable right now, else a dev card — whose
-    missing cards are the *needs* and whose excess holdings the *surplus*:
+    sense comes from the target-build features (needs and surplus):
 
     - maritime trades run only when productive (the bought card is needed,
       the sold cards are pure surplus), preferring the scarcest need;
@@ -101,38 +102,9 @@ def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatActio
     v_pips = vertex_pips(obs["tile_number"])
     t_pips = tile_pips(obs["tile_number"])
     held = obs["self_resources"].astype(jnp.float32)
-    me = obs["self"].astype(jnp.uint8) + 1
 
-    # The target build: the next thing worth saving for, by the build
-    # priorities above (a settlement spot must be buildable right now —
-    # empty, distance rule, touching an own road).
-    owner = obs["vertex_owner"]
-    has_settlement = jnp.any((owner == me) & (obs["vertex_type"] == SETTLEMENT))
-    own_road = obs["edge_road"] == me
-    occ = owner > 0
-    u, v = EDGE_V[:, 0], EDGE_V[:, 1]
-    nb_occ = jnp.zeros((N_VERTICES,), bool).at[u].max(occ[v]).at[v].max(occ[u])
-    touched = jnp.zeros((N_VERTICES,), bool).at[u].max(own_road).at[v].max(own_road)
-    has_spot = jnp.any(~occ & ~nb_occ & touched)
-    cost = jnp.where(
-        has_settlement,
-        _CITY_COST,
-        jnp.where(has_spot, _SETTLEMENT_COST, _DEV_COST),
-    )
-    need = jnp.maximum(cost - held, 0.0)
-    surplus = jnp.maximum(held - cost, 0.0)
-
-    # Own maritime ratio per resource (2 at the matching port, 3 with a
-    # generic port, else 4) — what a productive sale must come out of surplus.
-    port_alloc = obs["port_allocation"].astype(jnp.int32)
-    on_port = (owner[PORT_V] == me).any(axis=1)
-    has_2to1 = (
-        jnp.zeros((N_RESOURCES,), bool)
-        .at[port_alloc % N_RESOURCES]
-        .max(on_port & (port_alloc < N_RESOURCES))
-    )
-    has_3to1 = jnp.any(on_port & (port_alloc == N_RESOURCES))
-    ratio = jnp.where(has_2to1, 2.0, jnp.where(has_3to1, 3.0, 4.0))
+    _, need, surplus = target_build(obs)
+    ratio = maritime_ratio(obs)
 
     # A maritime row sells _RES_IDX for _RES_TARGET: productive iff the buy is
     # needed and the sale never dips into the target's own ingredients. The
@@ -170,5 +142,5 @@ def greedy_policy(key: KeyScalar, obs: Observation, mask: FlatMask) -> FlatActio
         ),
     )
     noise = jax.random.uniform(key, (N_FLAT,))
-    score = _BASE + bonus + noise
+    score = TIER_SCORES + bonus + noise
     return jnp.argmax(jnp.where(mask, score, -jnp.inf))

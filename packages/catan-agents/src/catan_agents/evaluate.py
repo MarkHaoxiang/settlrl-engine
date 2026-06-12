@@ -21,7 +21,7 @@ from catan_engine.env.batched import Actor, AgentSelectionArray
 from catan_engine.mechanics.flat import FlatMaskArray
 from jaxtyping import Array, Float, Int
 
-from catan_agents.shared.policy import (
+from catan_agents.policy import (
     AgentSpec,
     BeliefSpec,
     GameAgent,

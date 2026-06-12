@@ -34,7 +34,7 @@ from catan_agents import (
     StatefulSpec,
     sample_world,
 )
-from catan_agents.shared.evaluate import _actor, _picker
+from catan_agents.evaluate import _actor, _picker
 from catan_engine.belief import BeliefView
 from catan_engine.env import BatchedCatanEnv, Observation
 

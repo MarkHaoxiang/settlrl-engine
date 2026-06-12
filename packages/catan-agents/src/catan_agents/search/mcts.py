@@ -26,12 +26,12 @@ from catan_engine.mechanics.common import agent_selection_single, player_total_v
 from catan_engine.mechanics.dice import distribute_resources
 from jaxtyping import Array, Bool, Float, Int, UInt8
 
-from catan_agents.shared.greedy import TIER_SCORES
-from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
-from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
-from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
-from catan_agents.shared.sample import sample_world
-from catan_agents.shared.value import Value, ValueFunction, heuristic_value
+from catan_agents.greedy import TIER_SCORES
+from catan_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.internal.rows import ROW_TYPE as _ROW_TYPE
+from catan_agents.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
+from catan_agents.sample import sample_world
+from catan_agents.value import Value, ValueFunction, heuristic_value
 
 _ILLEGAL = -1e9  # prior logit for illegal moves
 
@@ -191,7 +191,7 @@ def make_mcts(
     """Gumbel-MuZero search using the engine itself as the dynamics model.
 
     Searches ``num_worlds * num_futures`` independent trees per move —
-    ``num_worlds`` :func:`~catan_agents.shared.sample.sample_world`
+    ``num_worlds`` :func:`~catan_agents.sample.sample_world`
     determinizations of the view, ``num_futures`` chance re-keyings of each —
     and averages their improved-policy weights before the final masked
     argmax. ``value`` drives the leaf evaluation (``tanh(value /

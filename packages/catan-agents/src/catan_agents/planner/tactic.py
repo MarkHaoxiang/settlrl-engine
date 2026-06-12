@@ -29,11 +29,11 @@ from catan_engine.env import ActionType
 from catan_engine.mechanics.action import ActionParams, apply_action
 from catan_engine.mechanics.flat import flat_available_for
 
+from catan_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.internal.rows import ROW_TYPE as _ROW_TYPE
 from catan_agents.planner.pov import Pov
-from catan_agents.shared.policy import FlatMask
-from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
-from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
-from catan_agents.shared.value import heuristic_value
+from catan_agents.policy import FlatMask
+from catan_agents.value import heuristic_value
 
 _DEV_TOTAL = int(sum(DEV_CARD_COUNTS))
 _ROAD_COST = np.asarray(ROAD_COST, np.int64)

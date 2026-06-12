@@ -1,7 +1,7 @@
 # catan-agents — internal notes
 
 Catan agents over `catan-engine`'s public flat-action seam: pure-JAX
-policies (`shared/`, `search/`) plus stateful plain-Python planners
+policies plus stateful plain-Python planners
 (`planner/`).
 
 **No agent assumes full observability.** Model-based agents consume the
@@ -12,7 +12,19 @@ tracked belief is exact on resources (tested in the engine), so "2p is
 perfect-info" is a property of the data, not an API boundary — the same
 agents run at 2–4 players with beliefs of varying sharpness.
 
-## shared/
+## Layout
+
+The API layer is the top-level modules — `policy.py` (protocols/specs),
+`value.py` (the value protocol and the heuristic's *weights*), `evaluate.py`,
+`sample.py`, the registry in `__init__.py`, `cli.py` — plus the agents
+(`baselines.py`, `greedy.py`, `search/`, `planner/`). `internal/` holds the
+helpers behind them: `rows.py` (the flat-table decode) and
+`feature_engineering.py` (the weight-free hand-engineered features —
+`board_features` for the value terms, `target_build` / `maritime_ratio` for
+greedy's trade sense). Weights always live with an agent or in `value.py`;
+features never carry them.
+
+## API layer and agents
 
 - `rows.py` — the flat action table decoded once (device `ROW_TYPE` /
   `ROW_PARAMS` for the vmapped sweeps; host `ROW_IDX` / `ROW_TARGET` /
@@ -82,7 +94,8 @@ agents run at 2–4 players with beliefs of varying sharpness.
   calibration (183k self-play positions): P(win) = σ(0.053·v), phase-stable —
   but the calibrated `value_scale≈38` *lost* to the sharper hand-picked 20 in
   mcts (44.5%, n=200): honest calibration is not the best search temperature.
-- `greedy.py` — scripted policy: a static per-row tier score plus small
+- `greedy.py` — the scripted agent: its tier table and bonus coefficients
+  over the obs-side features. A static per-row tier score plus small
   observation bonuses. Invariant: tier gaps (≥ 100) exceed every bonus range
   (|bonus| < 50), so bonuses only reorder within a tier; types sharing a tier
   are phase-disjoint, dominated, or deliberately bonus-decided. Two sanctioned
@@ -96,8 +109,9 @@ agents run at 2–4 players with beliefs of varying sharpness.
   and (a need advances or it consolidates toward scarcity). The discard
   prefers surplus before most-held. Still deliberately simple: never offers
   a trade (an obs-only policy has no rejected-offer memory), ignores whose
-  production the robber blocks. `_BASE` is also mcts's root-prior tier table
-  — the maritime gate lives in the bonus channel, so priors are unchanged.
+  production the robber blocks. `TIER_SCORES` is also mcts's root-prior
+  table — the maritime gate lives in the bonus channel, so priors are
+  unchanged.
 - `evaluate.py` — fused driver over the engine's `rollout(actor=...)` seam:
   every seat's vmapped agent picks in every lane each step inside the scan and
   the acting seat's pick is kept — n_seats policy evals per step, fine for
@@ -126,7 +140,7 @@ in-tree opponent sees the sampled world (strategy fusion) — count-only value
 terms blunt what it can exploit. smcts removes the first for dice and dev
 draws (true chance nodes); the second is inherent to PIMC.
 
-- `greedy.py` — one-step lookahead: all 662 successors in one
+- `lookahead.py` — one-step lookahead: all 662 successors in one
   `vmap(apply_action)`, valued and masked-argmaxed. Trade proposals are the
   one material-neutral successor, so they're scored by their *accepted*
   outcome instead, gated on a partner model (the same value from the
@@ -230,7 +244,7 @@ value-free before). `pov.py` is the host-side toolkit — one `Pov` per
 decision wrapping the host-fetched observation, the static board graph
 re-stated as numpy/python tables (`VERTEX_*`, `EDGE_ENDPOINTS`,
 `TILE_CORNERS`), and the flat table's host decode (`flat_row`,
-`ROWS_OF_TYPE`, re-exported from `shared.rows`). `tree.py` is the framework
+`ROWS_OF_TYPE`, re-exported from `internal.rows`). `tree.py` is the framework
 (`Node` / `Selector` / `Plan` / `Blackboard`); `goals.py` the goal economics
 (`plan_candidates` / `choose_plan` and their scoring weights); `tactic.py`
 the lookahead seam; `agent.py` the tree's nodes and the shipped `planner`
