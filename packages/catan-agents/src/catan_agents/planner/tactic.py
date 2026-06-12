@@ -36,6 +36,9 @@ from catan_agents.shared.value import heuristic_value
 _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 _DEV_TOTAL = int(sum(DEV_CARD_COUNTS))
 _ROAD_COST = np.asarray(ROAD_COST, np.int64)
+_BUY_DEV_ROW = int(
+    np.flatnonzero(np.asarray(_ROW_TYPE) == int(ActionType.BUY_DEVELOPMENT_CARD))[0]
+)
 
 
 def _u8(x: object) -> jax.Array:
@@ -127,6 +130,59 @@ def _after(
     return mask2, _successor_values(layout, succ, player, mask2)
 
 
+_ROLL_OUTCOMES = jnp.arange(2, 13, dtype=jnp.int32)
+_ROLL_WEIGHTS = jnp.asarray([1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1], jnp.float32) / 36.0
+_ROLL = jnp.int32(ActionType.ROLL_DICE)
+_BUY = jnp.int32(ActionType.BUY_DEVELOPMENT_CARD)
+_ZERO = jnp.int32(0)
+
+
+@jax.jit
+def _roll_expectation(
+    layout: BoardLayout, state: BoardState, player: jax.Array
+) -> jax.Array:
+    """Exact expectation of the value after this state's pending roll, over
+    the 11 forced two-dice outcomes (the engine's chance-node seam)."""
+
+    def one(r: jax.Array) -> jax.Array:
+        succ, _ = apply_action(
+            layout, state, _ROLL, ActionParams(idx=r, target=_ZERO), jnp.bool_(True)
+        )
+        return heuristic_value(layout, succ, player)
+
+    out: jax.Array = (jax.vmap(one)(_ROLL_OUTCOMES) * _ROLL_WEIGHTS).sum()
+    return out
+
+
+@jax.jit
+def _roll_expectation_after(
+    layout: BoardLayout, state: BoardState, row: jax.Array, player: jax.Array
+) -> jax.Array:
+    """``_roll_expectation`` of the state one (legal) row later."""
+    params = ActionParams(idx=_ROW_PARAMS.idx[row], target=_ROW_PARAMS.target[row])
+    succ, _ = apply_action(layout, state, _ROW_TYPE[row], params, jnp.bool_(True))
+    out: jax.Array = _roll_expectation(layout, succ, player)
+    return out
+
+
+@jax.jit
+def _buy_dev_expectation(
+    layout: BoardLayout, state: BoardState, player: jax.Array
+) -> jax.Array:
+    """Deck-weighted expectation over the five forced dev draws (the second
+    chance-node seam), replacing the sweep's single-sample draw."""
+
+    def one(t: jax.Array) -> jax.Array:
+        succ, _ = apply_action(
+            layout, state, _BUY, ActionParams(idx=t + 1, target=_ZERO), jnp.bool_(True)
+        )
+        return heuristic_value(layout, succ, player)
+
+    vals = jax.vmap(one)(jnp.arange(N_DEV_CARD_TYPES, dtype=jnp.int32))
+    w = state.dev_deck.astype(jnp.float32)
+    return (vals * w).sum() / jnp.maximum(w.sum(), 1.0)
+
+
 # Rows an imagined opponent may not use in a reply: their reconstructed dev
 # hand is fiction, so their dev plays would be too.
 _NO_DEV_PLAYS = jnp.asarray(
@@ -177,17 +233,35 @@ class Tactic:
 
     def values(self, pov: Pov) -> np.ndarray:
         """``(N_FLAT,)`` heuristic value of each action's successor (one
-        sampled outcome for the stochastic ones); junk on illegal rows."""
+        sampled outcome for steals; the dev draw is an exact deck-weighted
+        expectation); junk on illegal rows."""
         if self._cache_for is not pov:
             self._key, sub = jax.random.split(self._key)
             self._board = reconstruct(pov, sub)
-            vals = _successor_values(
-                *self._board, jnp.int32(pov.me), jnp.asarray(pov.mask)
+            me = jnp.int32(pov.me)
+            vals = np.array(  # a copy: device_get views are read-only
+                jax.device_get(
+                    _successor_values(*self._board, me, jnp.asarray(pov.mask))
+                )
             )
-            self._cache = np.asarray(jax.device_get(vals))
+            if pov.mask[_BUY_DEV_ROW]:
+                vals[_BUY_DEV_ROW] = float(_buy_dev_expectation(*self._board, me))
+            self._cache = vals
             self._cache_for = pov
         assert self._cache is not None
         return self._cache
+
+    def roll_expectation(self, pov: Pov, row: int | None = None) -> float:
+        """Exact 11-outcome expectation over the pending roll — of this state,
+        or of the state after playing ``row`` first (the pre-roll knight
+        question: does moving the robber pay before the dice land?)."""
+        self.values(pov)  # ensure the board cache
+        assert self._board is not None
+        layout, state = self._board
+        me = jnp.int32(pov.me)
+        if row is None:
+            return float(_roll_expectation(layout, state, me))
+        return float(_roll_expectation_after(layout, state, jnp.int32(row), me))
 
     def best(self, pov: Pov, rows: np.ndarray) -> int:
         """The row among ``rows`` whose successor scores best."""

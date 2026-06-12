@@ -180,8 +180,11 @@ class MoveRobber(Node):
 
 
 class PlayKnight(Node):
-    """Play a knight to unblock our own production (legal pre-roll too,
-    rulebook p.7), or whenever the play takes Largest Army outright."""
+    """The pre-roll knight (legal before rolling, rulebook p.7), decided by
+    expectimax: play it exactly when the best relocation raises the exact
+    11-outcome expectation of our own pending roll — which prices unblocking,
+    denial, the steal, and the army race in one comparison. Post-roll, only
+    an immediate Largest Army grab fires here (DenialKnight owns the rest)."""
 
     def __init__(self, tactic: Tactic) -> None:
         self.tactic = tactic
@@ -190,9 +193,12 @@ class PlayKnight(Node):
         rows = pov.legal_rows(ActionType.PLAY_KNIGHT)
         if rows.size == 0:
             return None
-        blocked = pov.tile_pips[pov.robber] > 0 and any(
-            int(pov.vertex_owner[c]) == pov.me + 1 for c in TILE_CORNERS[pov.robber]
-        )
+        if pov.phase == GamePhase.ROLL and pov.current_player == pov.me:
+            best = self.tactic.best_paranoid(pov, rows)
+            gain = self.tactic.roll_expectation(
+                pov, best
+            ) - self.tactic.roll_expectation(pov)
+            return best if gain > 0.3 else None
         after = int(pov.knights_played[pov.me]) + 1
         others = np.delete(pov.knights_played, pov.me)
         takes_army = (
@@ -200,7 +206,7 @@ class PlayKnight(Node):
             and after >= 3
             and after > int(others.max())
         )
-        return self.tactic.best_paranoid(pov, rows) if blocked or takes_army else None
+        return self.tactic.best_paranoid(pov, rows) if takes_army else None
 
 
 class RespondToTrade(Node):

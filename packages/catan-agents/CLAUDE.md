@@ -237,7 +237,13 @@ opponents' best answer — apply my row, fabricate their MAIN turn on the
 result, max over their *grounded* options (builds/bank trades; their dev
 plays are masked out because the reconstructed dev hand is fiction).
 Measured neutral on the lookahead rung; kept as the principled tie-break
-(robber/knight targets, surplus builds).
+(robber/knight targets, surplus builds). Expectimax over the engine's two
+chance seams: `roll_expectation` (exact 11-outcome forced rolls — decides
+the pre-roll knight: play iff the relocation raises the expectation of our
+own pending roll by > 0.3) and a deck-weighted exact dev-draw expectation
+replacing the sweep's single-sample BUY_DEV value. Both measured neutral —
+the same lesson as smcts: with the shared stationary heuristic leaf, exact
+chance handling doesn't convert into strength; the leaf is the ceiling.
 
 Design invariants:
 
@@ -293,7 +299,7 @@ Design invariants:
 
 Strength (seat-swapped, June 12 night, hybrid + opponent model): 85.0% vs
 greedy (n=200), **~55% vs lookahead** (54.7% and 55.7% on n=300 runs) and
-**49.5% vs mcts pooled** (396/800 over the final configs) — tied with mcts
+**49.6% vs mcts pooled** (546/1100 over the final configs) — tied with mcts
 at the top, clearly over lookahead; from 42% / 10% / — that morning. The
 arc: scripted push 75/45/40 (SpendDown, goal-switching margin,
 time-to-afford), tactic hybrid to 52/50 (value-arbitrated
