@@ -1,19 +1,22 @@
-# 0002 — linear value fitting (predict target)
+# 0002 — linear value fitting (predict and maximise targets)
 
-Status: concluded (framework adopted; fitted weights not — fail on the
-strict gate)
+Status: concluded (framework adopted; optimized weights not — both targets
+fail the strict gate the same way)
 
 ## Hypothesis
 
-Logistic-regression weights fit on game outcomes against a known opponent
-(greedy) recover or beat the hand-tuned heuristic weights when deployed in
-one-step lookahead; the pipeline generalizes to any feature subset.
+Weights optimized against a known opponent (greedy) — fit to *predict*
+outcomes, or searched to *maximise* the measured match win rate — recover or
+beat the hand-tuned heuristic weights when deployed in one-step lookahead;
+the pipeline generalizes to any feature subset.
 
 ## Setup
 
-`uv run python experiments/0002_linear_value_fitting/run.py` — config at the
-top of run.py (the shared machinery is `experiments/_value_fitting.py`; this
-report's numbers predate the framework extraction, same logic). Collect ~190k positions (3,150 episodes, B=64)
+`uv run python experiments/0002_linear_value_fitting/run.py [predict|maximise]`
+— config at the top of run.py; the shared machinery is
+`experiments/_value_fitting.py` (the predict numbers below predate the
+framework extraction, same logic; the maximise run originally lived as
+experiment 0003 before the targets merged). Collect ~190k positions (3,150 episodes, B=64)
 from lookahead(heuristic) vs greedy; rows are seat-0-minus-seat-1
 `BoardFeatures` (21 terms, including the new `second_spot` / `reach` /
 `army_lead`), labels seat-0-won. Fit a candidate matrix — three feature
@@ -42,14 +45,28 @@ From `runs/0002_linear_value_fitting/2026-06-12T223650Z`
   each), but **42.7% ± 2.8%** head-to-head against lookahead(hand-tuned) —
   gate (lower 2σ > 50%) fails.
 
+### Maximise target (CEM, from `runs/0003_cem_value_weights_vs_greedy/2026-06-12T231337Z`)
+
+- 3 generations × 6 members × 60-game evaluations around the hand weights:
+  the search shifted weight out of `race` (0.8 → 0.1) and `progress` into
+  `n_dev` (+2.09) and `best_spot` — against greedy, endgame urgency pays
+  less than mid-game economy.
+- Deployment bench: **80.8% vs greedy** against the hand weights' 77.8% —
+  the search beat its objective's baseline.
+- Head-to-head vs lookahead(hand-tuned): **43.3% ± 2.8%** — gate fails,
+  almost exactly where the predict target landed (42.7%).
+
 ## Decision
 
-The framework is adopted: collect → fit subsets → probe-by-match → gate, all
-reusable for any future feature set (`value.make_linear` is the deployment
-seam). The fitted weights are not: outcome regression recovers
-hand-tuned-level play against the known opponent from data alone — which
-validates the features — but does not beat the hand weights, because
-predicting *who wins* is not the same objective as ranking *successor
-states*. Next lever if pursued classically: a decision-aware objective
-(preference pairs over successors, or per-phase weights); otherwise this is
-exactly catan-learn Stage 1's job with a nonlinear model.
+The framework is adopted (`value.make_linear` is the deployment seam; one
+CONFIG drives either target). The optimized weights are not, and the two
+targets fail identically: predict recovers hand-level play vs the known
+opponent (prediction is not control — see the v1 coefficient pathology),
+maximise even *beats* the hand weights against its objective opponent — and
+both lose ~43% head-to-head against the hand-tuned lookahead. Optimizing
+against a fixed opponent breeds specialists; the hand weights are the
+generalist. Next levers, each a CONFIG change: make the objective the gate
+itself (maximise vs `lookahead(heuristic)`, needs a larger `eval_games` —
+60-game evaluations swing ±6 points), or an opponent pool; classically
+beyond that, a decision-aware objective (preference pairs over successors).
+Otherwise this is catan-learn Stage 1's job with a nonlinear model.
