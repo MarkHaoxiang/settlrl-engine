@@ -6,7 +6,11 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
 
 - 0001_bench_smoke — pass: greedy beats random 83.1% ± 4.7% (n=65, 2p);
   infrastructure worked example.
-- 0002_sklearn_value_weights_vs_greedy — framework adopted, weights not:
+- 0002_linear_value_fitting (predict target) — framework adopted, weights not:
   outcome-fit logistic weights reach hand-tuned level vs greedy (75.2% vs
   77.8%) but lose head-to-head (42.7%, n=314); held-out AUC flat (0.83–0.84)
   while match probes span 53–78% — select by matches, never fit metrics.
+- 0003_cem_value_weights_vs_greedy (maximise target) — fail on the gate,
+  path validated: CEM beats the hand weights against its objective opponent
+  (80.8% vs 77.8% vs greedy) yet loses head-to-head (43.3%) — fixed-opponent
+  optimization breeds specialists; next: optimize against the gate or a pool.

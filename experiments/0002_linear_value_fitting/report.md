@@ -1,4 +1,4 @@
-# 0002 — sklearn value weights vs greedy
+# 0002 — linear value fitting (predict target)
 
 Status: concluded (framework adopted; fitted weights not — fail on the
 strict gate)
@@ -11,8 +11,9 @@ one-step lookahead; the pipeline generalizes to any feature subset.
 
 ## Setup
 
-`uv run python experiments/0002_sklearn_value_weights_vs_greedy/run.py` —
-config at the top of run.py. Collect ~190k positions (3,150 episodes, B=64)
+`uv run python experiments/0002_linear_value_fitting/run.py` — config at the
+top of run.py (the shared machinery is `experiments/_value_fitting.py`; this
+report's numbers predate the framework extraction, same logic). Collect ~190k positions (3,150 episodes, B=64)
 from lookahead(heuristic) vs greedy; rows are seat-0-minus-seat-1
 `BoardFeatures` (21 terms, including the new `second_spot` / `reach` /
 `army_lead`), labels seat-0-won. Fit a candidate matrix — three feature
@@ -23,7 +24,7 @@ lookahead(hand-tuned) at n=300.
 
 ## Results
 
-From `runs/0002_sklearn_value_weights_vs_greedy/2026-06-12T223650Z`
+From `runs/0002_linear_value_fitting/2026-06-12T223650Z`
 (`fits.json`, `probes.json`):
 
 - v1 (naive: train-accuracy selection, no constraints) deployed at 73.0% vs
