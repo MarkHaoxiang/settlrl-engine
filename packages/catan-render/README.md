@@ -30,7 +30,7 @@ A menu lets you choose between two modes, each at its own URL:
   **New game** button — a dialog configures the next game: player count (2 or 4), what controls
   each seat, seating with several humans (hotseat on this screen, or online — you take the first
   seat and the others join through the invite link), number-token placement (random or spiral),
-  an optional seed, and the host key on protected servers; cancelling keeps the game in progress.
+  and an optional seed; cancelling keeps the game in progress.
 - **Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the
   JSON from `GET /api/game/record`) or the live game as played so far, then scrub anywhere
   with the slider, step move by move, or press play; the log panel fills in as the game
@@ -92,9 +92,7 @@ Open http://localhost:8000.
 
 The server is configured by environment variables: `HOST` (default `0.0.0.0`),
 `PORT` (default `8000`), `RELOAD` (default `1`; set `0` in production — the
-reloader is a dev file-watcher), `CATAN_RENDER_CREATE_KEY` (when set, only
-requests carrying it as `X-Create-Key` may create games — the dialog's "Host
-key" field; players joining or playing never need it), `CATAN_RENDER_MAX_STREAMS`
+reloader is a dev file-watcher), `CATAN_RENDER_MAX_STREAMS`
 (default `64`; concurrent event-stream subscribers, capped below the threadpool
 size so idle streams can't starve ordinary requests — extras get `503`),
 `CATAN_RENDER_STATE_DIR` (a directory to persist games in — see below),
@@ -116,19 +114,18 @@ replayed back into the registry on the next startup, so a deploy or crash
 resumes games in progress, seat tokens and all. Bot pacing restarts for resumed
 games. Evicted games' files are removed.
 
-For a public deployment, set `CATAN_RENDER_CREATE_KEY` so strangers can't fill
-the registry, and front the server with a proxy that rate-limits — the built-in
-caps (stream cap, a 2 MB request-body limit, a replay move-count cap, and
-high-entropy game ids) bound resource use but are not a substitute for one. A
-production run (`RELOAD=0`) with no key set logs a startup warning to that
-effect.
+Anyone can create games; the concurrency cap queues them past
+`CATAN_RENDER_MAX_ACTIVE`. For a public deployment, front the server with a
+proxy that rate-limits — the built-in caps (stream cap, a 2 MB request-body
+limit, a replay move-count cap, and high-entropy game ids) bound resource use
+but are not a substitute for one.
 
 The repo-root `Dockerfile` builds a self-contained image (frontend compiled
 in, CPU JAX):
 
 ```bash
 docker build -t catan-render .
-docker run -p 8000:8000 -e CATAN_RENDER_CREATE_KEY=<secret> catan-render
+docker run -p 8000:8000 catan-render
 ```
 
 To serve under a path instead of a (sub)domain — e.g. `markhaoxiang.com/catan`
@@ -188,7 +185,7 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees. Requires the `X-Create-Key` header when the server sets `CATAN_RENDER_CREATE_KEY` |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees |
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |

@@ -747,9 +747,7 @@ export interface operations {
     post_create_api_games_post: {
         parameters: {
             query?: never;
-            header?: {
-                "X-Create-Key"?: string | null;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };

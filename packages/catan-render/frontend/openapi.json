@@ -10,33 +10,15 @@
     "summary": "Post Create",
     "description": "Create a game, or return the caller's place in line when the server\nis at its concurrency cap (a ``202`` they re-POST with ``ticket``).",
     "operationId": "post_create_api_games_post",
-    "parameters": [
-     {
-      "name": "X-Create-Key",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Create-Key"
-      }
-     }
-    ],
     "requestBody": {
-     "required": true,
      "content": {
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/_CreateRequest"
        }
       }
-     }
+     },
+     "required": true
     },
     "responses": {
      "200": {

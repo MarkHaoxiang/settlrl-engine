@@ -118,17 +118,6 @@ export interface NewGameConfig {
   claim: ClaimMode;
 }
 
-// The host key gating game creation on protected deployments; entered once
-// in the new-game dialog and persisted.
-const CREATE_KEY = "catan-create-key";
-
-export const savedCreateKey = (): string => localStorage.getItem(CREATE_KEY) ?? "";
-
-export function saveCreateKey(key: string): void {
-  if (key) localStorage.setItem(CREATE_KEY, key);
-  else localStorage.removeItem(CREATE_KEY);
-}
-
 // A freshly created game: its id plus the creator's seat tokens (every human
 // seat is claimed for the hotseat default).
 export interface CreatedGame {
@@ -150,7 +139,6 @@ export async function createGame(
   config: NewGameConfig,
   ticket?: string
 ): Promise<CreatedGame | QueuedGame> {
-  const key = savedCreateKey();
   return api<CreatedGame | QueuedGame>("/api/games", {
     method: "POST",
     body: JSON.stringify({
@@ -164,7 +152,6 @@ export async function createGame(
       claim: config.claim,
       ticket,
     }),
-    headers: key ? { "X-Create-Key": key } : {},
   });
 }
 

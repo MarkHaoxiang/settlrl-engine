@@ -65,23 +65,6 @@ def test_create_claim_first_takes_one_seat_and_leaves_the_rest(
     assert client.post(f"/api/games/{game}/join", json={}).json()["seat"] == 1
 
 
-def test_create_key_gates_creation_when_set() -> None:
-    client = TestClient(create_app(GameRegistry(), create_key="sesame"))
-    assert client.post("/api/games", json={"seed": 0}).status_code == 403
-    assert (
-        client.post(
-            "/api/games", json={"seed": 0}, headers={"X-Create-Key": "wrong"}
-        ).status_code
-        == 403
-    )
-    resp = client.post(
-        "/api/games", json={"seed": 0}, headers={"X-Create-Key": "sesame"}
-    )
-    assert resp.status_code == 200
-    # Only creation is gated; viewing and joining never need the key.
-    assert client.get(f"/api/games/{resp.json()['id']}").status_code == 200
-
-
 def test_full_registry_of_active_games_returns_503() -> None:
     client = TestClient(create_app(GameRegistry(max_games=1)))
     assert client.post("/api/games", json={"seed": 0}).status_code == 200

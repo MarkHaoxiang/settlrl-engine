@@ -7,7 +7,6 @@ apps with their own registries instead of sharing module state.
 
 import json
 import os
-import secrets
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
@@ -79,7 +78,6 @@ def _needs_driver(handle: GameHandle, turn_timeout: float) -> bool:
 
 
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
-CreateKey = Annotated[str | None, Header(alias="X-Create-Key")]
 
 # Replaying a submitted record steps the engine once per move; cap the count so
 # an untrusted POST /api/replay can't hand us an arbitrarily long game to grind
@@ -166,7 +164,6 @@ class _ChatRequest(BaseModel):
 
 def create_app(
     games: GameRegistry | None = None,
-    create_key: str | None = None,
     bot_delay: float = 0.65,
     root_path: str = "",
     max_streams: int = 64,
@@ -178,11 +175,9 @@ def create_app(
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
-    ``create_key`` gates game creation: when set, ``POST /api/games`` requires
-    a matching ``X-Create-Key`` header. Public deployments set it so strangers
-    can't spam games and exhaust the registry. ``bot_delay`` paces the
-    server-side bot driver (seconds between bot moves, so clients can animate
-    each one). ``root_path`` is the proxy prefix the app is served under.
+    ``bot_delay`` paces the server-side bot driver (seconds between bot moves,
+    so clients can animate each one). ``root_path`` is the proxy prefix the app
+    is served under.
     ``max_streams`` caps concurrent event-stream subscribers (each pins a
     threadpool thread, so this must stay well under the pool size or idle
     streams starve ordinary requests); ``max_body_bytes`` rejects oversized
@@ -238,17 +233,10 @@ def create_app(
 
     @app.post("/api/games")
     def post_create(
-        req: _CreateRequest, response: Response, x_create_key: CreateKey = None
+        req: _CreateRequest, response: Response
     ) -> _CreatedModel | _QueuedModel:
         """Create a game, or return the caller's place in line when the server
         is at its concurrency cap (a ``202`` they re-POST with ``ticket``)."""
-        if create_key is not None and not (
-            x_create_key is not None
-            and secrets.compare_digest(x_create_key, create_key)
-        ):
-            raise HTTPException(
-                status_code=403, detail="creation requires the host key"
-            )
         seats = (
             [s if isinstance(s, str) else s.model_dump() for s in req.seats]
             if req.seats is not None
@@ -472,10 +460,7 @@ _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 # The uvicorn entry point (catan_render.server:app). ROOT_PATH is the proxy
 # prefix when served under a path (e.g. /catan behind Caddy's handle_path).
-# An empty CATAN_RENDER_CREATE_KEY means "no key" (compose substitutes an empty
-# string for an unset value), not a key that happens to be the empty string.
 app = create_app(
-    create_key=os.environ.get("CATAN_RENDER_CREATE_KEY") or None,
     root_path=os.environ.get("ROOT_PATH", ""),
     max_streams=int(os.environ.get("CATAN_RENDER_MAX_STREAMS", "64")),
     state_dir=os.environ.get("CATAN_RENDER_STATE_DIR") or None,

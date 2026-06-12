@@ -5,8 +5,6 @@ import { useEffect, useState } from "react";
 import {
   fetchBots,
   HUMAN,
-  savedCreateKey,
-  saveCreateKey,
   type BotParamValue,
   type BotSpec,
   type NewGameConfig,
@@ -115,7 +113,6 @@ export default function NewGameDialog({
   // With several human seats: all on this screen, or just yours (the others
   // join through the invite link).
   const [seating, setSeating] = useState<"hotseat" | "online">("hotseat");
-  const [hostKey, setHostKey] = useState(savedCreateKey());
   // One controller per possible seat; only the first nPlayers are used.
   const [seats, setSeats] = useState<SeatConfig[]>([
     { kind: HUMAN },
@@ -152,7 +149,6 @@ export default function NewGameDialog({
   const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
 
   const start = () => {
-    saveCreateKey(hostKey.trim());
     onStart({
       seed: seed === "" ? Math.floor(Math.random() * 65536) : Number(seed),
       nPlayers,
@@ -250,18 +246,6 @@ export default function NewGameDialog({
             placeholder="random"
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
-            style={{ ...buttonStyle, cursor: "text", width: 100, padding: "5px 10px", fontSize: 12 }}
-          />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={labelStyle} title="Required on protected servers to create games">
-            Host key
-          </span>
-          <input
-            type="text"
-            placeholder="none"
-            value={hostKey}
-            onChange={(e) => setHostKey(e.target.value)}
             style={{ ...buttonStyle, cursor: "text", width: 100, padding: "5px 10px", fontSize: 12 }}
           />
         </div>
