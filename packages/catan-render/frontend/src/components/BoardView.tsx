@@ -8,9 +8,11 @@ import Building from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
 import BankStacks from "./BankStacks";
-import PlayerAreas from "./PlayerAreas";
+import PlayerAreas, { seatEdge, type Edge } from "./PlayerAreas";
 import TableDice from "./TableDice";
+import TransferAnimations from "./TransferAnimations";
 import InteractionOverlay, { type BoardInteraction, type BoardTargetPoint } from "./InteractionOverlay";
+import type { FlyToken } from "../lib/transfers";
 
 export type { BoardInteraction, BoardTargetPoint };
 
@@ -25,11 +27,14 @@ const CARD_H = (Math.sqrt(3) * HEX_SIZE * 89) / 80;
 const EDGE_BAND = CARD_H + 44;
 
 // The table dice: the last roll's sum, a per-move seed for their resting
-// angles, and the roll handler while rolling is the viewer's move.
+// angles, the roll handler while rolling is the viewer's move, and the seat
+// they rest in front of (the player whose turn it is; undefined parks them in
+// the corner).
 export interface DiceState {
   sum: number;
   seed: number;
   onRoll?: () => void;
+  seat?: number;
 }
 
 // Trade targets on the table: bank piles the viewer can trade for, and seats
@@ -46,6 +51,8 @@ interface Props {
   interaction?: BoardInteraction;
   dice?: DiceState;
   trade?: TradeTargets;
+  // Card motions to fly across the table this snapshot (lib/transfers).
+  transfers?: FlyToken[];
 }
 
 // The whole table seen from above: the ocean board in the middle (tiles,
@@ -53,7 +60,7 @@ interface Props {
 // seat's play area on its table edge, and the dice in a corner — one SVG
 // scene that pans, zooms, and spins together (lib/viewport.ts). It fills its
 // parent container, so a parent can overlay mode-specific controls on top.
-export default function BoardView({ board, interaction, dice, trade }: Props) {
+export default function BoardView({ board, interaction, dice, trade, transfers }: Props) {
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
   const minX = Math.min(...pixels.map((p) => p.x));
   const maxX = Math.max(...pixels.map((p) => p.x));
@@ -80,6 +87,23 @@ export default function BoardView({ board, interaction, dice, trade }: Props) {
     const r = el.getBoundingClientRect();
     return { x: r.x + r.width / 2 - c.x, y: r.y - c.y };
   };
+
+  // The dice glide to rest on the ocean in front of whoever's turn it is,
+  // falling back to the bottom-right corner. Drawn at the corner and slid by
+  // the offset, so the CSS transition animates the move (TableDice draws around
+  // its given centre, which stays fixed).
+  const diceCorner = { x: oceanX + oceanW + EDGE_BAND / 2, y: oceanY + oceanH + EDGE_BAND / 2 };
+  const diceHome = (edge: Edge): { x: number; y: number } => {
+    const m = EDGE_BAND * 0.5;
+    switch (edge) {
+      case "bottom": return { x: oceanX + oceanW / 2, y: oceanY + oceanH - m };
+      case "top": return { x: oceanX + oceanW / 2, y: oceanY + m };
+      case "left": return { x: oceanX + m, y: oceanY + oceanH / 2 };
+      case "right": return { x: oceanX + oceanW - m, y: oceanY + oceanH / 2 };
+    }
+  };
+  const diceTarget =
+    dice && dice.seat != null ? diceHome(seatEdge(board.players.length, dice.seat)) : diceCorner;
 
   return (
     <div
@@ -132,16 +156,24 @@ export default function BoardView({ board, interaction, dice, trade }: Props) {
               />
             )}
 
-            {/* The dice rest in the table's bottom-right corner */}
+            {/* The dice rest in front of the active player (corner otherwise) */}
             {dice && (
-              <TableDice
-                cx={oceanX + oceanW + EDGE_BAND / 2}
-                cy={oceanY + oceanH + EDGE_BAND / 2}
-                size={HEX_SIZE * 0.4}
-                sum={dice.sum}
-                seed={dice.seed}
-                onRoll={dice.onRoll}
-              />
+              <g
+                className="table-dice"
+                style={{
+                  transform: `translate(${diceTarget.x - diceCorner.x}px, ${diceTarget.y - diceCorner.y}px)`,
+                  transition: "transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
+                }}
+              >
+                <TableDice
+                  cx={diceCorner.x}
+                  cy={diceCorner.y}
+                  size={HEX_SIZE * 0.4}
+                  sum={dice.sum}
+                  seed={dice.seed}
+                  onRoll={dice.onRoll}
+                />
+              </g>
             )}
 
             {/* Each seat's play area on its table edge */}
@@ -245,6 +277,9 @@ export default function BoardView({ board, interaction, dice, trade }: Props) {
           </svg>
         </div>
       </div>
+
+      {/* Cards flying between the bank and seats on production / steals */}
+      <TransferAnimations tokens={transfers ?? []} containerRef={containerRef} />
 
       {/* Spin the table a quarter turn at a time (e.g. to face your seat) */}
       <div

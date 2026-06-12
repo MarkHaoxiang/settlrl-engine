@@ -15,7 +15,8 @@ import TradePopover from "../components/TradePopover";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
-import { createGame, joinGame, type GameAction, type NewGameConfig } from "../lib/game";
+import { createGame, joinGame, type GameAction, type GameSnapshot, type NewGameConfig } from "../lib/game";
+import { deriveTransfers, type FlyToken } from "../lib/transfers";
 import {
   parseTokens,
   rememberGame,
@@ -181,6 +182,20 @@ export default function PlayView() {
     setChoice(null);
     setKnightArming(false);
     setTradeWith(null);
+  }, [snapshot]);
+
+  // Card-transfer animations: read the headline motions from each single-step
+  // advance. A version gap (reconnect, or coalesced renders) can't be pinned to
+  // one move, so we skip it rather than fly a misleading batch.
+  const [transfers, setTransfers] = useState<FlyToken[]>([]);
+  const prevSnap = useRef<GameSnapshot | null>(null);
+  useEffect(() => {
+    const prev = prevSnap.current;
+    prevSnap.current = snapshot ?? null;
+    if (prev && snapshot && snapshot.version === prev.version + 1) {
+      const t = deriveTransfers(prev.board, snapshot.board, String(snapshot.version));
+      if (t.length) setTransfers(t);
+    }
   }, [snapshot]);
 
   // Esc closes the choosers / cancels knight targeting.
@@ -368,10 +383,12 @@ export default function PlayView() {
           board={board}
           interaction={interaction}
           trade={tradeTargets}
+          transfers={transfers}
           dice={{
             sum: status.dice_roll,
             seed: snapshot.log.length,
             onRoll: rollAction && !busy ? () => act(rollAction.flat) : undefined,
+            seat: status.terminal ? undefined : status.current_player,
           }}
         />
         <TopBar mode="Play">

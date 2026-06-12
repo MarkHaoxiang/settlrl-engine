@@ -46,7 +46,6 @@ export default function BankStacks({
         const clickable = tradable?.has(r) ?? false;
         const pile = (
           <CardPile
-            key={clickable ? undefined : r}
             cx={x}
             cy={y}
             w={cardW}
@@ -59,9 +58,10 @@ export default function BankStacks({
             <TerrainIcon terrain={r} cx={x} cy={y - cardH * 0.16} scale={cardW * 0.016} opacity={0.85} />
           </CardPile>
         );
-        if (!clickable) return pile;
+        // data-bank tags each pile as a fly-token endpoint (TransferAnimations).
+        if (!clickable) return <g key={r} data-bank={r}>{pile}</g>;
         return (
-          <g key={r} className="board-ghost" onClick={(e) => onPick?.(r, e.currentTarget)}>
+          <g key={r} data-bank={r} className="board-ghost" onClick={(e) => onPick?.(r, e.currentTarget)}>
             <rect
               className="ghost"
               x={x - cardW / 2 - 6}

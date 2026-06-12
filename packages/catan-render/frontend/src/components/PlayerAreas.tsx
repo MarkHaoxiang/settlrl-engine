@@ -187,9 +187,13 @@ function Area({
 // area is rotated to face its player, like looking down at a real table.
 const EDGES_4 = ["bottom", "left", "top", "right"] as const;
 const EDGES_2 = ["bottom", "top"] as const;
-type Edge = (typeof EDGES_4)[number];
+export type Edge = (typeof EDGES_4)[number];
 
 const EDGE_ANGLE: Record<Edge, number> = { bottom: 0, left: 90, top: 180, right: -90 };
+
+// The table edge a seat sits on, shared with the dice placement (BoardView).
+export const seatEdge = (nPlayers: number, seat: number): Edge =>
+  (nPlayers === 2 ? EDGES_2 : EDGES_4)[seat] ?? "bottom";
 
 export default function PlayerAreas({
   board,
@@ -239,7 +243,8 @@ export default function PlayerAreas({
         const { x, y } = centre(edge);
         const builds = board.buildings.filter((b) => b.player === p.player);
         return (
-          <g key={p.player} transform={`translate(${x} ${y}) rotate(${EDGE_ANGLE[edge]})`}>
+          // data-seat tags the area as a fly-token endpoint (TransferAnimations).
+          <g key={p.player} data-seat={p.player} transform={`translate(${x} ${y}) rotate(${EDGE_ANGLE[edge]})`}>
             <Area
               player={p}
               roadsLeft={Math.max(0, ROAD_SUPPLY - board.roads.filter((r) => r.player === p.player).length)}

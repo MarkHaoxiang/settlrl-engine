@@ -14,8 +14,8 @@ A menu lets you choose between two modes, each at its own URL:
   picks come from a popover) and resource cards to discard after a 7. Trading happens on the
   table as well: click the bank pile you want for the maritime exchanges, or an opponent's
   hand pile to compose a 1:1 offer (they accept or reject on their turn). A small bottom bar
-  keeps the rest (buy a dev card, answer a trade, end turn — the dice sit on the table by
-  the board's corner and take the click to roll); the top bar holds New
+  keeps the rest (buy a dev card, answer a trade, end turn — the dice rest on the table in
+  front of whoever's turn it is and take the click to roll); the top bar holds New
   game and a light/dark theme toggle. The scene is a top-down table (zoom, pan, and spin it — mouse, touch, or keyboard:
   arrows pan, +/− zoom, [ ] spin, 0 re-fits):
   the bank's card piles (true to card scale) sit left of the board, and each seat's play
@@ -246,6 +246,7 @@ packages/catan-render/
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard
         ├── lib/api-schema.d.ts # Wire types generated from openapi.json (do not edit)
         ├── lib/game.ts       # Live-game API client (/api/game*)
+        ├── lib/transfers.ts  # Diff two snapshots into card-transfer animations (production / steals)
         ├── lib/replay.ts     # Replay API client (/api/replay*)
         ├── lib/actionMeta.ts # Action display metadata: icons, labels, costs, confirm phrasing
         ├── lib/useGame.ts    # Hook driving one live game (snapshot stream, act / chat)
@@ -269,6 +270,7 @@ packages/catan-render/
             ├── BankStacks.tsx   # The bank's card grid (resource piles + dev deck)
             ├── PlayerAreas.tsx  # Each seat's table edge: hand/dev piles + unbuilt pieces
             ├── TableDice.tsx    # The dice on the table (click to roll when glowing)
+            ├── TransferAnimations.tsx # Chips that fly between bank piles / seats on a transfer
             ├── PlayersPanel.tsx # Seat list atop the chat column (stats + belief inspect)
             ├── NewGameDialog.tsx # Modal: configure players / seats / numbers / seed for a new game
             ├── ChatPanel.tsx    # Right-hand column: players section + chat / log
