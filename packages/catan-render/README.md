@@ -94,12 +94,20 @@ reloader is a dev file-watcher), `CATAN_RENDER_CREATE_KEY` (when set, only
 requests carrying it as `X-Create-Key` may create games — the dialog's "Host
 key" field; players joining or playing never need it), `CATAN_RENDER_MAX_STREAMS`
 (default `64`; concurrent event-stream subscribers, capped below the threadpool
-size so idle streams can't starve ordinary requests — extras get `503`), and
-`ROOT_PATH` (the proxy prefix when served under a path). Run **one process, one
-worker**: live games are held in memory, so extra workers would split them.
-Restarts lose live games. The registry holds up to 32 games, evicting finished
-games, hour-idle ones, or unstarted ones idle past a few minutes (so a burst of
-empty games can't pin every slot) to make room.
+size so idle streams can't starve ordinary requests — extras get `503`),
+`CATAN_RENDER_STATE_DIR` (a directory to persist games in — see below),
+and `ROOT_PATH` (the proxy prefix when served under a path). Run **one process,
+one worker**: live games are held in memory, so extra workers would split them.
+The registry holds up to 32 games, evicting finished games, hour-idle ones, or
+unstarted ones idle past a few minutes (so a burst of empty games can't pin
+every slot) to make room.
+
+**Persistence.** Without `CATAN_RENDER_STATE_DIR`, games live only in memory and
+a restart loses them. Point it at a (mounted) directory and each game is
+journalled there — its setup plus every move, seat claim, and chat line — and
+replayed back into the registry on the next startup, so a deploy or crash
+resumes games in progress, seat tokens and all. Bot pacing restarts for resumed
+games. Evicted games' files are removed.
 
 For a public deployment, set `CATAN_RENDER_CREATE_KEY` so strangers can't fill
 the registry, and front the server with a proxy that rate-limits — the built-in
@@ -215,6 +223,7 @@ packages/catan-render/
 │   ├── driver.py        # Server-side bot pacing (one daemon thread per game)
 │   ├── views.py         # Per-seat snapshots: the hidden-information boundary
 │   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
+│   ├── store.py         # Crash-recovery journals: persist games, replay on boot
 │   ├── openapi.py       # Schema dump backing the generated frontend types
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
 │   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots

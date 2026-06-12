@@ -26,10 +26,11 @@ from starlette.types import Scope
 
 from .bots import bot_catalog
 from .driver import start_bot_driver
-from .games import GameHandle, GameRegistry, RegistryFullError
+from .games import GameHandle, GameRegistry, RegistryFullError, restore_registry
 from .models import GameModel, ReplayStateModel
 from .replay import ReplaySession
 from .session import HUMAN, GameSession, IllegalActionError
+from .store import GameStore
 from .views import game_model
 
 
@@ -49,14 +50,11 @@ def _warm_jit_cache() -> None:
         scratch.bot_step()  # compiles the default bot policy
 
 
-@asynccontextmanager
-async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-    threading.Thread(target=_warm_jit_cache, daemon=True).start()
-    # Each event-stream subscriber occupies a threadpool thread for its whole
-    # connection; the anyio default (40) would cap concurrent clients and
-    # then starve ordinary requests.
-    anyio.to_thread.current_default_thread_limiter().total_tokens = 160
-    yield
+def _needs_driver(handle: GameHandle) -> bool:
+    """A non-terminal game with a bot seat needs the server-side bot driver
+    (restarted for restored games, started on create)."""
+    session = handle.session
+    return not session.terminal() and any(k != HUMAN for k in session.seats)
 
 
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
@@ -139,6 +137,7 @@ def create_app(
     root_path: str = "",
     max_streams: int = 64,
     max_body_bytes: int = 2 * 1024 * 1024,
+    state_dir: str | None = None,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -150,14 +149,35 @@ def create_app(
     ``max_streams`` caps concurrent event-stream subscribers (each pins a
     threadpool thread, so this must stay well under the pool size or idle
     streams starve ordinary requests); ``max_body_bytes`` rejects oversized
-    request bodies before they are parsed.
+    request bodies before they are parsed. ``state_dir`` turns on persistence:
+    games are journalled there and replayed back on the next startup (ignored
+    when ``games`` is passed).
     """
-    registry = games if games is not None else GameRegistry()
+    if games is not None:
+        registry = games
+    elif state_dir:
+        registry = restore_registry(GameStore(state_dir))
+    else:
+        registry = GameRegistry()
     replays = _ReplaySlot()
     # Each live event stream holds one permit for its whole connection; past
     # the cap, new subscribers get 503 rather than exhausting the threadpool.
     sse_gate = threading.Semaphore(max_streams)
-    app = FastAPI(title="Catan Render", lifespan=_lifespan, root_path=root_path)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        threading.Thread(target=_warm_jit_cache, daemon=True).start()
+        # Each event-stream subscriber occupies a threadpool thread for its
+        # whole connection; the anyio default (40) would cap concurrent clients
+        # and then starve ordinary requests.
+        anyio.to_thread.current_default_thread_limiter().total_tokens = 160
+        # Resume bot pacing for any games replayed in from the store.
+        for handle in registry.all_handles():
+            if _needs_driver(handle):
+                start_bot_driver(handle, bot_delay)
+        yield
+
+    app = FastAPI(title="Catan Render", lifespan=lifespan, root_path=root_path)
 
     @app.middleware("http")
     async def _limit_body(
@@ -208,7 +228,7 @@ def create_app(
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
         tokens = dict(handle.claim(seat) for seat in claiming)
-        if any(kind != HUMAN for kind in session.seats):
+        if _needs_driver(handle):
             start_bot_driver(handle, bot_delay)
         return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
 
@@ -296,6 +316,8 @@ def create_app(
             if req.player is not None and req.player not in owned:
                 raise HTTPException(status_code=403, detail="not your seat")
             handle.session.add_chat(req.player, text)
+            if handle.journal is not None:
+                handle.journal.chat(req.player, text)
             handle.bump()
             return game_model(handle, owned)
 
@@ -411,4 +433,5 @@ app = create_app(
     create_key=os.environ.get("CATAN_RENDER_CREATE_KEY") or None,
     root_path=os.environ.get("ROOT_PATH", ""),
     max_streams=int(os.environ.get("CATAN_RENDER_MAX_STREAMS", "64")),
+    state_dir=os.environ.get("CATAN_RENDER_STATE_DIR") or None,
 )
