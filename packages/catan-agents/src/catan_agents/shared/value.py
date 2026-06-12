@@ -76,6 +76,7 @@ def make_heuristic(
     w_vp: float = 10.0,
     w_prod: float = 1.0,
     w_hand: float = 0.3,
+    w_scarce: float = 1.0,
     w_over: float = 0.4,
     w_dev: float = 1.5,
     w_spot: float = 0.5,
@@ -92,7 +93,9 @@ def make_heuristic(
     Terms per player: total VP (awards and VP cards included; opponents' VP
     cards by their deck-share prior), pip-weighted production of own buildings
     (robber-aware, city double), distinct resource types produced, hand
-    diversity (sqrt per type) with a discard-risk penalty per card over seven,
+    diversity (sqrt per type, plus a production-scarcity-weighted copy that
+    prices cards the player cannot produce) with a discard-risk penalty per
+    card over seven,
     held dev cards, expansion (pips of the best settlement spot buildable right
     now, and own roads), completeness of the closest affordable build, knights
     played toward Largest Army, a wheat/ore production premium, and a
@@ -126,6 +129,10 @@ def make_heuristic(
 
         res = state.player_resources[p].astype(jnp.float32)
         hand = jnp.sqrt(res).sum()
+        # Held cards of resources the player barely produces are the hard
+        # ones to replace: weighting by production scarcity makes converting
+        # produced surplus into them (ports, trades) read as a gain.
+        scarce = (jnp.sqrt(res) / (1.0 + per_res)).sum()
         over = jnp.maximum(res.sum() - 7.0, 0.0)
 
         n_dev = state.dev_hand[p].astype(jnp.float32).sum()
@@ -182,6 +189,7 @@ def make_heuristic(
             + w_prod * production
             + w_diverse * diversity
             + w_hand * hand
+            + w_scarce * scarce
             - w_over * over
             + w_dev * n_dev
             + w_spot * best_spot

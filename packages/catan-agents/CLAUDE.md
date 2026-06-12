@@ -59,18 +59,31 @@ agents run at 2–4 players with beliefs of varying sharpness.
   the closing-urgency term (`w_race=0.8`; 1.2 measured equal) beat the prior
   weights 57.3% (n=600) on the lookahead rung and 57.5% (n=200) on the mcts
   rung, no greedy regression (90.5%); a production-matched 2:1-port synergy
-  term measured negative (47.3%) and stays at `w_port=0`. Value-as-win-prob
+  term measured negative (47.3%) and stays at `w_port=0`. June 12: the
+  production-scarcity hand term (`w_scarce`, a sqrt-hand copy weighted by
+  1/(1+production)) prices cards the player cannot produce, so port/domestic
+  conversions toward them read as gains — 57.3% (n=205) over `w_scarce=0` on
+  the lookahead rung at the adopted 1.0 (0.5 measured 52.2%; 1.5 lost to 1.0
+  head-to-head 43.1%). Value-as-win-prob
   calibration (183k self-play positions): P(win) = σ(0.053·v), phase-stable —
   but the calibrated `value_scale≈38` *lost* to the sharper hand-picked 20 in
   mcts (44.5%, n=200): honest calibration is not the best search temperature.
 - `greedy.py` — scripted policy: a static per-row tier score plus small
   observation bonuses. Invariant: tier gaps (≥ 100) exceed every bonus range
   (|bonus| < 50), so bonuses only reorder within a tier; types sharing a tier
-  are phase-disjoint, both dominated (MARITIME / PROPOSE sit below END_TURN),
-  or deliberately bonus-decided (ACCEPT vs REJECT: accept iff it holds
-  strictly more of the card it would give than of the card it would get).
-  Deliberately simple: no resource targeting, never offers a trade, ignores
-  whose production the robber blocks.
+  are phase-disjoint, dominated, or deliberately bonus-decided. Two sanctioned
+  exceptions, both trade-shaped (June 12, new greedy beat the old 79.0%
+  n=305 2p, 67.5% vs chance 33% at 3p; vs random 85%→98.7%): a *productive*
+  MARITIME row carries a +150 gate lifting it over END_TURN — productive
+  means the bought card is needed for the target build (city if a settlement
+  stands, else settlement if a spot is buildable now, else dev card) and the
+  sale comes entirely out of surplus, so conversions can't ping-pong; and
+  ACCEPT vs REJECT is bonus-decided — accept iff paid purely from surplus
+  and (a need advances or it consolidates toward scarcity). The discard
+  prefers surplus before most-held. Still deliberately simple: never offers
+  a trade (an obs-only policy has no rejected-offer memory), ignores whose
+  production the robber blocks. `_BASE` is also mcts's root-prior tier table
+  — the maritime gate lives in the bonus channel, so priors are unchanged.
 - `evaluate.py` — fused driver over the engine's `rollout(actor=...)` seam:
   every seat's vmapped agent picks in every lane each step inside the scan and
   the acting seat's pick is kept — n_seats policy evals per step, fine for
@@ -230,8 +243,9 @@ Design invariants:
   drops again when cards are played, but the plan completes on the next tick,
   before that can happen).
 
-Strength (seat-swapped, June 12): 78% vs greedy (n=101), 10% vs lookahead
-(n=60) — code-only planning clears the scripted tier table but not search.
+Strength (seat-swapped, June 12): 78% vs the *pre-trade* greedy (n=101), 10%
+vs lookahead (n=60); the same day's trade-aware greedy overtook it (planner
+42%, n=100) — the planner's own trade/robber play is now the weak rung.
 Move latency is ~0.1 ms/lane at B=32 (cuda benchmark), so the stepwise
 driver's cost is the env dispatch, not the agent.
 
