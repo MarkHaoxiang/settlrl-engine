@@ -2,6 +2,8 @@
 // All paths are prefixed with the build-time base (vite `--base`), so the
 // app works at / and behind a stripped proxy prefix (e.g. /catan) alike.
 
+import { EventSourceParserStream } from "eventsource-parser/stream";
+
 export const API_BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
 export class ApiError extends Error {
@@ -31,6 +33,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 // Subscribe to a server-sent-event stream (fetch-based: EventSource can't
 // send headers), yielding each event's data payload. Ends when the server
 // closes the stream or `signal` aborts; throws ApiError on a bad status.
+// Decoding and SSE framing (data lines, keepalive comments) are handled by
+// eventsource-parser.
 export async function* sse(
   path: string,
   headers: Record<string, string>,
@@ -38,23 +42,13 @@ export async function* sse(
 ): AsyncGenerator<string> {
   const resp = await fetch(API_BASE + path, { headers, signal });
   if (!resp.ok || !resp.body) throw new ApiError(resp.status, resp.statusText);
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
+  const events = resp.body
+    .pipeThrough(new TextDecoderStream())
+    .pipeThrough(new EventSourceParserStream())
+    .getReader();
   for (;;) {
-    const { done, value } = await reader.read();
+    const { done, value } = await events.read();
     if (done) return;
-    buf += decoder.decode(value, { stream: true });
-    let end;
-    while ((end = buf.indexOf("\n\n")) >= 0) {
-      const event = buf.slice(0, end);
-      buf = buf.slice(end + 2);
-      const data = event
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (data) yield data;
-    }
+    if (value.data) yield value.data;
   }
 }
