@@ -94,6 +94,9 @@ class PlayerModel(BaseModel):
     resource_cards: int  # total resource cards in hand
     dev_cards: int  # total unplayed development cards in hand
     victory_points: int  # building victory points (settlement=1, city=2)
+    knights_played: int = 0  # cumulative knights played (public)
+    longest_road: bool = False  # holds the Longest Road award (+2)
+    largest_army: bool = False  # holds the Largest Army award (+2)
     resources: ResourceCounts | None = None
     dev_card_types: DevCardCounts | None = None
 

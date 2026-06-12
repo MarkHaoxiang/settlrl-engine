@@ -1164,6 +1164,21 @@
       "type": "integer",
       "title": "Victory Points"
      },
+     "knights_played": {
+      "type": "integer",
+      "title": "Knights Played",
+      "default": 0
+     },
+     "longest_road": {
+      "type": "boolean",
+      "title": "Longest Road",
+      "default": false
+     },
+     "largest_army": {
+      "type": "boolean",
+      "title": "Largest Army",
+      "default": false
+     },
      "resources": {
       "anyOf": [
        {

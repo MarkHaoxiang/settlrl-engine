@@ -38,7 +38,10 @@ export interface Player {
   player: number;
   resourceCards: number;
   devCards: number;
-  victoryPoints: number;
+  victoryPoints: number; // building points only
+  knightsPlayed: number;
+  longestRoad: boolean;
+  largestArmy: boolean;
   // Per-type breakdowns are private: null for seats this client doesn't own.
   resources: Record<ResourceKind, number> | null;
   devCardTypes: Record<DevCardKind, number> | null;
@@ -121,6 +124,9 @@ export function adaptBoard(wire: BoardWire): Board {
       resourceCards: p.resource_cards,
       devCards: p.dev_cards,
       victoryPoints: p.victory_points,
+      knightsPlayed: p.knights_played,
+      longestRoad: p.longest_road,
+      largestArmy: p.largest_army,
       resources: p.resources ?? null,
       devCardTypes: p.dev_card_types ?? null,
     })),

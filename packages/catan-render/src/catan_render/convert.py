@@ -174,6 +174,10 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
     player_resources = state.player_resources[batch_index]
     dev_hand = state.dev_hand[batch_index]
     victory_points = state.victory_points[batch_index]
+    knights = state.knights_played[batch_index]
+    # Award holders (a player index, or NO_INDEX when unclaimed — never == p).
+    longest_road_owner = int(state.longest_road_owner[batch_index])
+    largest_army_owner = int(state.largest_army_owner[batch_index])
     players: list[PlayerModel] = []
     for p in range(state.n_players):
         # Indexed positionally in enum order (see _RESOURCE_NAMES / _DEV_CARD_NAMES).
@@ -185,6 +189,9 @@ def board_to_model(board: Board, batch_index: int = 0) -> BoardModel:
                 resource_cards=int(res.sum()),
                 dev_cards=int(dev.sum()),
                 victory_points=int(victory_points[p]),
+                knights_played=int(knights[p]),
+                longest_road=longest_road_owner == p,
+                largest_army=largest_army_owner == p,
                 resources=ResourceCounts(
                     **{name: int(res[i]) for i, name in enumerate(_RESOURCE_NAMES)}
                 ),

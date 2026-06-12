@@ -8,6 +8,7 @@ import BoardView, {
 import BoardPopover from "../components/BoardPopover";
 import ChatPanel from "../components/ChatPanel";
 import ChoicePopover from "../components/ChoicePopover";
+import GameOverScreen from "../components/GameOverScreen";
 import Hand, { DEV_PLAY_TYPE } from "../components/Hand";
 import NewGameDialog from "../components/NewGameDialog";
 import TradePopover from "../components/TradePopover";
@@ -80,6 +81,7 @@ export default function PlayView() {
   useEffect(() => {
     setTokens(gameId ? tokensFor(gameId) : {});
     setJoinFailed(false);
+    setEndDismissed(false);
     joining.current = false;
     if (gameId) rememberGame(gameId);
   }, [gameId]);
@@ -120,6 +122,8 @@ export default function PlayView() {
   // Whether the new-game configuration dialog is open (shown on entry
   // without a game, and reopened by the New game button).
   const [configuring, setConfiguring] = useState(!gameId);
+  // The end-game overlay shows once a game finishes; "View board" dismisses it.
+  const [endDismissed, setEndDismissed] = useState(false);
   // Set while waiting in line when the server is at its concurrency cap.
   const [queue, setQueue] = useState<{ position: number; total: number } | null>(null);
   const queueTimer = useRef<number | null>(null);
@@ -436,10 +440,22 @@ export default function PlayView() {
               color: ACCENT,
               fontWeight: 700,
               zIndex: 10,
+              cursor: endDismissed ? "pointer" : "default",
             }}
+            onClick={endDismissed ? () => setEndDismissed(false) : undefined}
+            title={endDismissed ? "Show final standings" : undefined}
           >
             {winnerLabel}
           </div>
+        )}
+        {status.terminal && !endDismissed && (
+          <GameOverScreen
+            board={board}
+            winner={status.winner ?? null}
+            mySeats={mySeats}
+            onNewGame={() => setConfiguring(true)}
+            onDismiss={() => setEndDismissed(true)}
+          />
         )}
 
         {/* Full-width flex strip so the panel centres without halving the

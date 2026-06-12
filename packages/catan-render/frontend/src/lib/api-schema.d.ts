@@ -524,6 +524,21 @@ export interface components {
             dev_cards: number;
             /** Victory Points */
             victory_points: number;
+            /**
+             * Knights Played
+             * @default 0
+             */
+            knights_played: number;
+            /**
+             * Longest Road
+             * @default false
+             */
+            longest_road: boolean;
+            /**
+             * Largest Army
+             * @default false
+             */
+            largest_army: boolean;
             resources?: components["schemas"]["ResourceCounts"] | null;
             dev_card_types?: components["schemas"]["DevCardCounts"] | null;
         };
