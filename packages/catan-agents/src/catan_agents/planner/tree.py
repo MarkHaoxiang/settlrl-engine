@@ -134,6 +134,10 @@ class Blackboard:
     """A committed follow-up (the second half of an own-turn combo): played
     the next tick it is legal, dropped the moment it is not."""
 
+    def noise(self) -> float:
+        """Sub-unit score jitter: varies tie-breaks across seats and games."""
+        return self.rng.random() * 0.3
+
     def set_plan(self, plan: Plan | None) -> None:
         self.plan = plan
         self.plan_age = 0

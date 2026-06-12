@@ -14,6 +14,11 @@ agents run at 2–4 players with beliefs of varying sharpness.
 
 ## shared/
 
+- `rows.py` — the flat action table decoded once (device `ROW_TYPE` /
+  `ROW_PARAMS` for the vmapped sweeps; host `ROW_IDX` / `ROW_TARGET` /
+  `ROWS_OF_TYPE` / `flat_row` for the planner). Every agent imports from
+  here — there used to be one decode per module, and they can silently
+  diverge.
 - `policy.py` — the seat protocols and `AgentSpec`: a policy *family*
   (`make` + `defaults`, with `policy` the cached shipped build) plus optional
   `for_testing` parameter overrides — `spec.for_tests` is the cheap family
@@ -225,9 +230,13 @@ value-free before). `pov.py` is the host-side toolkit — one `Pov` per
 decision wrapping the host-fetched observation, the static board graph
 re-stated as numpy/python tables (`VERTEX_*`, `EDGE_ENDPOINTS`,
 `TILE_CORNERS`), and the flat table's host decode (`flat_row`,
-`ROWS_OF_TYPE`). `tree.py` is the framework (`Node` / `Selector` / `Plan` /
-`Blackboard`); `tactic.py` the lookahead seam; `agent.py` the shipped
-`planner` family.
+`ROWS_OF_TYPE`, re-exported from `shared.rows`). `tree.py` is the framework
+(`Node` / `Selector` / `Plan` / `Blackboard`); `goals.py` the goal economics
+(`plan_candidates` / `choose_plan` and their scoring weights); `tactic.py`
+the lookahead seam; `agent.py` the tree's nodes and the shipped `planner`
+family. The tactic's batched seams (`_after_many`, `_best_replies`) take
+fixed-size row blocks padded with a repeated legal row — fixed shapes mean
+one jit trace instead of one per block size.
 
 `tactic.py`: `reconstruct` rebuilds a single-game engine board from the
 observation — public fields exactly; hidden ones neutrally (opponent hands

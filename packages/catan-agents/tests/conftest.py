@@ -11,6 +11,7 @@ from jaxtyping import install_import_hook
 install_import_hook(
     [
         "catan_agents.shared.policy",
+        "catan_agents.shared.rows",
         "catan_agents.shared.value",
         "catan_agents.shared.baselines",
         "catan_agents.shared.greedy",
@@ -20,6 +21,7 @@ install_import_hook(
         "catan_agents.search.mcts",
         "catan_agents.planner.pov",
         "catan_agents.planner.tree",
+        "catan_agents.planner.goals",
         "catan_agents.planner.tactic",
         "catan_agents.planner.agent",
     ],

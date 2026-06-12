@@ -30,9 +30,20 @@ from catan_engine.board.resources import (
 )
 from catan_engine.board.state import CITY, GamePhase
 from catan_engine.env import ActionType
-from catan_engine.mechanics.flat import FLAT_ATYPE, FLAT_IDX, FLAT_TARGET
 
 from catan_agents.shared.policy import HostFlatMask, HostObservation
+from catan_agents.shared.rows import (
+    ROW_IDX as ROW_IDX,
+)
+from catan_agents.shared.rows import (
+    ROW_TARGET as ROW_TARGET,
+)
+from catan_agents.shared.rows import (
+    ROWS_OF_TYPE as ROWS_OF_TYPE,
+)
+from catan_agents.shared.rows import (
+    flat_row as flat_row,
+)
 
 # -- Static board graph, host-side ------------------------------------------
 
@@ -61,29 +72,8 @@ VERTEX_TILES: tuple[tuple[int, ...], ...] = tuple(
 )
 """Tiles cornered by each vertex."""
 
-# -- Static flat-action table, host-side -------------------------------------
-
-_ROW_TYPE: np.ndarray = np.asarray(FLAT_ATYPE)
-ROW_IDX: np.ndarray = np.asarray(FLAT_IDX)
-"""Primary action parameter per flat row (host-side decode)."""
-ROW_TARGET: np.ndarray = np.asarray(FLAT_TARGET)
-"""Secondary action parameter per flat row (host-side decode)."""
-
-ROWS_OF_TYPE: dict[int, np.ndarray] = {
-    int(t): np.flatnonzero(t == _ROW_TYPE) for t in ActionType
-}
-"""Flat rows of each action type, in table order."""
-
-_ROW_LOOKUP: dict[tuple[int, int, int], int] = {
-    (int(t), int(i), int(tg)): row
-    for row, (t, i, tg) in enumerate(zip(_ROW_TYPE, ROW_IDX, ROW_TARGET, strict=True))
-}
-
-
-def flat_row(atype: ActionType, idx: int = 0, target: int = 0) -> int:
-    """The flat row of one concrete ``(action type, params)`` move."""
-    return _ROW_LOOKUP[(int(atype), idx, target)]
-
+# The flat-action table's host decode (ROW_IDX / ROW_TARGET / ROWS_OF_TYPE /
+# flat_row) is re-exported above from ``catan_agents.shared.rows``.
 
 # Build costs in resource order [sheep, wheat, wood, brick, ore].
 COST_ROAD: np.ndarray = np.asarray(ROAD_COST, dtype=np.int64)

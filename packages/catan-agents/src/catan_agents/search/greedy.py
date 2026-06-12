@@ -8,7 +8,7 @@ import numpy as np
 from catan_engine.belief import BeliefView
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import BoardState, IntScalar, KeyScalar
-from catan_engine.env import N_FLAT, flat_to_action
+from catan_engine.env import N_FLAT
 from catan_engine.mechanics.action import (
     ActionParams,
     ActionType,
@@ -18,11 +18,10 @@ from catan_engine.mechanics.action import (
 from catan_engine.mechanics.trade import _PARTNER_BITS
 
 from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask
+from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import ValueFunction, heuristic_value
-
-# Static decode of every flat row: its action type and (idx, target) params.
-_ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 
 # The ProposeTrade rows and their partners (the low bits of the packed
 # target — see trade.pack_trade): a proposal's successor is material-neutral

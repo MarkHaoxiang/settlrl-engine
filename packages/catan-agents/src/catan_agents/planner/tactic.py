@@ -25,15 +25,16 @@ from catan_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES, DevC
 from catan_engine.board.layout import BoardLayout
 from catan_engine.board.resources import N_RESOURCES, ROAD_COST
 from catan_engine.board.state import BoardState, GamePhase, KeyScalar
-from catan_engine.env import N_FLAT, ActionType, flat_to_action
+from catan_engine.env import ActionType
 from catan_engine.mechanics.action import ActionParams, apply_action
 from catan_engine.mechanics.flat import flat_available_for
 
 from catan_agents.planner.pov import Pov
 from catan_agents.shared.policy import FlatMask
+from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
 from catan_agents.shared.value import heuristic_value
 
-_ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 _DEV_TOTAL = int(sum(DEV_CARD_COUNTS))
 _ROAD_COST = np.asarray(ROAD_COST, np.int64)
 _BUY_DEV_ROW = int(
@@ -118,7 +119,6 @@ def _successor_values(
     return jax.vmap(heuristic_value, in_axes=(None, 0, None))(layout, succ, player)
 
 
-@jax.jit
 def _after(
     layout: BoardLayout, state: BoardState, row: jax.Array, player: jax.Array
 ) -> tuple[jax.Array, jax.Array]:
@@ -128,6 +128,12 @@ def _after(
     succ, _ = apply_action(layout, state, _ROW_TYPE[row], params, jnp.bool_(True))
     mask2 = flat_available_for(layout, succ)
     return mask2, _successor_values(layout, succ, player, mask2)
+
+
+# One dispatch for a fixed-size block of first actions (callers pad with a
+# repeated legal row: fixed shapes mean one trace, padding is just ignored).
+_COMBO_PAD = 32
+_after_many = jax.jit(jax.vmap(_after, in_axes=(None, None, 0, None)))
 
 
 _ROLL_OUTCOMES = jnp.arange(2, 13, dtype=jnp.int32)
@@ -222,6 +228,10 @@ def _best_reply(
     return jnp.max(jnp.where(mask, vals, -jnp.inf))
 
 
+_REPLY_PAD = 8
+_best_replies = jax.jit(jax.vmap(_best_reply, in_axes=(None, None, 0, None)))
+
+
 class Tactic:
     """Per-decision successor values, computed lazily and cached per ``Pov``."""
 
@@ -273,21 +283,20 @@ class Tactic:
         the opponents' best reply: among moves equally good for us, prefer
         the one that leaves them the worst answer."""
         vals = self.values(pov)
-        top = float(np.max(vals[rows]))
-        short = [int(r) for r in rows if vals[r] >= top - margin]
+        order = sorted((int(r) for r in rows), key=lambda r: -float(vals[r]))
+        top = float(vals[order[0]])
+        short = [r for r in order if vals[r] >= top - margin][:_REPLY_PAD]
         if len(short) == 1:
             return short[0]
         assert self._board is not None
         layout, state = self._board
-        opponents = [p for p in range(pov.n_players) if p != pov.me]
-
-        def reply(row: int) -> float:
-            return max(
-                float(_best_reply(layout, state, jnp.int32(row), jnp.int32(p)))
-                for p in opponents
-            )
-
-        return min(short, key=reply)
+        padded = jnp.asarray(short + [short[0]] * (_REPLY_PAD - len(short)), jnp.int32)
+        replies = np.full(len(short), -np.inf)
+        for p in range(pov.n_players):
+            if p != pov.me:
+                per = np.asarray(_best_replies(layout, state, padded, jnp.int32(p)))
+                replies = np.maximum(replies, per[: len(short)])
+        return short[int(np.argmin(replies))]
 
     def combo_best(
         self, pov: Pov, enablers: list[int], follow: np.ndarray
@@ -299,15 +308,16 @@ class Tactic:
         self.values(pov)  # ensure the board cache
         assert self._board is not None
         layout, state = self._board
-        player = jnp.int32(pov.me)
+        live = enablers[:_COMBO_PAD]
+        padded = jnp.asarray(live + [live[0]] * (_COMBO_PAD - len(live)), jnp.int32)
+        masks, vals = _after_many(layout, state, padded, jnp.int32(pov.me))
+        masks2, vals2 = np.asarray(masks), np.asarray(vals)
         out: tuple[int, int, float] | None = None
-        for e in enablers:
-            mask2, vals2 = _after(layout, state, jnp.int32(e), player)
-            allowed = np.asarray(mask2) & follow
+        for i, e in enumerate(live):
+            allowed = masks2[i] & follow
             if not allowed.any():
                 continue
-            v2 = np.asarray(vals2)
-            row2 = int(np.flatnonzero(allowed)[np.argmax(v2[allowed])])
-            if out is None or v2[row2] > out[2]:
-                out = (e, row2, float(v2[row2]))
+            row2 = int(np.flatnonzero(allowed)[np.argmax(vals2[i][allowed])])
+            if out is None or vals2[i, row2] > out[2]:
+                out = (e, row2, float(vals2[i, row2]))
         return out

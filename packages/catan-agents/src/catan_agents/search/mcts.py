@@ -26,8 +26,10 @@ from catan_engine.mechanics.common import agent_selection_single, player_total_v
 from catan_engine.mechanics.dice import distribute_resources
 from jaxtyping import Array, Bool, Float, Int, UInt8
 
-from catan_agents.shared.greedy import _BASE
+from catan_agents.shared.greedy import TIER_SCORES
 from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
+from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import Value, ValueFunction, heuristic_value
 
@@ -35,8 +37,6 @@ _ILLEGAL = -1e9  # prior logit for illegal moves
 
 _Weights = Float[Array, f"flat={N_FLAT}"]  # one tree's improved-policy weights
 
-# Static decode of every flat row, for the root's one-step value sweep.
-_ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 
 # Interior-node prior: greedy's static tier table, tempered so tier gaps
 # (>= 100) land ~2 nats apart — strong enough to order first expansions,
@@ -48,7 +48,7 @@ _ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
 _NO_PROPOSE = jnp.where(
     _ROW_TYPE == ActionType.PROPOSE_TRADE, _ILLEGAL, 0.0
 )  # additive row demotion for both priors
-_TIER_LOGITS = _BASE / 50.0 + _NO_PROPOSE
+_TIER_LOGITS = TIER_SCORES / 50.0 + _NO_PROPOSE
 
 # Two-dice outcomes and their probabilities.
 _ROLLS = jnp.arange(2, 13)

@@ -13,20 +13,19 @@ from catan_engine.env import (
     N_FLAT,
     ActionType,
     Observation,
-    flat_to_action,
 )
 
 from catan_agents.shared.policy import FlatAction, FlatMask
+from catan_agents.shared.rows import ROW_PARAMS, ROW_TYPE
 from catan_agents.shared.value import tile_pips, vertex_pips
 
 _SETTLEMENT_COST = jnp.asarray(SETTLEMENT_COST, jnp.float32)
 _CITY_COST = jnp.asarray(CITY_COST, jnp.float32)
 _DEV_COST = jnp.asarray(DEV_CARD_COST, jnp.float32)
 
-# Static decode of every flat row: its action type and (idx, target) params.
-_ROW_TYPE, _ROW_PARAMS = flat_to_action(jnp.arange(N_FLAT))
-_ROW_IDX = _ROW_PARAMS.idx
-_ROW_TARGET = _ROW_PARAMS.target
+_ROW_TYPE = ROW_TYPE
+_ROW_IDX = ROW_PARAMS.idx
+_ROW_TARGET = ROW_PARAMS.target
 
 # Priority tier per action type. Tiers are spaced so no per-target bonus
 # (|bonus| < 50) can cross between them; types sharing a tier are never both
@@ -56,7 +55,11 @@ _TIER: dict[ActionType, float] = {
     ActionType.MARITIME_TRADE: 0.0,
     ActionType.PROPOSE_TRADE: 0.0,
 }
-_BASE = jnp.asarray([_TIER[ActionType(t)] for t in range(N_ACTION_TYPES)])[_ROW_TYPE]
+TIER_SCORES = jnp.asarray([_TIER[ActionType(t)] for t in range(N_ACTION_TYPES)])[
+    _ROW_TYPE
+]
+"""Per-row tier score — also mcts's root-prior table (scaled there)."""
+_BASE = TIER_SCORES
 
 # Row groups whose bonus is target-dependent.
 _VERTEX_BUILD = (

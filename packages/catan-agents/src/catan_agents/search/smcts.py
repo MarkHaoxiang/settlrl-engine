@@ -40,13 +40,13 @@ from catan_agents.search.mcts import (
     _NO_PROPOSE,
     _QTRANSFORM,
     _ROLL_P,
-    _ROW_PARAMS,
-    _ROW_TYPE,
     _TIER_LOGITS,
     _terminal,
     _winner,
 )
 from catan_agents.shared.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
+from catan_agents.shared.rows import ROW_PARAMS as _ROW_PARAMS
+from catan_agents.shared.rows import ROW_TYPE as _ROW_TYPE
 from catan_agents.shared.sample import sample_world
 from catan_agents.shared.value import Value, ValueFunction, heuristic_value
 
