@@ -1,9 +1,10 @@
 """Per-seat view tests: redaction and turn scoping, without HTTP.
 
 ``game_model`` is the hidden-information boundary, so beyond the spot checks
-there is a sweep: drive a random hotseat game and assert that no observer's
-view ever carries another player's hand, off-turn actions, or a belief that
-isn't theirs.
+there is a sweep: drive a random hotseat game and assert that while it is
+running no observer's view carries another player's hand, off-turn actions, or
+a belief that isn't theirs. Once the game ends every hand is revealed to
+everyone (see ``test_terminal_reveals_every_hand``).
 """
 
 import numpy as np
@@ -48,8 +49,9 @@ def test_belief_follows_the_acting_owned_seat() -> None:
     assert players[2].resources is None
 
 
-def test_no_view_ever_leaks_hidden_hands() -> None:
-    # A random 4-human game, checked at every step for every observer kind.
+def test_running_views_never_leak_hidden_hands() -> None:
+    # A random 4-human game, checked at every step (while running) for every
+    # observer kind. Redaction only applies before the game ends.
     session = GameSession(seed=1, seats=["human"] * 4)
     handle = _handle(session)
     rng = np.random.default_rng(0)
@@ -71,3 +73,15 @@ def test_no_view_ever_leaks_hidden_hands() -> None:
             else:
                 assert doc["belief"] is None
         session.apply(int(rng.choice(session.legal_flat())))
+
+
+def test_terminal_reveals_every_hand() -> None:
+    # When the game is over, every hand is open — even to a spectator.
+    session = GameSession(seed=3, n_players=2, seats=["random", "random"])
+    session._run_bots()  # play it out to a winner
+    assert session.terminal()
+    view = game_model(_handle(session), owned=set())
+    assert all(
+        p.resources is not None and p.dev_card_types is not None
+        for p in view.board.players
+    )

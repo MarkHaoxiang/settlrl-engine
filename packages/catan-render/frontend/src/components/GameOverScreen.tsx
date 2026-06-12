@@ -1,16 +1,18 @@
-// The end-of-game overlay: winner headline plus final standings (public VP,
-// awards, and piece/card counts). Dismissable to inspect the final board.
+// The end-of-game overlay: winner headline plus final standings (victory
+// points, awards, and piece/card counts). Dismissable to inspect the board.
 
 import type { Board, Player } from "../lib/boardData";
 import { PLAYER_COLORS, playerName } from "../lib/boardData";
 import { ACCENT, DIVIDER, buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
 
-const WIN_VP = 10;
-
-// Publicly-visible victory points: building points + the two awards. Hidden
-// victory-point dev cards are never revealed, so a winner can read above this;
-// their row is floored at the win threshold.
-const publicVp = (p: Player) => p.victoryPoints + (p.longestRoad ? 2 : 0) + (p.largestArmy ? 2 : 0);
+// Final victory points: building points + the two awards + victory-point dev
+// cards. Every hand is revealed once the game is over, so this is the true
+// total for every player.
+const totalVp = (p: Player) =>
+  p.victoryPoints +
+  (p.longestRoad ? 2 : 0) +
+  (p.largestArmy ? 2 : 0) +
+  (p.devCardTypes?.victory_point ?? 0);
 
 export default function GameOverScreen({
   board,
@@ -25,9 +27,8 @@ export default function GameOverScreen({
   onNewGame: () => void;
   onDismiss: () => void;
 }) {
-  const vp = (p: Player) => (p.player === winner ? Math.max(publicVp(p), WIN_VP) : publicVp(p));
   const standings = [...board.players].sort((a, b) =>
-    a.player === winner ? -1 : b.player === winner ? 1 : vp(b) - vp(a)
+    a.player === winner ? -1 : b.player === winner ? 1 : totalVp(b) - totalVp(a)
   );
   const headline =
     winner == null
@@ -71,7 +72,7 @@ export default function GameOverScreen({
               <span style={{ width: 18, textAlign: "center" }}>{p.player === winner ? "👑" : ""}</span>
               <span style={{ width: 12, height: 12, borderRadius: "50%", background: PLAYER_COLORS[p.player] }} />
               <span style={{ flex: 1, fontWeight: 600 }}>{playerName(p.player)}</span>
-              <span style={{ fontSize: 20, fontWeight: 800, width: 32, textAlign: "right" }}>{vp(p)}</span>
+              <span style={{ fontSize: 20, fontWeight: 800, width: 32, textAlign: "right" }}>{totalVp(p)}</span>
               <span style={{ width: 64, fontSize: 14, textAlign: "right" }} title="awards">
                 {p.longestRoad ? "🛣️" : ""}
                 {p.largestArmy ? `⚔️${p.knightsPlayed}` : ""}
@@ -82,9 +83,6 @@ export default function GameOverScreen({
             </div>
           ))}
         </div>
-        <span style={{ fontSize: 11, opacity: 0.55, textAlign: "center" }}>
-          Points shown are public (building + awards); hidden victory-point cards aren't revealed.
-        </span>
         <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
           <button style={buttonStyle} onClick={onDismiss}>
             View board

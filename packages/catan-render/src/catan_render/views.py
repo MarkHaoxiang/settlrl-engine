@@ -17,6 +17,8 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
     ``owned`` is the requester's proven seats: it decides ``your_turn``, which
     legal actions ship, whose hands stay unredacted, and the belief observer.
     Spectators (no seats) get the public view: counts, board, log — no hands.
+    Once the game is over every hand is revealed, to anyone: there is no longer
+    a position to protect, and the final standings show the full breakdown.
     """
     session = handle.session
     status = session.status()
@@ -34,10 +36,11 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
         else None
     )
     board = board_to_model(session.board)
-    for player in board.players:
-        if player.player not in owned:
-            player.resources = None
-            player.dev_card_types = None
+    if not status.terminal:
+        for player in board.players:
+            if player.player not in owned:
+                player.resources = None
+                player.dev_card_types = None
     return GameModel(
         id=handle.id,
         version=handle.version,
