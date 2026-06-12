@@ -43,9 +43,11 @@ Claiming a human seat (creating or joining a game) issues a bearer token, and ev
 proves its seats via the `X-Seat-Tokens` header: snapshots are per-seat views — your own
 hand arrives in full, everyone else's only as public counts, and the legal-move list only
 ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
-link, and opening it claims a free human seat (or spectates when none is left). Bot seats
-are stepped one move per request (`POST /api/games/{id}/bot`), so clients pace them with a
-short delay and animate each move.
+link, and opening it claims a free human seat (or spectates when none is left). The server
+pushes state: each client holds an event stream (`GET /api/games/{id}/events`, SSE) and
+receives its per-seat snapshot on every change, and bot seats are played by a server-side
+driver pacing one move at a time so each lands as its own pushed snapshot — games advance
+with no tab open, and every move animates.
 
 ## Requirements
 
@@ -88,12 +90,13 @@ Open http://localhost:8000.
 
 The server is configured by environment variables: `HOST` (default `0.0.0.0`),
 `PORT` (default `8000`), `RELOAD` (default `1`; set `0` in production — the
-reloader is a dev file-watcher), and `CATAN_RENDER_CREATE_KEY` (when set, only
+reloader is a dev file-watcher), `CATAN_RENDER_CREATE_KEY` (when set, only
 requests carrying it as `X-Create-Key` may create games — the dialog's "Host
-key" field; players joining or playing never need it). Run **one process,
-one worker**: live games are held in memory, so extra workers would split
-them. Restarts lose live games. The registry holds up to 32 games, evicting
-finished or hour-idle ones to make room.
+key" field; players joining or playing never need it), and `ROOT_PATH` (the
+proxy prefix when served under a path). Run **one process, one worker**: live
+games are held in memory, so extra workers would split them. Restarts lose
+live games. The registry holds up to 32 games, evicting finished or hour-idle
+ones to make room.
 
 The repo-root `Dockerfile` builds a self-contained image (frontend compiled
 in, CPU JAX):
@@ -102,6 +105,18 @@ in, CPU JAX):
 docker build -t catan-render .
 docker run -p 8000:8000 -e CATAN_RENDER_CREATE_KEY=<secret> catan-render
 ```
+
+To serve under a path instead of a (sub)domain — e.g. `markhaoxiang.com/catan`
+behind a proxy that strips the prefix (Caddy `handle_path /catan/*`) — bake
+the prefix into the frontend and tell FastAPI about it:
+
+```bash
+docker build -t catan-render --build-arg BASE_PATH=/catan/ .
+docker run -p 8000:8000 -e ROOT_PATH=/catan catan-render
+```
+
+The mark-haoxiang repo's `infra/` wires this up as the `catan` compose
+service behind its Caddy.
 
 Seat tokens are bearer secrets, so put TLS in front for anything beyond a
 LAN — e.g. Caddy, which manages certificates itself:
@@ -152,7 +167,7 @@ BASE=http://localhost:8000 npm run e2e
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
-| `POST /api/games/{id}/bot` | Play one due bot move; the snapshot's `bot_move` says who played what (null when none was due) |
+| `GET /api/games/{id}/events` | Server-sent events: the requester's snapshot immediately, then again on every change (`bot_move` carries the server-paced bot play just made) |
 | `POST /api/games/{id}/chat` | Append a chat message `{ "text", "player"?: <owned seat> }` (no seat: spectator) |
 | `GET /api/games/{id}/record` | The finished game as a replayable `catan_engine.record` transcript (`409` while running: a record reconstructs hidden hands) |
 | `POST /api/games/{id}/replay` | Load a finished game for replay (`409` while running) |
@@ -186,7 +201,8 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/catan-render/
 ├── src/catan_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
-│   ├── server.py        # create_app + thin routes: auth, locking, status codes
+│   ├── server.py        # create_app + thin routes: auth, locking, status codes, SSE
+│   ├── driver.py        # Server-side bot pacing (one daemon thread per game)
 │   ├── views.py         # Per-seat snapshots: the hidden-information boundary
 │   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
 │   ├── openapi.py       # Schema dump backing the generated frontend types
@@ -209,7 +225,7 @@ packages/catan-render/
         ├── lib/game.ts       # Live-game API client (/api/game*)
         ├── lib/replay.ts     # Replay API client (/api/replay*)
         ├── lib/actionMeta.ts # Action display metadata: icons, labels, costs, confirm phrasing
-        ├── lib/useGame.ts    # Hook driving one live game (act / chat / bot pacing)
+        ├── lib/useGame.ts    # Hook driving one live game (snapshot stream, act / chat)
         ├── lib/seats.ts      # Seat tokens this browser holds, per game (localStorage)
         ├── lib/viewport.ts   # useTableViewport: pan / zoom / rotate (mouse, touch, keyboard)
         ├── lib/theme.ts      # Light / dark theme switching (persisted)

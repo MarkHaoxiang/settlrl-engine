@@ -5,7 +5,7 @@
 // index) — scoped by the seat tokens sent with every request: your_turn,
 // actions, unredacted hands, and belief all follow the seats you can prove.
 
-import { api } from "./api";
+import { api, sse } from "./api";
 import type { components } from "./api-schema";
 import { adaptBoard, type Board } from "./boardData";
 import type { SeatTokens } from "./seats";
@@ -58,15 +58,17 @@ export async function postAction(
   );
 }
 
-// Step one due bot move; the snapshot's bot_move says what was played (null
-// when no bot move was due).
-export async function postBotStep(gameId: string, tokens: SeatTokens): Promise<GameSnapshot> {
-  return adaptGame(
-    await api<GameWire>(`/api/games/${gameId}/bot`, {
-      method: "POST",
-      headers: seatHeaders(tokens),
-    })
-  );
+// Subscribe to the game's pushed snapshots (SSE): the current one arrives
+// immediately, then a new one on every state change — moves, server-paced
+// bot plays, chat, joins. Ends only on abort or a dropped connection.
+export async function* streamGame(
+  gameId: string,
+  tokens: SeatTokens,
+  signal: AbortSignal
+): AsyncGenerator<GameSnapshot> {
+  for await (const data of sse(`/api/games/${gameId}/events`, seatHeaders(tokens), signal)) {
+    yield adaptGame(JSON.parse(data) as GameWire);
+  }
 }
 
 // Append a chat message to the game log (player: an owned seat it belongs

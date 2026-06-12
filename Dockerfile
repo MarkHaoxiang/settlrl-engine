@@ -6,11 +6,15 @@
 #   docker run -p 8000:8000 -e CATAN_RENDER_CREATE_KEY=<secret> catan-render
 
 FROM node:22-slim AS frontend
+# The URL prefix the app is served under (assets, routes, API calls); pair a
+# non-root value with ROOT_PATH at runtime, e.g. BASE_PATH=/catan/ behind a
+# proxy that strips /catan.
+ARG BASE_PATH=/
 WORKDIR /build
 COPY packages/catan-render/frontend/package.json packages/catan-render/frontend/package-lock.json ./
 RUN npm ci
 COPY packages/catan-render/frontend/ ./
-RUN npm run build
+RUN npm run build -- --base=$BASE_PATH
 
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 WORKDIR /app

@@ -8,11 +8,15 @@ per-seat view contents live in ``test_views.py`` and registry logic in
 """
 
 import json
+import socket
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
+import uvicorn
 from catan_render.games import GameRegistry
 from catan_render.server import create_app
 from fastapi.testclient import TestClient
@@ -173,12 +177,61 @@ def test_create_same_seed_reproduces_the_board(client: TestClient) -> None:
     assert a == b
 
 
-def test_bot_endpoint_steps_one_move_and_reports_it(client: TestClient) -> None:
+def _next_event(lines: Iterator[str]) -> dict[str, object]:
+    """The next SSE data event (skipping keepalives), parsed."""
+    for _, line in zip(range(50), lines, strict=False):
+        if line.startswith("data:"):
+            return dict(json.loads(line[5:].strip()))
+    raise AssertionError("no data event arrived")
+
+
+def test_events_stream_snapshot_now_then_on_every_change() -> None:
+    # The never-ending stream needs a real server: TestClient buffers whole
+    # responses, so it would block on the open stream forever.
+    config = uvicorn.Config(create_app(GameRegistry()), log_level="warning")
+    server = uvicorn.Server(config)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    thread = threading.Thread(target=server.run, args=([sock],), daemon=True)
+    thread.start()
+    try:
+        while not server.started:
+            time.sleep(0.02)
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http:
+            # All-human so no bot driver mutates the game mid-test.
+            doc = http.post(
+                "/api/games", json={"seed": 0, "seats": ["human"] * 4}
+            ).json()
+            game, hdr = doc["id"], _hdr(dict(doc["tokens"]))
+            with http.stream("GET", f"/api/games/{game}/events", headers=hdr) as resp:
+                lines = resp.iter_lines()
+                first = _next_event(lines)
+                assert first["status"]["your_turn"] is True  # type: ignore[index]
+                flat = first["actions"][0]["flat"]  # type: ignore[index]
+                http.post(f"/api/games/{game}/action", json={"flat": flat}, headers=hdr)
+                second = _next_event(lines)
+        assert second["version"] > first["version"]  # type: ignore[operator]
+        assert len(second["log"]) == len(first["log"]) + 1  # type: ignore[arg-type]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
+    registry = GameRegistry()
+    client = TestClient(create_app(registry, bot_delay=0.0))
     game, _ = _create(client, seats=["random"] * 4)
-    body = client.post(f"/api/games/{game}/bot").json()
-    assert body["bot_move"] is not None
-    assert body["bot_move"]["player"] == 0
-    assert body["bot_move"]["action"]["type"] == "setup_settlement"
+    handle = registry.get(game)
+    assert handle is not None
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        with handle.lock:
+            if handle.session.terminal():
+                break
+        time.sleep(0.1)
+    body = client.get(f"/api/games/{game}").json()
+    assert body["status"]["terminal"] and body["status"]["winner"] is not None
 
 
 def test_concurrent_duplicate_actions_apply_once(client: TestClient) -> None:
@@ -235,8 +288,10 @@ def _finish(registry: GameRegistry, game: str) -> None:
     """Drive an all-bot game to completion in-process (HTTP would be slow)."""
     handle = registry.get(game)
     assert handle is not None
-    handle.session._run_bots()
-    assert handle.session.terminal()
+    with handle.lock:  # the game's own bot driver steps it concurrently
+        handle.session._run_bots()
+        assert handle.session.terminal()
+        handle.bump()
 
 
 def test_record_and_replay_export_finished_games_only(

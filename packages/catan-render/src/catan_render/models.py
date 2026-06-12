@@ -240,10 +240,12 @@ class GameModel(BaseModel):
     """
 
     id: str
+    # Change counter: clients drop snapshots older than the one shown.
+    version: int = 0
     board: BoardModel
     status: GameStatusModel
     actions: list[ActionModel] = []
-    # Set on bot-step responses: the move that endpoint just played.
+    # The last bot move played (cleared when a human acts), for animation.
     bot_move: BotMoveModel | None = None
     # The game's chat / log (moves, chat messages, the win), oldest first.
     log: list[LogEntryModel] = []

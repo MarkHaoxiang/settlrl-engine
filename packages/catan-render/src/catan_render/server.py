@@ -8,26 +8,27 @@ apps with their own registries instead of sharing module state.
 import json
 import os
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
+import anyio.to_thread
 from catan_engine.record import GameRecord, ReplayError
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from .actions import decode_actions
 from .bots import bot_catalog
+from .driver import start_bot_driver
 from .games import GameHandle, GameRegistry, RegistryFullError
-from .models import BotMoveModel, GameModel, ReplayStateModel
+from .models import GameModel, ReplayStateModel
 from .replay import ReplaySession
-from .session import GameSession, IllegalActionError
+from .session import HUMAN, GameSession, IllegalActionError
 from .views import game_model
 
 
@@ -50,6 +51,10 @@ def _warm_jit_cache() -> None:
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     threading.Thread(target=_warm_jit_cache, daemon=True).start()
+    # Each event-stream subscriber occupies a threadpool thread for its whole
+    # connection; the anyio default (40) would cap concurrent clients and
+    # then starve ordinary requests.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 160
     yield
 
 
@@ -122,17 +127,22 @@ class _ChatRequest(BaseModel):
 
 
 def create_app(
-    games: GameRegistry | None = None, create_key: str | None = None
+    games: GameRegistry | None = None,
+    create_key: str | None = None,
+    bot_delay: float = 0.65,
+    root_path: str = "",
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
     ``create_key`` gates game creation: when set, ``POST /api/games`` requires
     a matching ``X-Create-Key`` header. Public deployments set it so strangers
-    can't spam games and exhaust the registry.
+    can't spam games and exhaust the registry. ``bot_delay`` paces the
+    server-side bot driver (seconds between bot moves, so clients can animate
+    each one). ``root_path`` is the proxy prefix the app is served under.
     """
     registry = games if games is not None else GameRegistry()
     replays = _ReplaySlot()
-    app = FastAPI(title="Catan Render", lifespan=_lifespan)
+    app = FastAPI(title="Catan Render", lifespan=_lifespan, root_path=root_path)
 
     def handle_of(game_id: str) -> GameHandle:
         handle = registry.get(game_id)
@@ -167,6 +177,8 @@ def create_app(
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
         tokens = dict(handle.claim(seat) for seat in claiming)
+        if any(kind != HUMAN for kind in session.seats):
+            start_bot_driver(handle, bot_delay)
         return _CreatedModel(id=handle.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
@@ -177,6 +189,7 @@ def create_app(
                 seat, token = handle.claim(req.seat)
             except (LookupError, ValueError) as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            handle.bump()
         return _JoinedModel(id=game_id, seat=seat, token=token)
 
     @app.get("/api/games/{game_id}")
@@ -199,24 +212,35 @@ def create_app(
                 handle.session.apply(req.flat)
             except IllegalActionError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            handle.bot_move = None
+            handle.bump()
             return game_model(handle, owned)
 
-    @app.post("/api/games/{game_id}/bot")
-    def post_bot_step(game_id: str, x_seat_tokens: SeatTokens = None) -> GameModel:
-        """Play one due bot move; the snapshot plus what was played
-        (``bot_move``, null when no bot move was due)."""
+    @app.get("/api/games/{game_id}/events")
+    def get_events(game_id: str, x_seat_tokens: SeatTokens = None) -> StreamingResponse:
+        """Server-sent events: the requester's snapshot now, then again on
+        every state change (moves, bot plays, chat, joins). Comment lines
+        keep idle connections alive."""
         handle = handle_of(game_id)
-        with handle.lock:
-            seat = handle.session.acting_seat()
-            flat = handle.session.bot_step()
-            move = (
-                None
-                if flat is None
-                else BotMoveModel(player=seat, action=decode_actions([flat])[0])
-            )
-            return game_model(
-                handle, handle.owned_seats(_tokens(x_seat_tokens)), bot_move=move
-            )
+        tokens = _tokens(x_seat_tokens)
+
+        def stream() -> Iterator[str]:
+            seen = -1
+            while True:
+                with handle.lock:
+                    if handle.version == seen:
+                        handle.lock.wait(timeout=15.0)
+                    if handle.closed:
+                        return
+                    if handle.version == seen:
+                        body = None  # idle: fall through to a keepalive
+                    else:
+                        seen = handle.version
+                        model = game_model(handle, handle.owned_seats(tokens))
+                        body = model.model_dump_json()
+                yield f"data: {body}\n\n" if body else ": keepalive\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
 
     @app.post("/api/games/{game_id}/chat")
     def post_chat(
@@ -234,6 +258,7 @@ def create_app(
             if req.player is not None and req.player not in owned:
                 raise HTTPException(status_code=403, detail="not your seat")
             handle.session.add_chat(req.player, text)
+            handle.bump()
             return game_model(handle, owned)
 
     @app.get("/api/games/{game_id}/record")
@@ -335,5 +360,9 @@ class _SPAStaticFiles(StaticFiles):
 # Serve built frontend when it exists (src/catan_render/server.py -> package root)
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
-# The uvicorn entry point (catan_render.server:app).
-app = create_app(create_key=os.environ.get("CATAN_RENDER_CREATE_KEY"))
+# The uvicorn entry point (catan_render.server:app). ROOT_PATH is the proxy
+# prefix when served under a path (e.g. /catan behind Caddy's handle_path).
+app = create_app(
+    create_key=os.environ.get("CATAN_RENDER_CREATE_KEY"),
+    root_path=os.environ.get("ROOT_PATH", ""),
+)

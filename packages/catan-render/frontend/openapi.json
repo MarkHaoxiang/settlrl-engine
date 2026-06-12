@@ -231,11 +231,11 @@
     }
    }
   },
-  "/api/games/{game_id}/bot": {
-   "post": {
-    "summary": "Post Bot Step",
-    "description": "Play one due bot move; the snapshot plus what was played\n(``bot_move``, null when no bot move was due).",
-    "operationId": "post_bot_step_api_games__game_id__bot_post",
+  "/api/games/{game_id}/events": {
+   "get": {
+    "summary": "Get Events",
+    "description": "Server-sent events: the requester's snapshot now, then again on\nevery state change (moves, bot plays, chat, joins). Comment lines\nkeep idle connections alive.",
+    "operationId": "get_events_api_games__game_id__events_get",
     "parameters": [
      {
       "name": "game_id",
@@ -268,9 +268,7 @@
       "description": "Successful Response",
       "content": {
        "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/GameModel"
-        }
+        "schema": {}
        }
       }
      },
@@ -913,6 +911,11 @@
      "id": {
       "type": "string",
       "title": "Id"
+     },
+     "version": {
+      "type": "integer",
+      "title": "Version",
+      "default": 0
      },
      "board": {
       "$ref": "#/components/schemas/BoardModel"

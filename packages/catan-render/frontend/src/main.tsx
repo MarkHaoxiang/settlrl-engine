@@ -9,7 +9,9 @@ initTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    {/* basename follows the build-time base, so routes work behind a
+        stripped proxy prefix (vite --base=/catan/) as well as at /. */}
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
       <App />
     </BrowserRouter>
   </StrictMode>

@@ -15,6 +15,7 @@ import secrets
 import threading
 import time
 
+from .models import BotMoveModel
 from .session import HUMAN, GameSession
 
 # Games are addressed by short ids; tokens prove seat ownership.
@@ -36,13 +37,28 @@ class GameHandle:
     def __init__(self, game_id: str, session: GameSession) -> None:
         self.id = game_id
         self.session = session
-        self.lock = threading.Lock()
+        # A Condition doubles as the per-game lock: mutators hold it and call
+        # bump(); push subscribers and the bot driver wait() on it.
+        self.lock = threading.Condition()
         # seat -> token for claimed human seats.
         self.claims: dict[int, str] = {}
         self.touched = time.monotonic()
+        # Monotonic change counter: every state change bumps it, and waiters
+        # re-serialise their view when it moves.
+        self.version = 0
+        # The last bot move played (cleared when a human acts), so pushed
+        # snapshots can animate it.
+        self.bot_move: BotMoveModel | None = None
+        # Set on eviction: waiters and the bot driver exit.
+        self.closed = False
 
     def touch(self) -> None:
         self.touched = time.monotonic()
+
+    def bump(self) -> None:
+        """Mark a state change and wake waiters (caller holds the lock)."""
+        self.version += 1
+        self.lock.notify_all()
 
     def human_seats(self) -> list[int]:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
@@ -117,3 +133,6 @@ class GameRegistry:
                 raise RegistryFullError("all games are active; try again later")
             victim = min(evictable, key=lambda h: (not h.session.terminal(), h.touched))
             del self._games[victim.id]
+            with victim.lock:
+                victim.closed = True
+                victim.bump()

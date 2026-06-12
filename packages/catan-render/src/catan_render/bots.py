@@ -19,7 +19,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 from catan_agents import POLICIES, AgentSpec, BeliefSpec, ObservationSpec
-from catan_agents.shared.policy import BeliefPolicy, Policy
+from catan_agents.shared.policy import BeliefPolicy, Policy, StatefulPolicy
 from catan_engine.board.state import KeyScalar
 from catan_engine.env import BatchedCatanEnv, Observation
 
@@ -39,7 +39,9 @@ Knob = int | float | bool
 _ACTS: dict[tuple[str, tuple[tuple[str, Knob], ...]], Policy | BeliefPolicy] = {}
 
 
-def _knobs(spec: AgentSpec[Policy] | AgentSpec[BeliefPolicy]) -> dict[str, Knob]:
+def _knobs(
+    spec: AgentSpec[Policy] | AgentSpec[BeliefPolicy] | AgentSpec[StatefulPolicy],
+) -> dict[str, Knob]:
     """The family's scalar build parameters and their effective defaults."""
     out: dict[str, Knob] = {}
     for name, param in inspect.signature(spec.make).parameters.items():
@@ -57,6 +59,10 @@ def bot_catalog() -> dict[str, dict[str, object]]:
     """
     catalog: dict[str, dict[str, object]] = {}
     for name, spec in POLICIES.items():
+        # Stateful families need one live agent per (session, seat) — a seam
+        # the per-move bot_act doesn't have — so they are not offered.
+        if not isinstance(spec, ObservationSpec | BeliefSpec):
+            continue
         params = {
             k: {
                 "type": "bool"
@@ -101,6 +107,8 @@ def _policy(kind: str, params: Mapping[str, Knob]) -> Policy | BeliefPolicy:
     key = (kind, tuple(sorted(params.items())))
     if key not in _ACTS:
         spec = POLICIES[kind]
+        if not isinstance(spec, ObservationSpec | BeliefSpec):
+            raise ValueError(f"bot kind {kind!r} is not seatable (stateful family)")
         built = spec.make(**{**spec.defaults, **params}) if params else spec.policy
         _ACTS[key] = jax.jit(built)
     return _ACTS[key]
