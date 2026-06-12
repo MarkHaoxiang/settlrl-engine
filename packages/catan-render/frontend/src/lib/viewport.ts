@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useGesture } from "@use-gesture/react";
 
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 3;
@@ -8,9 +9,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 // Pan / zoom / rotate for the table, driven by mouse drag, wheel, pinch, and
 // keyboard (arrows pan, +/- zoom, [ ] spin a quarter turn, 0 re-fits). The
-// view opens fitted to the scene.
+// view opens fitted to the scene. Pointer/wheel/pinch recognition is delegated
+// to @use-gesture (cross-device deltas, the click-vs-drag threshold, pointer
+// capture, and the non-passive wheel listener); the state, rotation, keyboard,
+// and fit-to-scene are ours.
 //
-// Wiring: put `containerRef` + `containerHandlers` on the viewport element,
+// Wiring: put `containerRef` on the viewport element (gestures bind to it),
 // `sceneTransform` on a layer inside it, and `rotationTransform` on a second
 // layer inside that — rotation gets its own (transitioned) layer so spinning
 // animates without dragging on pan/zoom updates.
@@ -21,95 +25,41 @@ export function useTableViewport(sceneW: number, sceneH: number) {
   // Cumulative degrees, so each quarter turn animates the short way round
   // instead of unwinding.
   const [rotation, setRotation] = useState(0);
-
-  // Active drag-to-pan gesture; `moved` flips once past the click-vs-drag
-  // threshold, after which the pointer is captured so releasing over a board
-  // element doesn't also click it.
-  const drag = useRef<{
-    id: number;
-    x: number;
-    y: number;
-    panX: number;
-    panY: number;
-    moved: boolean;
-  } | null>(null);
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (drag.current) {
-      // A second touch landed: this is a pinch, not a pan.
-      drag.current = null;
-      return;
-    }
-    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, moved: false };
-  };
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d || e.pointerId !== d.id) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    if (!d.moved && Math.hypot(dx, dy) > 4) {
-      d.moved = true;
-      e.currentTarget.setPointerCapture(d.id);
-    }
-    if (d.moved) setPan({ x: d.panX + dx, y: d.panY + dy });
-  };
-
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.id === e.pointerId) drag.current = null;
-  };
-
-  // Distance between the two active touch points during a pinch gesture.
-  const pinchStart = useRef<{ dist: number; zoom: number } | null>(null);
-  // Latest zoom, so the native handlers below read it without re-subscribing.
+  // Latest zoom, so pinch can seed its scale from the current value.
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
-  // Wheel + pinch zoom. Attached natively so we can preventDefault (React's
-  // onWheel is passive and would still scroll/zoom the page).
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      // Trackpads report small deltas; mice report large ones. Exponential
-      // scaling keeps the zoom feel consistent across both.
-      const factor = Math.exp(-e.deltaY * 0.0015);
-      setZoom((z) => clamp(z * factor, MIN_ZOOM, MAX_ZOOM));
-    };
-
-    const touchDist = (t: TouchList) =>
-      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
-        pinchStart.current = { dist: touchDist(e.touches), zoom: zoomRef.current };
-      }
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && pinchStart.current) {
-        e.preventDefault();
-        const ratio = touchDist(e.touches) / pinchStart.current.dist;
-        setZoom(clamp(pinchStart.current.zoom * ratio, MIN_ZOOM, MAX_ZOOM));
-      }
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) pinchStart.current = null;
-    };
-
-    el.addEventListener("wheel", onWheel, { passive: false });
-    el.addEventListener("touchstart", onTouchStart, { passive: false });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd);
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-    };
-  }, []);
+  useGesture(
+    {
+      // memo holds the pan at gesture start, so movement (screen px) is added
+      // to a fixed base rather than a value that shifts as we re-render.
+      onDrag: ({ movement: [mx, my], first, memo }) => {
+        const base = first || !memo ? [pan.x, pan.y] : memo;
+        setPan({ x: base[0] + mx, y: base[1] + my });
+        return base;
+      },
+      // Trackpads report small deltas, mice large ones; exponential scaling
+      // keeps the zoom feel consistent across both.
+      onWheel: ({ delta: [, dy], event }) => {
+        event.preventDefault();
+        setZoom((z) => clamp(z * Math.exp(-dy * 0.0015), MIN_ZOOM, MAX_ZOOM));
+      },
+      onPinch: ({ offset: [scale] }) => {
+        setZoom(clamp(scale, MIN_ZOOM, MAX_ZOOM));
+      },
+    },
+    {
+      target: containerRef,
+      eventOptions: { passive: false },
+      // filterTaps + a small threshold keep a click from registering as a pan,
+      // so taps still reach the board elements underneath.
+      drag: { filterTaps: true, threshold: 4, pointer: { buttons: 1 } },
+      pinch: {
+        scaleBounds: { min: MIN_ZOOM, max: MAX_ZOOM },
+        from: () => [zoomRef.current, 0],
+      },
+    }
+  );
 
   const fitZoom = () => {
     const el = containerRef.current;
@@ -173,12 +123,6 @@ export function useTableViewport(sceneW: number, sceneH: number) {
 
   return {
     containerRef,
-    containerHandlers: {
-      onPointerDown,
-      onPointerMove,
-      onPointerUp,
-      onPointerCancel: onPointerUp,
-    },
     sceneTransform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
     rotationTransform: `rotate(${rotation}deg)`,
     rotate: (deg: number) => setRotation((r) => r + deg),

@@ -70,7 +70,7 @@ export default function BoardView({ board, interaction, dice, trade }: Props) {
   const offsetX = -minX + HEX_SIZE + PADDING + oceanX;
   const offsetY = -minY + HEX_SIZE + PADDING + oceanY;
 
-  const { containerRef, containerHandlers, sceneTransform, rotationTransform, rotate } =
+  const { containerRef, sceneTransform, rotationTransform, rotate } =
     useTableViewport(width, height);
 
   // Anchor for the caller's popover: top-centre of the clicked SVG element,
@@ -84,7 +84,6 @@ export default function BoardView({ board, interaction, dice, trade }: Props) {
   return (
     <div
       ref={containerRef}
-      {...containerHandlers}
       style={{
         position: "absolute",
         inset: 0,
