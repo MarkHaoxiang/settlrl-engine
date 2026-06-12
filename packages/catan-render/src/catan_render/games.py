@@ -14,11 +14,10 @@ from __future__ import annotations
 import secrets
 import threading
 import time
-from collections.abc import Sequence
-from typing import Literal, cast
+from typing import cast
 
 from .models import BotMoveModel
-from .session import HUMAN, GameSession, SeatLike
+from .session import HUMAN, GameSession, GameSetup
 from .store import GameJournal, GameStore
 
 # Games are addressed by unguessable ids; tokens prove seat ownership. The id
@@ -127,7 +126,7 @@ class GameRegistry:
                 game_id = secrets.token_urlsafe(_ID_BYTES)
             handle = GameHandle(game_id, session)
             if self._store is not None:
-                handle.journal = self._store.create(_journal_header(game_id, session))
+                handle.journal = self._store.create(game_id, session.setup.to_dict())
             self._games[game_id] = handle
             return handle
 
@@ -176,28 +175,6 @@ class GameRegistry:
                 self._store.remove(victim.id)
 
 
-def _reconstructable_seats(session: GameSession) -> list[SeatLike]:
-    """``session``'s seats as a ``reset``-compatible list (round-trips through
-    the journal header)."""
-    seats: list[SeatLike] = []
-    for kind, params in zip(session.seats, session.seat_params, strict=True):
-        if kind == HUMAN or not params:
-            seats.append(kind)
-        else:
-            seats.append({"kind": kind, "params": dict(params)})
-    return seats
-
-
-def _journal_header(game_id: str, session: GameSession) -> dict[str, object]:
-    return {
-        "id": game_id,
-        "seed": session.seed,
-        "n_players": session.n_players,
-        "number_placement": session.number_placement,
-        "seats": _reconstructable_seats(session),
-    }
-
-
 def restore_registry(store: GameStore, max_games: int = 32) -> GameRegistry:
     """Rebuild a registry from a store: replay each game's journal back into a
     live handle, so a restart resumes games in progress (callers restart bot
@@ -215,28 +192,32 @@ def _rebuild_handle(
 ) -> GameHandle | None:
     """Reconstruct one game from its header and event log, or None if it can't
     be replayed (a corrupt file is dropped rather than failing the boot)."""
+    claims: dict[int, str] = {}
     try:
-        seed = int(str(header["seed"]))
-        n_players = int(str(header["n_players"]))
-        placement = cast(Literal["random", "spiral"], header["number_placement"])
-        seats = cast(Sequence[SeatLike], header["seats"])
-        session = GameSession(seed=seed, n_players=n_players)
-        session.reset(seed, number_placement=placement, seats=seats)
-        claims: dict[int, str] = {}
-        n_moves = 0
-        for ev in events:
-            kind = ev.get("t")
-            if kind == "move":
-                session.apply(int(str(ev["flat"])))
-                n_moves += 1
-            elif kind == "chat":
-                session.add_chat(cast("int | None", ev.get("player")), str(ev["text"]))
-            elif kind == "claim":
-                claims[int(str(ev["seat"]))] = str(ev["token"])
+        session = GameSession.from_setup(GameSetup.from_dict(header))
+        for event in events:
+            _replay_event(session, claims, event)
     except (KeyError, ValueError, TypeError):
         return None
-    handle = GameHandle(str(header["id"]), session)
+    game_id = str(header["id"])
+    handle = GameHandle(game_id, session)
     handle.claims = claims
     handle.version = len(events)
-    handle.journal = store.reopen(str(header["id"]), moves_written=n_moves)
+    moves = sum(1 for e in events if e.get("t") == "move")
+    handle.journal = store.reopen(game_id, moves_written=moves)
     return handle
+
+
+def _replay_event(
+    session: GameSession, claims: dict[int, str], event: dict[str, object]
+) -> None:
+    """Apply one journalled event back onto the rebuilding game."""
+    match event.get("t"):
+        case "move":
+            session.apply(cast(int, event["flat"]))
+        case "chat":
+            session.add_chat(
+                cast("int | None", event.get("player")), str(event["text"])
+            )
+        case "claim":
+            claims[cast(int, event["seat"])] = str(event["token"])

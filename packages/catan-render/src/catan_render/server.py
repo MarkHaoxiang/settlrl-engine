@@ -50,6 +50,16 @@ def _warm_jit_cache() -> None:
         scratch.bot_step()  # compiles the default bot policy
 
 
+def _build_registry(games: GameRegistry | None, state_dir: str | None) -> GameRegistry:
+    """The app's registry: the one passed in (tests), one restored from the
+    store, or a fresh in-memory one."""
+    if games is not None:
+        return games
+    if state_dir:
+        return restore_registry(GameStore(state_dir))
+    return GameRegistry()
+
+
 def _needs_driver(handle: GameHandle, turn_timeout: float) -> bool:
     """A non-terminal game needs the server-side driver when it has a bot seat
     to pace, or a turn timeout to enforce on human seats (started on create,
@@ -158,12 +168,7 @@ def create_app(
     when ``games`` is passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a
     human turn that has gone idle that long, so an abandoned game still finishes.
     """
-    if games is not None:
-        registry = games
-    elif state_dir:
-        registry = restore_registry(GameStore(state_dir))
-    else:
-        registry = GameRegistry()
+    registry = _build_registry(games, state_dir)
     replays = _ReplaySlot()
     # Each live event stream holds one permit for its whole connection; past
     # the cap, new subscribers get 503 rather than exhausting the threadpool.

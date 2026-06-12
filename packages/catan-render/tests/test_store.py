@@ -5,9 +5,25 @@ from pathlib import Path
 
 from catan_render.games import GameHandle, GameRegistry, restore_registry
 from catan_render.server import create_app
-from catan_render.session import GameSession
+from catan_render.session import GameSession, GameSetup
 from catan_render.store import GameStore
 from fastapi.testclient import TestClient
+
+
+def test_game_setup_round_trips_through_a_dict() -> None:
+    setup = GameSetup(
+        seed=3,
+        n_players=2,
+        number_placement="spiral",
+        seats=["human", {"kind": "random", "params": {}}],
+    )
+    # from_dict ignores the journal's framing keys (id, t).
+    assert GameSetup.from_dict({**setup.to_dict(), "id": "x", "t": "header"}) == setup
+
+
+def test_session_setup_captures_its_seats() -> None:
+    session = GameSession(seed=5, n_players=2, seats=["human", "random"])
+    assert session.setup == GameSetup(5, 2, "random", ["human", "random"])
 
 
 def _play(handle: GameHandle, n: int) -> None:

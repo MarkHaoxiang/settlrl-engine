@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,6 +41,9 @@ class GameJournal:
     def _append(self, event: dict[str, object]) -> None:
         self._fh.write(json.dumps(event) + "\n")
         self._fh.flush()
+
+    def header(self, game_id: str, setup: Mapping[str, object]) -> None:
+        self._append({"t": "header", "id": game_id, **setup})
 
     def sync_moves(self, moves: Sequence["Move"]) -> None:
         for move in moves[self._moves_written :]:
@@ -75,10 +78,10 @@ class GameStore:
     def _path(self, game_id: str) -> Path:
         return self.root / f"{game_id}.jsonl"
 
-    def create(self, header: dict[str, object]) -> GameJournal:
+    def create(self, game_id: str, setup: Mapping[str, object]) -> GameJournal:
         """Start a journal for a new game, writing its header line."""
-        journal = GameJournal(self._path(str(header["id"])), moves_written=0)
-        journal._append({"t": "header", **header})
+        journal = GameJournal(self._path(game_id), moves_written=0)
+        journal.header(game_id, setup)
         return journal
 
     def reopen(self, game_id: str, moves_written: int) -> GameJournal:

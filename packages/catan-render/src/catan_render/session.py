@@ -10,7 +10,8 @@ a replayable ``GameRecord`` export.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Literal
+from dataclasses import dataclass
+from typing import Literal, cast
 
 import jax
 import numpy as np
@@ -47,6 +48,36 @@ _MAX_BOT_STEPS = 50_000
 _LOG_CAP = 500
 
 
+@dataclass(frozen=True)
+class GameSetup:
+    """What determines a fresh game; with the move trace it reconstructs one
+    exactly (the model behind ``catan_engine.record``). Round-trips through a
+    plain dict for persistence."""
+
+    seed: int
+    n_players: int
+    number_placement: Literal["random", "spiral"]
+    seats: list[SeatLike]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "seed": self.seed,
+            "n_players": self.n_players,
+            "number_placement": self.number_placement,
+            "seats": self.seats,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> GameSetup:
+        """Read a setup back from its dict form (extra keys are ignored)."""
+        return cls(
+            seed=cast(int, d["seed"]),
+            n_players=cast(int, d["n_players"]),
+            number_placement=cast(Literal["random", "spiral"], d["number_placement"]),
+            seats=list(cast("Sequence[SeatLike]", d["seats"])),
+        )
+
+
 class IllegalActionError(ValueError):
     """Raised when an action that is not currently legal is applied."""
 
@@ -68,6 +99,16 @@ class GameSession:
     ) -> None:
         self.n_players = n_players
         self.reset(seed, seats=seats)
+
+    @classmethod
+    def from_setup(cls, setup: GameSetup) -> GameSession:
+        """A fresh game at its opening position (replay its moves to advance)."""
+        session = cls(seed=setup.seed, n_players=setup.n_players, seats=setup.seats)
+        if setup.number_placement != "random":  # the ctor already used "random"
+            session.reset(
+                setup.seed, number_placement=setup.number_placement, seats=setup.seats
+            )
+        return session
 
     def reset(
         self,
@@ -160,6 +201,18 @@ class GameSession:
     def moves(self) -> list[Move]:
         """The full applied-move trace, in order (uncapped, unlike the log)."""
         return self._moves
+
+    @property
+    def setup(self) -> GameSetup:
+        """This game's reconstructable setup (seat params fold back into the
+        ``{"kind", "params"}`` form ``reset`` accepts)."""
+        seats: list[SeatLike] = [
+            kind
+            if kind == HUMAN or not params
+            else {"kind": kind, "params": dict(params)}
+            for kind, params in zip(self.seats, self.seat_params, strict=True)
+        ]
+        return GameSetup(self.seed, self.n_players, self.number_placement, seats)
 
     def terminal(self) -> bool:
         return all(self.env.terminations.values())
