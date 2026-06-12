@@ -56,8 +56,10 @@ def seat_swapped(
     return int(r1.wins[0]) + int(r2.wins[1]), r1.episodes + r2.episodes
 
 
-def collect(run: Run, cfg: dict) -> tuple[np.ndarray, ...]:
-    """Positions from lookahead(heuristic) [seat 0] vs the opponent [seat 1].
+def collect(
+    run: Run, cfg: dict, spec_a: AgentSpec, spec_b: AgentSpec
+) -> tuple[np.ndarray, ...]:
+    """Positions from ``spec_a`` [seat 0] vs ``spec_b`` [seat 1].
 
     Rows are seat0 features minus seat1 features, labels seat0-won; episode
     ids group correlated rows, fractions locate each row within its game."""
@@ -67,8 +69,8 @@ def collect(run: Run, cfg: dict) -> tuple[np.ndarray, ...]:
         n_players=2, track_beliefs=True,
     )  # fmt: skip
     pickers = [
-        jax.jit(_picker(POLICIES["lookahead"], 2, 0)),
-        jax.jit(_picker(POLICIES[cfg["opponent"]], 2, 1)),
+        jax.jit(_picker(spec_a, 2, 0)),
+        jax.jit(_picker(spec_b, 2, 1)),
     ]
     feats = jax.jit(
         jax.vmap(
@@ -162,10 +164,9 @@ def fit_predict(
 
 
 def probe_best(
-    run: Run, cfg: dict, candidates: dict[str, dict[str, Any]]
+    run: Run, cfg: dict, candidates: dict[str, dict[str, Any]], opponent: AgentSpec
 ) -> dict[str, float]:
     """Rank candidate weights by cheap seat-swapped matches vs the opponent."""
-    opponent = POLICIES[cfg["opponent"]]
     probes: dict[str, float] = {}
     for label, cand in candidates.items():
         w, n = seat_swapped(_spec(cand["weights"]), opponent, cfg["probe_games"], 10)
@@ -174,19 +175,23 @@ def probe_best(
     return probes
 
 
-def maximise(run: Run, cfg: dict) -> dict[str, float]:
+def maximise(
+    run: Run,
+    cfg: dict,
+    opponent: AgentSpec,
+    init: dict[str, float],
+    seed_offset: int = 0,
+) -> dict[str, float]:
     """The maximise target: cross-entropy search over weight vectors, with the
-    measured seat-swapped win rate vs the opponent as the objective.
+    measured seat-swapped win rate vs ``opponent`` as the objective.
 
-    Starts from the hand weights restricted to the configured features (new
-    features start at 0); each generation shares an evaluation seed (common
+    Starts from ``init``; each generation shares an evaluation seed (common
     random numbers) and the seed changes across generations so the search
     cannot overfit one batch of boards."""
     m = cfg["maximise"]
     terms = cfg["features"]
-    opponent = POLICIES[cfg["opponent"]]
-    rng = np.random.default_rng(cfg["seed"])
-    mean = np.asarray([HAND_WEIGHTS.get(t, 0.0) for t in terms])
+    rng = np.random.default_rng(cfg["seed"] + seed_offset)
+    mean = np.asarray([init.get(t, 0.0) for t in terms])
     sigma = np.maximum(np.abs(mean) * m["sigma"], 0.3)
     best: tuple[float, np.ndarray] = (-1.0, mean)
     for gen in range(m["iterations"]):
@@ -195,7 +200,7 @@ def maximise(run: Run, cfg: dict) -> dict[str, float]:
         for i, w_vec in enumerate(pop):
             weights = dict(zip(terms, w_vec.tolist(), strict=True))
             w, n = seat_swapped(
-                _spec(weights), opponent, m["eval_games"], 100 + 7 * gen
+                _spec(weights), opponent, m["eval_games"], 100 + 7 * (gen + seed_offset)
             )
             rates.append(w / n)
             run.log(gen=gen, member=i, rate=w / n)
@@ -212,24 +217,45 @@ def maximise(run: Run, cfg: dict) -> dict[str, float]:
 
 
 def run_experiment(run: Run, cfg: dict) -> None:
-    """Fit or search, then bench the winner and gate it against the
-    hand-tuned lookahead (pass iff the lower 2-sigma bound clears 50%)."""
-    if cfg["target"] == "predict":
-        data = collect(run, cfg)
-        run.log(positions=len(data[1]), win_rate_seat0=float(np.mean(data[1])))
-        candidates = fit_predict(run, cfg, data)
-        run.save_json("fits.json", candidates)
-        probes = probe_best(run, cfg, candidates)
-        run.save_json("probes.json", probes)
-        best_label = max(probes, key=lambda k: probes[k])
-        weights = candidates[best_label]["weights"]
-    else:
-        weights = maximise(run, cfg)
-        best_label = "cem"
+    """Optimize for ``rounds`` iterations, then bench the champion and gate it
+    against the hand-tuned lookahead (pass iff the lower 2-sigma bound clears 50%).
+
+    ``opponent: "self"`` is the self-play ladder: every round optimizes
+    against the *current champion* (round 0's champion is the hand weights),
+    and a challenger replaces it only by winning the acceptance match. A
+    ``POLICIES`` name keeps the fixed known opponent (warm-started across
+    rounds)."""
+    rounds = cfg.get("rounds", 1)
+    self_play = cfg["opponent"] == "self"
+    champion = {t: HAND_WEIGHTS.get(t, 0.0) for t in cfg["features"]}
+    best_label = cfg["target"]
+    for rnd in range(rounds):
+        champ_spec = _spec(champion)
+        opp_spec = champ_spec if self_play else POLICIES[cfg["opponent"]]
+        if cfg["target"] == "predict":
+            data = collect(run, cfg, champ_spec, opp_spec)
+            run.log(
+                round=rnd,
+                positions=len(data[1]),
+                win_rate_seat0=float(np.mean(data[1])),
+            )
+            candidates = fit_predict(run, cfg, data)
+            run.save_json(f"fits_round{rnd}.json", candidates)
+            probes = probe_best(run, cfg, candidates, opp_spec)
+            best_label = max(probes, key=lambda k: probes[k])
+            weights = candidates[best_label]["weights"]
+        else:
+            weights = maximise(run, cfg, opp_spec, init=champion, seed_offset=37 * rnd)
+        w, n = seat_swapped(_spec(weights), champ_spec, cfg["probe_games"], 500 + rnd)
+        accepted = w / n > 0.5
+        run.log(round=rnd, challenger_vs_champion=w / n, accepted=accepted)
+        if accepted:
+            champion = weights
+    weights = champion
     run.save_json("weights.json", weights)
 
     learned, hand = _spec(weights), POLICIES["lookahead"]
-    opponent = POLICIES[cfg["opponent"]]
+    opponent = POLICIES[cfg.get("bench_opponent", "greedy")]
     n = cfg["bench_games"]
     w_vs_opp, n_vs_opp = seat_swapped(learned, opponent, n, 30)
     w_base, n_base = seat_swapped(hand, opponent, n, 30)

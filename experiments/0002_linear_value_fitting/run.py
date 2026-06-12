@@ -1,13 +1,17 @@
-"""Linear value fitting over the hand-engineered features, vs a known opponent.
+"""Linear value fitting over the hand-engineered features.
 
-Hypothesis: weights optimized against a known opponent (greedy) — fit to
-predict outcomes, or searched to maximise the match win rate — recover or
-beat the hand-tuned heuristic weights when deployed in one-step lookahead.
+A framework for a class of experiments: optimize linear weights over
+``BoardFeatures``, deploy them in one-step lookahead, and gate against the
+hand-tuned weights. Pick a variant::
 
-The optimisation target is a config option::
+    uv run python experiments/0002_linear_value_fitting/run.py [variant]
 
-    uv run python experiments/0002_linear_value_fitting/run.py            # predict
-    uv run python experiments/0002_linear_value_fitting/run.py maximise   # search
+- ``predict``   — fit weights to predict game outcomes vs a known opponent
+- ``maximise``  — CEM search over weights for match win rate vs a known
+  opponent
+- ``self_play`` — iterated maximise: each round's opponent is the current
+  champion (round 0: the hand weights), challengers accepted only by
+  beating it; rounds are configurable
 """
 
 import sys
@@ -15,13 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _lib import start_run
-from _value_fitting import HAND_WEIGHTS, run_experiment
+from value_fitting import HAND_WEIGHTS, run_experiment
 
-CONFIG = {
+BASE = {
     "seed": 0,
-    "opponent": "greedy",  # the known opponent (data and objective)
-    "features": list(HAND_WEIGHTS),  # BoardFeatures names to fit
-    "target": "predict",  # or "maximise"; argv overrides
+    "features": list(HAND_WEIGHTS),  # BoardFeatures names to optimize
     "collect": {"steps": 12_000, "batch_size": 64, "snapshot_every": 4},
     "maximise": {
         "iterations": 3,
@@ -31,17 +33,24 @@ CONFIG = {
         "sigma": 0.3,
     },
     "probe_games": 120,
+    "bench_opponent": "greedy",
     "bench_games": 200,
     "gate_games": 300,
 }
 
+VARIANTS = {
+    "predict": {"target": "predict", "opponent": "greedy", "rounds": 1},
+    "maximise": {"target": "maximise", "opponent": "greedy", "rounds": 1},
+    "self_play": {"target": "maximise", "opponent": "self", "rounds": 3},
+}
+
 
 def main() -> None:
-    if len(sys.argv) > 1:
-        if sys.argv[1] not in ("predict", "maximise"):
-            raise SystemExit("usage: run.py [predict|maximise]")
-        CONFIG["target"] = sys.argv[1]
-    run_experiment(start_run(Path(__file__).parent, CONFIG), CONFIG)
+    variant = sys.argv[1] if len(sys.argv) > 1 else "predict"
+    if variant not in VARIANTS:
+        raise SystemExit(f"usage: run.py [{'|'.join(VARIANTS)}]")
+    config = {**BASE, **VARIANTS[variant], "variant": variant}
+    run_experiment(start_run(Path(__file__).parent, config), config)
 
 
 if __name__ == "__main__":

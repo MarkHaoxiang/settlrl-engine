@@ -20,12 +20,15 @@ Comments should be concise. Doc comments (docstrings) describe only the contract
 ## Experiments
 
 ML experiments live in `experiments/` (contract: `experiments/README.md`).
-Scaffold with `uv run python experiments/new.py "<title>"`; each numbered
-experiment commits its `run.py` + `report.md`, outputs land in the git-ignored
-`runs/`, and `experiments/JOURNAL.md` indexes one verdict line per concluded
-experiment. Strength claims gate through `catan-agents bench` with the
-threshold asserted in `run.py`. Record evidence there, not in package docs —
-CLAUDE.md files cite experiment numbers for their conclusions.
+Each numbered directory is an experiment *framework* — a class of related
+experiments: `run.py [variant]` selects a config, framework-specific helpers
+live in the same directory, outputs land in the git-ignored `runs/` (many
+logs per framework), and `experiments/JOURNAL.md` indexes one verdict line
+per concluded finding. Prefer extending a framework's variants over
+scaffolding a new number (`uv run python experiments/new.py "<title>"` for
+genuinely new classes). Strength claims gate through `catan-agents bench` or
+an in-run match with the threshold asserted in code. Record evidence there,
+not in package docs — CLAUDE.md files cite experiment numbers.
 
 ## Checks
 

@@ -1,7 +1,8 @@
-# 0002 — linear value fitting (predict and maximise targets)
+# 0002 — linear value fitting
 
-Status: concluded (framework adopted; optimized weights not — both targets
-fail the strict gate the same way)
+Status: live framework. Variants concluded: predict (fail), maximise vs a
+fixed opponent (fail), **self_play (pass — the first optimized weights to
+beat the hand-tuned heuristic)**
 
 ## Hypothesis
 
@@ -56,17 +57,33 @@ From `runs/0002_linear_value_fitting/2026-06-12T223650Z`
 - Head-to-head vs lookahead(hand-tuned): **43.3% ± 2.8%** — gate fails,
   almost exactly where the predict target landed (42.7%).
 
+### Self-play variant (`runs/0002_linear_value_fitting/2026-06-12T230644Z`)
+
+Three rounds of CEM where each round's opponent is the *current champion*
+(round 0: the hand weights) and a challenger is accepted only by winning the
+acceptance match. Round 0 rejected (48.0%), round 1 accepted (57.3%), round
+2 could not dethrone the new champion (50.0%). The final champion:
+
+- **56.1% vs lookahead(hand-tuned)** head-to-head (n=310, lower 2σ 50.5%) —
+  the gate passes;
+- **80.9% vs greedy** against the hand weights' 77.8% — better on both axes,
+  no specialist trade-off.
+
+The champion's main moves off the hand weights: more `vp` (+4.2), the knight
+cluster up (`knights` +0.47, `held_knights` +0.54, `n_dev` +0.40 — the army
+race is underweighted by hand), `n_roads` +0.42, and `progress` down (−0.70:
+hoarding toward the closest build is overrated once opponents punish it).
+
 ## Decision
 
-The framework is adopted (`value.make_linear` is the deployment seam; one
-CONFIG drives either target). The optimized weights are not, and the two
-targets fail identically: predict recovers hand-level play vs the known
-opponent (prediction is not control — see the v1 coefficient pathology),
-maximise even *beats* the hand weights against its objective opponent — and
-both lose ~43% head-to-head against the hand-tuned lookahead. Optimizing
-against a fixed opponent breeds specialists; the hand weights are the
-generalist. Next levers, each a CONFIG change: make the objective the gate
-itself (maximise vs `lookahead(heuristic)`, needs a larger `eval_games` —
-60-game evaluations swing ±6 points), or an opponent pool; classically
-beyond that, a decision-aware objective (preference pairs over successors).
-Otherwise this is catan-learn Stage 1's job with a nonlinear model.
+The framework is adopted (`value_fitting.py` in this directory;
+`value.make_linear` is the deployment seam; `run.py [variant]` selects the
+config). Fixed-opponent optimization breeds specialists — predict and
+maximise both lost ~43% head-to-head despite matching/beating the hand
+weights against their objective opponent — and the self-play ladder is the
+fix: optimizing against the evolving champion produced weights that beat the
+hand-tuned heuristic at the 2σ gate *and* widened the greedy margin.
+Adopting the champion as `make_heuristic` defaults is justified by the gate
+but cascades (every agent shares the leaf; ladder claims re-measure) —
+deferred to its own change. Further rounds/bigger budgets are config
+changes; the nonlinear continuation is catan-learn Stage 1.
