@@ -8,20 +8,28 @@ from catan_render.session import GameSession
 
 
 class _FakeSession:
-    """Just enough session for registry logic: seat kinds + terminality."""
+    """Just enough session for registry logic: seat kinds, terminality, and
+    whether any move has been played (default 1 = a started game)."""
 
-    def __init__(self, seats: list[str], terminal: bool = False) -> None:
+    def __init__(
+        self, seats: list[str], terminal: bool = False, moves_played: int = 1
+    ) -> None:
         self.seats = seats
         self._terminal = terminal
+        self.moves_played = moves_played
 
     def terminal(self) -> bool:
         return self._terminal
 
 
-def _session(seats: list[str] | None = None, terminal: bool = False) -> GameSession:
+def _session(
+    seats: list[str] | None = None, terminal: bool = False, moves_played: int = 1
+) -> GameSession:
     return cast(
         GameSession,
-        _FakeSession(seats or ["human", "human", "random", "random"], terminal),
+        _FakeSession(
+            seats or ["human", "human", "random", "random"], terminal, moves_played
+        ),
     )
 
 
@@ -83,3 +91,24 @@ def test_full_registry_of_active_games_refuses_creation() -> None:
     with pytest.raises(RegistryFullError):
         registry.create(_session())
     assert registry.get(active.id) is active
+
+
+def test_unstarted_idle_game_is_reclaimed_before_a_played_one() -> None:
+    # A create-flood leftover: a game no one moved in, idle past the short
+    # grace. It must yield its slot even though a started game is younger.
+    registry = GameRegistry(max_games=2)
+    started = registry.create(_session(moves_played=3))
+    unstarted = registry.create(_session(moves_played=0))
+    unstarted.touched = 0.0  # idle well past the unstarted grace
+    registry.create(_session())
+    assert registry.get(unstarted.id) is None
+    assert registry.get(started.id) is started
+
+
+def test_unstarted_but_recent_game_is_protected() -> None:
+    # An unstarted game someone just created (about to join) is not a leftover.
+    registry = GameRegistry(max_games=1)
+    fresh = registry.create(_session(moves_played=0))
+    with pytest.raises(RegistryFullError):
+        registry.create(_session())
+    assert registry.get(fresh.id) is fresh

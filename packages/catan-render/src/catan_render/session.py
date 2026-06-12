@@ -151,6 +151,11 @@ class GameSession:
     def acting_seat(self) -> int:
         return int(self.env._env.agent_selection[0])
 
+    @property
+    def moves_played(self) -> int:
+        """How many moves have been applied (0 = a game no one has started)."""
+        return len(self._moves)
+
     def terminal(self) -> bool:
         return all(self.env.terminations.values())
 

@@ -92,11 +92,19 @@ The server is configured by environment variables: `HOST` (default `0.0.0.0`),
 `PORT` (default `8000`), `RELOAD` (default `1`; set `0` in production — the
 reloader is a dev file-watcher), `CATAN_RENDER_CREATE_KEY` (when set, only
 requests carrying it as `X-Create-Key` may create games — the dialog's "Host
-key" field; players joining or playing never need it), and `ROOT_PATH` (the
-proxy prefix when served under a path). Run **one process, one worker**: live
-games are held in memory, so extra workers would split them. Restarts lose
-live games. The registry holds up to 32 games, evicting finished or hour-idle
-ones to make room.
+key" field; players joining or playing never need it), `CATAN_RENDER_MAX_STREAMS`
+(default `64`; concurrent event-stream subscribers, capped below the threadpool
+size so idle streams can't starve ordinary requests — extras get `503`), and
+`ROOT_PATH` (the proxy prefix when served under a path). Run **one process, one
+worker**: live games are held in memory, so extra workers would split them.
+Restarts lose live games. The registry holds up to 32 games, evicting finished
+games, hour-idle ones, or unstarted ones idle past a few minutes (so a burst of
+empty games can't pin every slot) to make room.
+
+For a public deployment, set `CATAN_RENDER_CREATE_KEY` so strangers can't fill
+the registry, and front the server with a proxy that rate-limits — the built-in
+caps (stream cap, a 2 MB request-body limit, a replay move-count cap, and
+high-entropy game ids) bound resource use but are not a substitute for one.
 
 The repo-root `Dockerfile` builds a self-contained image (frontend compiled
 in, CPU JAX):

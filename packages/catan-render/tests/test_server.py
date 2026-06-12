@@ -12,6 +12,7 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
@@ -19,6 +20,7 @@ import pytest
 import uvicorn
 from catan_render.games import GameRegistry
 from catan_render.server import create_app
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
@@ -177,6 +179,28 @@ def test_create_same_seed_reproduces_the_board(client: TestClient) -> None:
     assert a == b
 
 
+@contextmanager
+def _live_server(app: FastAPI) -> Iterator[int]:
+    """Run ``app`` on a real uvicorn server (ephemeral port), yielding the port.
+
+    SSE streams need this: TestClient buffers whole responses and would block
+    on an open stream forever.
+    """
+    server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    thread = threading.Thread(target=server.run, args=([sock],), daemon=True)
+    thread.start()
+    try:
+        while not server.started:
+            time.sleep(0.02)
+        yield port
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
 def _next_event(lines: Iterator[str]) -> dict[str, object]:
     """The next SSE data event (skipping keepalives), parsed."""
     for _, line in zip(range(50), lines, strict=False):
@@ -216,6 +240,21 @@ def test_events_stream_snapshot_now_then_on_every_change() -> None:
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+def test_event_stream_cap_rejects_extra_subscribers() -> None:
+    # One permit: the first stream holds it, so a second subscriber is shed
+    # with 503 instead of pinning another threadpool thread.
+    with (
+        _live_server(create_app(GameRegistry(), max_streams=1)) as port,
+        httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http,
+    ):
+        game = http.post("/api/games", json={"seed": 0}).json()["id"]
+        events = f"/api/games/{game}/events"
+        with http.stream("GET", events) as first:
+            _next_event(first.iter_lines())  # the permit is now held
+            with http.stream("GET", events) as second:
+                assert second.status_code == 503
 
 
 def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
@@ -338,6 +377,25 @@ def test_replay_rejects_bad_records(client: TestClient) -> None:
         ).status_code
         == 422
     )
+
+
+def test_oversized_request_body_is_rejected_before_parsing() -> None:
+    client = TestClient(create_app(GameRegistry(), max_body_bytes=100))
+    big = client.post("/api/replay", json={"pad": "x" * 500})
+    assert big.status_code == 413
+    # A small body still reaches the route (and is rejected on its merits).
+    assert client.post("/api/replay", json={"seed": 1}).status_code == 422
+
+
+def test_replay_with_too_many_moves_is_rejected(
+    client: TestClient, registry: GameRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    game, _ = _create(client, seats=["random"] * 4)
+    _finish(registry, game)
+    doc = client.get(f"/api/games/{game}/record").json()
+    monkeypatch.setattr("catan_render.server._MAX_REPLAY_MOVES", len(doc["moves"]) - 1)
+    resp = client.post("/api/replay", json=doc)
+    assert resp.status_code == 422 and "too many moves" in resp.json()["detail"]
 
 
 def test_get_bots_lists_policies(client: TestClient) -> None:

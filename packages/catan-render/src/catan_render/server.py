@@ -7,20 +7,21 @@ apps with their own registries instead of sharing module state.
 
 import json
 import os
+import secrets
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
 import anyio.to_thread
 from catan_engine.record import GameRecord, ReplayError
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from .bots import bot_catalog
@@ -60,6 +61,11 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
 CreateKey = Annotated[str | None, Header(alias="X-Create-Key")]
+
+# Replaying a submitted record steps the engine once per move; cap the count so
+# an untrusted POST /api/replay can't hand us an arbitrarily long game to grind
+# through. Well above any real game (random games run a few thousand moves).
+_MAX_REPLAY_MOVES = 20_000
 
 
 def _tokens(header: str | None) -> list[str]:
@@ -131,6 +137,8 @@ def create_app(
     create_key: str | None = None,
     bot_delay: float = 0.65,
     root_path: str = "",
+    max_streams: int = 64,
+    max_body_bytes: int = 2 * 1024 * 1024,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -139,10 +147,30 @@ def create_app(
     can't spam games and exhaust the registry. ``bot_delay`` paces the
     server-side bot driver (seconds between bot moves, so clients can animate
     each one). ``root_path`` is the proxy prefix the app is served under.
+    ``max_streams`` caps concurrent event-stream subscribers (each pins a
+    threadpool thread, so this must stay well under the pool size or idle
+    streams starve ordinary requests); ``max_body_bytes`` rejects oversized
+    request bodies before they are parsed.
     """
     registry = games if games is not None else GameRegistry()
     replays = _ReplaySlot()
+    # Each live event stream holds one permit for its whole connection; past
+    # the cap, new subscribers get 503 rather than exhausting the threadpool.
+    sse_gate = threading.Semaphore(max_streams)
     app = FastAPI(title="Catan Render", lifespan=_lifespan, root_path=root_path)
+
+    @app.middleware("http")
+    async def _limit_body(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        declared = request.headers.get("content-length")
+        if (
+            declared is not None
+            and declared.isdigit()
+            and int(declared) > max_body_bytes
+        ):
+            return JSONResponse({"detail": "request body too large"}, status_code=413)
+        return await call_next(request)
 
     def handle_of(game_id: str) -> GameHandle:
         handle = registry.get(game_id)
@@ -154,7 +182,10 @@ def create_app(
     def post_create(
         req: _CreateRequest, x_create_key: CreateKey = None
     ) -> _CreatedModel:
-        if create_key is not None and x_create_key != create_key:
+        if create_key is not None and not (
+            x_create_key is not None
+            and secrets.compare_digest(x_create_key, create_key)
+        ):
             raise HTTPException(
                 status_code=403, detail="creation requires the host key"
             )
@@ -223,22 +254,29 @@ def create_app(
         keep idle connections alive."""
         handle = handle_of(game_id)
         tokens = _tokens(x_seat_tokens)
+        if not sse_gate.acquire(blocking=False):
+            raise HTTPException(
+                status_code=503, detail="too many event streams; try again"
+            )
 
         def stream() -> Iterator[str]:
             seen = -1
-            while True:
-                with handle.lock:
-                    if handle.version == seen:
-                        handle.lock.wait(timeout=15.0)
-                    if handle.closed:
-                        return
-                    if handle.version == seen:
-                        body = None  # idle: fall through to a keepalive
-                    else:
-                        seen = handle.version
-                        model = game_model(handle, handle.owned_seats(tokens))
-                        body = model.model_dump_json()
-                yield f"data: {body}\n\n" if body else ": keepalive\n\n"
+            try:
+                while True:
+                    with handle.lock:
+                        if handle.version == seen:
+                            handle.lock.wait(timeout=15.0)
+                        if handle.closed:
+                            return
+                        if handle.version == seen:
+                            body = None  # idle: fall through to a keepalive
+                        else:
+                            seen = handle.version
+                            model = game_model(handle, handle.owned_seats(tokens))
+                            body = model.model_dump_json()
+                    yield f"data: {body}\n\n" if body else ": keepalive\n\n"
+            finally:
+                sse_gate.release()
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 
@@ -302,6 +340,11 @@ def create_app(
             record = GameRecord.from_json(json.dumps(doc))
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=f"bad record: {exc}") from exc
+        if len(record.moves) > _MAX_REPLAY_MOVES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"record has too many moves (max {_MAX_REPLAY_MOVES})",
+            )
         return load_replay(record)
 
     @app.get("/api/replay/state")
@@ -365,4 +408,5 @@ _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 app = create_app(
     create_key=os.environ.get("CATAN_RENDER_CREATE_KEY"),
     root_path=os.environ.get("ROOT_PATH", ""),
+    max_streams=int(os.environ.get("CATAN_RENDER_MAX_STREAMS", "64")),
 )

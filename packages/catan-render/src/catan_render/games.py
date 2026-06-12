@@ -18,13 +18,20 @@ import time
 from .models import BotMoveModel
 from .session import HUMAN, GameSession
 
-# Games are addressed by short ids; tokens prove seat ownership.
-_ID_BYTES = 4
+# Games are addressed by unguessable ids; tokens prove seat ownership. The id
+# is the only thing gating a game's public snapshot and its finished-game
+# record export, so it needs real entropy (an attacker must not enumerate ids).
+_ID_BYTES = 8
 _TOKEN_BYTES = 16
 
 # An unfinished game untouched for this long counts as abandoned and may be
 # evicted to make room.
 _IDLE_TTL_S = 3600.0
+
+# A game that no one has played a move in is reclaimed far sooner: a real game
+# gets moving within minutes, so a slot held by an unstarted game past this is
+# almost always a create-flood leftover, not a game someone is about to join.
+_UNSTARTED_TTL_S = 600.0
 
 
 class RegistryFullError(Exception):
@@ -122,12 +129,15 @@ class GameRegistry:
         while len(self._games) >= self._max:
             # Finished games go first, then the least recently touched — but a
             # running game someone touched recently is never evicted from
-            # under its players.
-            cutoff = time.monotonic() - _IDLE_TTL_S
+            # under its players. Unstarted games (no move played) age out on a
+            # much shorter clock so a burst of empty games can't pin every slot.
+            now = time.monotonic()
             evictable = [
                 h
                 for h in self._games.values()
-                if h.session.terminal() or h.touched < cutoff
+                if h.session.terminal()
+                or (h.session.moves_played == 0 and h.touched < now - _UNSTARTED_TTL_S)
+                or h.touched < now - _IDLE_TTL_S
             ]
             if not evictable:
                 raise RegistryFullError("all games are active; try again later")
