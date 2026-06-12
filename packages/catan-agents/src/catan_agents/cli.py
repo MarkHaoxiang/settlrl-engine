@@ -197,6 +197,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     bench_p.add_argument("--players", type=int, default=2, choices=(2, 3, 4))
     bench_p.add_argument("--batch-size", type=int, default=32)
     bench_p.add_argument("--seed", type=int, default=0)
+    bench_p.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the result as one JSON object (for experiment gates)",
+    )
     args = parser.parse_args(argv)
     if args.command == "bench":
         result = bench(
@@ -207,7 +212,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             batch_size=args.batch_size,
             seed=args.seed,
         )
-        print(_format_bench(result, args.players))
+        if args.json:
+            print(json.dumps({**result._asdict(), "players": args.players}))
+        else:
+            print(_format_bench(result, args.players))
         return
     result_c = compare(
         args.agent_a,

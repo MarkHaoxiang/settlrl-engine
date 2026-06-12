@@ -21,6 +21,8 @@ members = [
 cuda = [{ name = "jax", extras = ["cuda13"], marker = "sys_platform == 'linux'", specifier = ">=0.7" }]
 dev = [
     { name = "beartype", specifier = ">=0.19" },
+    { name = "catan-agents", editable = "packages/catan-agents" },
+    { name = "catan-learn", editable = "packages/catan-learn" },
     { name = "catan-reference", editable = "packages/catan-reference" },
     { name = "expecttest", specifier = ">=0.2.1" },
     { name = "gymnasium", specifier = ">=0.29" },

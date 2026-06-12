@@ -208,3 +208,6 @@ node_modules/
 
 # Claude Code runtime lock
 .claude/scheduled_tasks.lock
+
+# Experiment run outputs (reproducible from each run's manifest)
+runs/

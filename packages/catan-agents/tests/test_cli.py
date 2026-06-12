@@ -68,6 +68,17 @@ def test_bench_two_player_seat_swaps() -> None:
     assert sum(n for _, n in result.by_position) == result.episodes
 
 
+def test_bench_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    from catan_agents.cli import main
+
+    main(["bench", "random", "random", "--games", "2", "--batch-size", "8", "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["wins_a"] + doc["wins_b"] == doc["episodes"]
+    assert doc["players"] == 2
+
+
 def test_bench_rotates_three_player_seats(capsys: pytest.CaptureFixture[str]) -> None:
     from catan_agents.cli import main
 

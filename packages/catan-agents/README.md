@@ -59,6 +59,9 @@ a=113 b=87 n=200 rate=56.5% se=3.5% (chance 50.0%)
   a seated at seat 0: 59/100, seat 1: 54/100
 ```
 
+`--json` emits the result as one JSON object — the machine-readable form the
+experiment gates consume (see `experiments/README.md` at the repo root).
+
 Future tools (tournaments, ...) will hang off the same entry point as subcommands.
 
 ## Layout

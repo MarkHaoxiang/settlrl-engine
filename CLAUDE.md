@@ -17,6 +17,16 @@ Keep docs concise. User-facing docs (READMEs) should describe what something doe
 
 Comments should be concise. Doc comments (docstrings) describe only the contract to callers — behavior not evident from the signature; no implementation detail, design motivation, or perf notes (those belong in the per-package `CLAUDE.md`, or are simply omitted).
 
+## Experiments
+
+ML experiments live in `experiments/` (contract: `experiments/README.md`).
+Scaffold with `uv run python experiments/new.py "<title>"`; each numbered
+experiment commits its `run.py` + `report.md`, outputs land in the git-ignored
+`runs/`, and `experiments/JOURNAL.md` indexes one verdict line per concluded
+experiment. Strength claims gate through `catan-agents bench` with the
+threshold asserted in `run.py`. Record evidence there, not in package docs —
+CLAUDE.md files cite experiment numbers for their conclusions.
+
 ## Checks
 
 Pre-commit hooks (ruff check/format, mypy over every package, the engine test

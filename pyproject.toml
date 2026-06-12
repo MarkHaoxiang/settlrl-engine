@@ -4,6 +4,10 @@ members = ["packages/*"]
 [dependency-groups]
 dev = [
     "beartype>=0.19",
+    # Workspace members in the root env, so `uv run python experiments/...`
+    # imports the whole stack without --package indirection.
+    "catan-agents",
+    "catan-learn",
     "catan-reference",
     "expecttest>=0.2.1",
     "gymnasium>=0.29",
@@ -32,6 +36,8 @@ cuda = [
 default-groups = ["dev", "cuda"]
 
 [tool.uv.sources]
+catan-agents = { workspace = true }
+catan-learn = { workspace = true }
 catan-reference = { workspace = true }
 
 [tool.mypy]
@@ -59,6 +65,8 @@ ignore_missing_imports = true
 extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
+# Experiment scripts bootstrap sys.path before importing experiments/_lib.
+"experiments/**" = ["E402"]
 # jaxtyping shape strings in annotations ("*batch ...") trip the forward-ref
 # rules (and UP037's autofix strips the quotes they need — keep it off
 # everywhere under src, or any --fix run corrupts the annotations).
