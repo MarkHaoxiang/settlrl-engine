@@ -13,6 +13,7 @@ just takes their dot product with its weight kwargs.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 import jax
@@ -21,7 +22,7 @@ from catan_engine.board.layout import BoardLayout
 from catan_engine.board.state import BoardState, BoolScalar, IntScalar
 from jaxtyping import Array, Float
 
-from catan_agents.internal.feature_engineering import board_features
+from catan_agents.internal.feature_engineering import BoardFeatures, board_features
 
 Value = Float[Array, ""]
 """A scalar state score for one player: higher is better, arbitrary scale."""
@@ -60,6 +61,9 @@ def make_heuristic(
     w_spots: float = 0.0,
     w_fill: float = 0.0,
     w_kheld: float = 0.8,
+    w_second_spot: float = 0.0,
+    w_reach: float = 0.0,
+    w_army_lead: float = 0.0,
 ) -> ValueFunction:
     """Build a weighted heuristic value function (see :func:`heuristic_value`).
 
@@ -92,6 +96,9 @@ def make_heuristic(
             + w_spots * f.n_spots
             + w_fill * f.fill
             + w_kheld * f.held_knights
+            + w_second_spot * f.second_spot
+            + w_reach * f.reach
+            + w_army_lead * f.army_lead
         )
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
@@ -106,3 +113,36 @@ def make_heuristic(
 
 heuristic_value = make_heuristic()
 """The shipped heuristic, at the weights that won the 2-player CLI tournament."""
+
+
+def make_linear(weights: Mapping[str, float]) -> ValueFunction:
+    """A linear value over named :class:`BoardFeatures` terms.
+
+    ``weights`` maps feature names (``BoardFeatures._fields``) to
+    coefficients; unnamed features count zero. The fitted-weights deployment
+    seam: any classical fit over the engineered features drops in here.
+    """
+    unknown = set(weights) - set(BoardFeatures._fields)
+    if unknown:
+        raise ValueError(f"unknown features: {sorted(unknown)}")
+    names = tuple(weights)
+    coefs = tuple(float(weights[n]) for n in names)
+
+    def strength(
+        layout: BoardLayout, state: BoardState, p: IntScalar, exact_dev: BoolScalar
+    ) -> Value:
+        f = board_features(layout, state, p, exact_dev)
+        out: Value = sum(
+            (c * getattr(f, n) for n, c in zip(names, coefs, strict=True)),
+            jnp.float32(0.0),
+        )
+        return out
+
+    def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+        players = jnp.arange(state.n_players)
+        strengths = jax.vmap(lambda q: strength(layout, state, q, q == player))(players)
+        mine = strengths[player]
+        best_other = jnp.max(jnp.where(players == player, -jnp.inf, strengths))
+        return mine - best_other
+
+    return value

@@ -102,6 +102,15 @@ class BoardFeatures(NamedTuple):
     value term: it rewards hoarding toward several builds at once)."""
     held_knights: Scalar
     """Unplayed knights in hand (capped) — army-race potential."""
+    second_spot: Scalar
+    """Pips of the second-best buildable spot — expansion depth beyond the
+    single best."""
+    reach: Scalar
+    """Pips of the best spot exactly one more road away (through own or empty
+    vertices) — what the next road could unlock."""
+    army_lead: Scalar
+    """Knights played minus the best opponent's (clipped ±3): the Largest
+    Army race's margin, not just own progress."""
 
 
 def board_features(
@@ -159,6 +168,26 @@ def board_features(
     has_2to1 = jnp.zeros((5,), bool).at[port_alloc % 5].max(on_port & (port_alloc < 5))
     has_3to1 = jnp.any(on_port & (port_alloc == 5))
 
+    v_pips = vertex_pips(layout.tile_number)
+    spot_pips = jnp.where(spot, v_pips, 0.0)
+    # One more road away: an empty edge leaving a road-touched vertex the
+    # player may build through (own or empty) reaches its far end.
+    empty = state.edge_road == 0
+    pass_ok = touched & ((state.vertex_owner == 0) | (state.vertex_owner == p + 1))
+    reach_v = (
+        jnp.zeros((N_VERTICES,), bool)
+        .at[u]
+        .max(empty & pass_ok[v])
+        .at[v]
+        .max(empty & pass_ok[u])
+    )
+    reach_spot = reach_v & ~occ & ~nb_occ & ~spot & in_stock
+
+    knights_mine = state.knights_played[p].astype(jnp.float32)
+    others = jnp.where(
+        jnp.arange(state.n_players) == p, 0, state.knights_played
+    ).astype(jnp.float32)
+
     return BoardFeatures(
         vp=vp + dev_vp,
         production=production,
@@ -167,7 +196,7 @@ def board_features(
         scarce=(jnp.sqrt(res) / (1.0 + per_res)).sum(),
         over=jnp.maximum(res.sum() - 7.0, 0.0),
         n_dev=n_dev,
-        best_spot=jnp.max(jnp.where(spot, vertex_pips(layout.tile_number), 0.0)),
+        best_spot=jnp.max(spot_pips),
         n_roads=own_road.sum().astype(jnp.float32),
         progress=jnp.max(each),
         knights=jnp.minimum(state.knights_played[p].astype(jnp.float32), 3.0),
@@ -186,6 +215,9 @@ def board_features(
         held_knights=jnp.minimum(
             state.dev_hand[p, DevCard.KNIGHT].astype(jnp.float32), 2.0
         ),
+        second_spot=jnp.sort(spot_pips)[-2],
+        reach=jnp.max(jnp.where(reach_spot, v_pips, 0.0)),
+        army_lead=jnp.clip(knights_mine - jnp.max(others), -3.0, 3.0),
     )
 
 

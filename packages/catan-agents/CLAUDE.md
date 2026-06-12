@@ -90,7 +90,13 @@ features never carry them.
   was outright negative (43.1% at 1.0: it rewards hoarding toward several
   builds, i.e. discard exposure) — both knobs kept at 0. Ladder re-checked
   on the new defaults: relative rungs unchanged (every top agent shares the
-  leaf), absolute level up. Value-as-win-prob
+  leaf), absolute level up. `make_linear(weights)` deploys any named-
+  coefficient fit over `BoardFeatures` as a ValueFunction — the classical-
+  fit seam (experiments/0002: outcome-fit logistic reaches hand-tuned level
+  vs greedy but loses head-to-head 42.7%; held-out AUC is flat across
+  candidates whose match probes span 53–78%, so candidate selection must be
+  by match, never by fit metric; `second_spot` / `reach` / `army_lead`
+  joined the features at weight 0). Value-as-win-prob
   calibration (183k self-play positions): P(win) = σ(0.053·v), phase-stable —
   but the calibrated `value_scale≈38` *lost* to the sharper hand-picked 20 in
   mcts (44.5%, n=200): honest calibration is not the best search temperature.

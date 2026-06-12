@@ -24,7 +24,7 @@ Two-player strength (seat-swapped, 200–800-game matches): `planner` and `mcts`
 
 ## Value functions
 
-A `ValueFunction` scores a board for one player (higher is better). `heuristic_value` is the shipped hand-written one: victory points (weighted up superlinearly near the win), pip-weighted production (wheat and ore at a premium) and its diversity across both resources and dice numbers, expansion (roads and reachable settlement spots), progress toward the next build, hand quality with a discard-risk penalty and a scarcity premium on cards the player cannot produce, dev cards (held knights counting toward the army race), and Largest Army progress — all relative to the strongest opponent. `make_heuristic(**weights)` builds a variant with your own weights; `lookahead` and `mcts` accept any value function via `make_greedy(value)` / `make_mcts(value)`.
+A `ValueFunction` scores a board for one player (higher is better). `heuristic_value` is the shipped hand-written one: victory points (weighted up superlinearly near the win), pip-weighted production (wheat and ore at a premium) and its diversity across both resources and dice numbers, expansion (roads and reachable settlement spots), progress toward the next build, hand quality with a discard-risk penalty and a scarcity premium on cards the player cannot produce, dev cards (held knights counting toward the army race), and Largest Army progress — all relative to the strongest opponent. `make_heuristic(**weights)` builds a variant with your own weights, and `make_linear(weights)` builds a value from any named-coefficient fit over the engineered features; `lookahead` and `mcts` accept any value function via `make_greedy(value)` / `make_mcts(value)`.
 
 ## Evaluation
 
