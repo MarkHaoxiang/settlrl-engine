@@ -88,18 +88,23 @@ export default function BoardView({ board, interaction, dice, trade, transfers }
     return { x: r.x + r.width / 2 - c.x, y: r.y - c.y };
   };
 
-  // The dice glide to rest on the ocean in front of whoever's turn it is,
-  // falling back to the bottom-right corner. Drawn at the corner and slid by
-  // the offset, so the CSS transition animates the move (TableDice draws around
-  // its given centre, which stays fixed).
-  const diceCorner = { x: oceanX + oceanW + EDGE_BAND / 2, y: oceanY + oceanH + EDGE_BAND / 2 };
+  // The dice glide to rest in the empty table corner beside whoever's turn it
+  // is (the seat edges themselves are filled by each player's card/piece row).
+  // Each edge maps to its clockwise-leading corner, so the dice orbit the table
+  // as turns pass; no active seat parks them bottom-right. Drawn at that corner
+  // and slid by the offset, so the CSS transition animates the move (TableDice
+  // draws around its given centre, which stays fixed).
+  const left = oceanX - EDGE_BAND / 2;
+  const right = oceanX + oceanW + EDGE_BAND / 2;
+  const top = oceanY - EDGE_BAND / 2;
+  const bottom = oceanY + oceanH + EDGE_BAND / 2;
+  const diceCorner = { x: right, y: bottom };
   const diceHome = (edge: Edge): { x: number; y: number } => {
-    const m = EDGE_BAND * 0.5;
     switch (edge) {
-      case "bottom": return { x: oceanX + oceanW / 2, y: oceanY + oceanH - m };
-      case "top": return { x: oceanX + oceanW / 2, y: oceanY + m };
-      case "left": return { x: oceanX + m, y: oceanY + oceanH / 2 };
-      case "right": return { x: oceanX + oceanW - m, y: oceanY + oceanH / 2 };
+      case "bottom": return { x: right, y: bottom };
+      case "right": return { x: right, y: top };
+      case "top": return { x: left, y: top };
+      case "left": return { x: left, y: bottom };
     }
   };
   const diceTarget =
