@@ -41,7 +41,7 @@ HAND_WEIGHTS = {
 
 def _spec(weights: dict[str, float]) -> BeliefSpec:
     return BeliefSpec(
-        make_greedy, frozenset((2,)), defaults={"value": make_linear(weights)}
+        make_greedy, frozenset((2, 3, 4)), defaults={"value": make_linear(weights)}
     )
 
 
@@ -54,6 +54,22 @@ def seat_swapped(
         [spec_b, spec_a], n_episodes=n_games // 2, batch_size=32, seed=seed + 1
     )
     return int(r1.wins[0]) + int(r2.wins[1]), r1.episodes + r2.episodes
+
+
+def seat_rotated(
+    spec_a: AgentSpec, spec_b: AgentSpec, players: int, n_games: int, seed: int
+) -> tuple[int, int]:
+    """(a's wins, episodes) with ``a`` rotated through every seat of an
+    otherwise all-``b`` table (chance = 1/players)."""
+    wins = episodes = 0
+    per = n_games // players
+    for pos in range(players):
+        agents: list[AgentSpec] = [spec_b] * players
+        agents[pos] = spec_a
+        r = evaluate(agents, n_episodes=per, batch_size=32, seed=seed + pos)
+        wins += int(r.wins[pos])
+        episodes += r.episodes
+    return wins, episodes
 
 
 def collect(
@@ -254,22 +270,33 @@ def run_experiment(run: Run, cfg: dict) -> None:
     weights = champion
     run.save_json("weights.json", weights)
 
+    # Deployment numbers at every configured player count; the verdict gate
+    # is the 2p head-to-head (the optimization arena).
     learned, hand = _spec(weights), POLICIES["lookahead"]
     opponent = POLICIES[cfg.get("bench_opponent", "greedy")]
-    n = cfg["bench_games"]
-    w_vs_opp, n_vs_opp = seat_swapped(learned, opponent, n, 30)
-    w_base, n_base = seat_swapped(hand, opponent, n, 30)
-    run.log(learned_vs_opponent=w_vs_opp / n_vs_opp, hand_vs_opponent=w_base / n_base)
-
-    g = cfg["gate_games"]
-    w_gate, n_gate = seat_swapped(learned, hand, g, 20)
-    rate = w_gate / n_gate
-    se = (rate * (1 - rate) / n_gate) ** 0.5
-    run.finish(
-        "pass" if rate - 2 * se > 0.5 else "fail",
-        best_candidate=best_label,
-        learned_vs_hand=rate,
-        lower_2se=rate - 2 * se,
-        learned_vs_opponent=w_vs_opp / n_vs_opp,
-        hand_vs_opponent=w_base / n_base,
-    )
+    summary: dict[str, float] = {}
+    verdict = "fail"
+    for players in cfg.get("eval_players", [2]):
+        if players == 2:
+            n, g = cfg["bench_games"], cfg["gate_games"]
+            w_vs_opp, n_vs_opp = seat_swapped(learned, opponent, n, 30)
+            w_base, n_base = seat_swapped(hand, opponent, n, 30)
+            w_gate, n_gate = seat_swapped(learned, hand, g, 20)
+        else:
+            n = g = cfg.get("games_multi", 240)
+            w_vs_opp, n_vs_opp = seat_rotated(learned, opponent, players, n, 30)
+            w_base, n_base = seat_rotated(hand, opponent, players, n, 30)
+            w_gate, n_gate = seat_rotated(learned, hand, players, g, 20)
+        rate = w_gate / n_gate
+        se = (rate * (1 - rate) / n_gate) ** 0.5
+        summary[f"learned_vs_hand_{players}p"] = rate
+        summary[f"lower_2se_{players}p"] = rate - 2 * se
+        summary[f"learned_vs_opponent_{players}p"] = w_vs_opp / n_vs_opp
+        summary[f"hand_vs_opponent_{players}p"] = w_base / n_base
+        run.log(
+            players=players,
+            **{k: v for k, v in summary.items() if k.endswith(f"_{players}p")},
+        )
+        if players == 2:
+            verdict = "pass" if rate - 2 * se > 0.5 else "fail"
+    run.finish(verdict, best_candidate=best_label, **summary)

@@ -33,6 +33,8 @@ BASE = {
         "sigma": 0.3,
     },
     "probe_games": 120,
+    "eval_players": [2, 4],  # deployment numbers per count (gate stays 2p)
+    "games_multi": 240,  # 3-4p matches need n>=240 (seed-batch variance)
     "bench_opponent": "greedy",
     "bench_games": 200,
     "gate_games": 300,

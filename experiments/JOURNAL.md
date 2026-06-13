@@ -15,3 +15,8 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   beat the hand-tuned weights 56.1% head-to-head (n=310, lower 2σ 50.5%) and
   80.9% vs greedy (hand: 77.8%) — fixed-opponent specialists fixed by making
   the opponent evolve; adoption of the weights deferred (leaf cascade).
+- 0002_linear_value_fitting/self_play at 4p — the 2p edge does not transfer:
+  27.0% ± 2.8% vs three hand lookaheads (chance 25%), 64.7% vs greedy tables
+  (hand: 68.1%); champion reproduced bit-identically from config (framework
+  determinism verified). Adoption now 2p-conditional or needs a mixed-count
+  arena.
