@@ -146,3 +146,35 @@ def make_linear(weights: Mapping[str, float]) -> ValueFunction:
         return mine - best_other
 
     return value
+
+
+# Count-conditional tuned weights (experiments/0002_linear_value_fitting).
+# 2p: the self-play CEM champion — beat the hand-tuned weights 56.1%
+# head-to-head at 2p (n=310, lower 2-sigma 50.5%) but measured parity at 4p, so
+# it ships per count, not as the defaults. 4p: the hand-tuned weights until
+# a 4p-arena champion passes its gate.
+TUNED_WEIGHTS: dict[int, dict[str, float]] = {
+    2: {
+        "vp": 14.2031, "production": 1.4078, "diversity": 0.7259,
+        "hand": 0.5589, "scarce": 0.7476, "over": -0.5124, "n_dev": 1.9031,
+        "best_spot": 0.5498, "n_roads": 0.5699, "progress": 1.2971,
+        "knights": 0.9661, "wheat_ore": 0.0906, "race": 0.5990,
+        "numbers": 0.2066, "held_knights": 1.3367,
+    },
+    4: {
+        "vp": 10.0, "production": 1.0, "diversity": 0.6, "hand": 0.3,
+        "scarce": 1.0, "over": -0.4, "n_dev": 1.5, "best_spot": 0.5,
+        "n_roads": 0.15, "progress": 2.0, "knights": 0.5, "wheat_ore": 0.25,
+        "race": 0.8, "numbers": 0.3, "held_knights": 0.8,
+    },
+}  # fmt: skip
+
+
+_TUNED = {n: make_linear(w) for n, w in TUNED_WEIGHTS.items()}
+
+
+def tuned_value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+    """The count-tuned value: ``TUNED_WEIGHTS`` picked by the (static) seated
+    player count — 3p uses the 4p weights. Not the default ``heuristic_value``;
+    select it explicitly (e.g. ``"value": "tuned"`` in a bench spec)."""
+    return (_TUNED[2] if state.n_players == 2 else _TUNED[4])(layout, state, player)

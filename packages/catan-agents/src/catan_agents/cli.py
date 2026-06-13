@@ -12,7 +12,7 @@ from typing import NamedTuple
 from catan_agents import POLICIES
 from catan_agents.evaluate import evaluate
 from catan_agents.policy import BeliefSpec, ObservationSpec, StatefulSpec
-from catan_agents.value import make_heuristic
+from catan_agents.value import make_heuristic, tuned_value
 
 
 class CompareResult(NamedTuple):
@@ -77,7 +77,8 @@ def build_spec(text: str) -> ObservationSpec | BeliefSpec | StatefulSpec:
     JSON shape: ``{"kind": <name>, "params": {<make kwargs>},
     "value": {<make_heuristic weights>}}`` — ``params`` are knob overrides for
     the family builder; ``value`` builds a reweighted heuristic for the
-    families that take one.
+    families that take one, or the string ``"tuned"`` for the count-tuned
+    weights.
     """
     if text in POLICIES:
         return POLICIES[text]
@@ -94,7 +95,9 @@ def build_spec(text: str) -> ObservationSpec | BeliefSpec | StatefulSpec:
         )
     base = POLICIES[kind]
     overrides = dict(doc.get("params") or {})
-    if doc.get("value") is not None:
+    if doc.get("value") == "tuned":
+        overrides["value"] = tuned_value
+    elif doc.get("value") is not None:
         overrides["value"] = make_heuristic(**doc["value"])
     if not overrides:
         return base

@@ -23,8 +23,14 @@ from catan_engine.board.layout import (
     BoardLayout,
     TileNumberVec,
 )
-from catan_engine.board.resources import CITY_COST, N_RESOURCES, SETTLEMENT_COST
+from catan_engine.board.resources import (
+    CITY_COST,
+    N_RESOURCES,
+    ROAD_COST,
+    SETTLEMENT_COST,
+)
 from catan_engine.board.state import (
+    CITY,
     MAX_SETTLEMENTS,
     SETTLEMENT,
     BoardState,
@@ -39,6 +45,7 @@ Scalar = Float[Array, ""]
 _VP_CARD_SHARE = float(DEV_CARD_COUNTS[DevCard.VICTORY_POINT]) / float(
     sum(DEV_CARD_COUNTS)
 )
+_ROAD_COST_ARR = jnp.asarray(ROAD_COST, jnp.float32)
 _SETTLEMENT_COST_ARR = jnp.asarray(SETTLEMENT_COST, jnp.float32)
 _CITY_COST_ARR = jnp.asarray(CITY_COST, jnp.float32)
 _DEV_COST_ARR = jnp.asarray(DEV_CARD_COST, jnp.float32)
@@ -111,6 +118,32 @@ class BoardFeatures(NamedTuple):
     army_lead: Scalar
     """Knights played minus the best opponent's (clipped ±3): the Largest
     Army race's margin, not just own progress."""
+    wood_brick: Scalar
+    """The wood + brick share of production — the expansion engine, the
+    counterpart of ``wheat_ore``."""
+    settlements: Scalar
+    """Settlements standing (city upgrades return them to stock)."""
+    cities: Scalar
+    """Cities built."""
+    blocked_pips: Scalar
+    """Own production pips the robber is denying right now — what a knight
+    or a 7 would recover."""
+    biggest_stack: Scalar
+    """Largest single-resource count in hand — monopoly and discard
+    exposure concentrated in one type."""
+    hand_types: Scalar
+    """Distinct resource types held — trade flexibility."""
+    affordable: Scalar
+    """How many of the four buys (road/settlement/city/dev) the hand covers
+    right now (0-4) — immediately convertible purchasing power."""
+    road_lead: Scalar
+    """Own road count minus the best opponent's (clipped ±5) — the cheap
+    Longest Road race proxy (the exact trail DFS is too hot for a sweep)."""
+    port_count: Scalar
+    """Distinct port kinds owned (each 2:1 counts one, the 3:1 counts one)."""
+    reach2: Scalar
+    """Pips of the best spot exactly two roads away (through own or empty
+    vertices), beyond ``reach`` — deeper expansion on the horizon."""
 
 
 def board_features(
@@ -121,8 +154,8 @@ def board_features(
     vp = state.victory_points[p].astype(jnp.float32)
     vp += 2.0 * (state.longest_road_owner == p)
     vp += 2.0 * (state.largest_army_owner == p)
-    pips = tile_pips(layout.tile_number)
-    pips = pips * (jnp.arange(N_TILES) != state.robber)
+    raw_pips = tile_pips(layout.tile_number)
+    pips = raw_pips * (jnp.arange(N_TILES) != state.robber)
     weight = (
         ((state.vertex_owner[TILE_V] == p + 1) * state.vertex_type[TILE_V])
         .sum(axis=1)
@@ -188,6 +221,31 @@ def board_features(
         jnp.arange(state.n_players) == p, 0, state.knights_played
     ).astype(jnp.float32)
 
+    # Two roads out: continue from reach vertices that are empty.
+    pass2 = reach_v & (state.vertex_owner == 0)
+    reach2_v = (
+        jnp.zeros((N_VERTICES,), bool)
+        .at[u]
+        .max(empty & pass2[v])
+        .at[v]
+        .max(empty & pass2[u])
+    )
+    reach2_spot = reach2_v & ~occ & ~nb_occ & ~spot & ~reach_spot & in_stock
+
+    road_counts = (
+        jnp.zeros((state.n_players + 1,), jnp.float32).at[state.edge_road].add(1.0)
+    )[1:]
+    road_others = jnp.where(jnp.arange(state.n_players) == p, -1.0, road_counts)
+
+    affordable = jnp.stack(
+        [
+            jnp.all(res >= _ROAD_COST_ARR),
+            jnp.all(res >= _SETTLEMENT_COST_ARR),
+            jnp.all(res >= _CITY_COST_ARR),
+            jnp.all(res >= _DEV_COST_ARR),
+        ]
+    )
+
     return BoardFeatures(
         vp=vp + dev_vp,
         production=production,
@@ -218,6 +276,18 @@ def board_features(
         second_spot=jnp.sort(spot_pips)[-2],
         reach=jnp.max(jnp.where(reach_spot, v_pips, 0.0)),
         army_lead=jnp.clip(knights_mine - jnp.max(others), -3.0, 3.0),
+        wood_brick=per_res[2] + per_res[3],
+        settlements=is_settlement.sum().astype(jnp.float32),
+        cities=((state.vertex_owner == p + 1) & (state.vertex_type == CITY))
+        .sum()
+        .astype(jnp.float32),
+        blocked_pips=raw_pips[state.robber] * weight[state.robber],
+        biggest_stack=res.max(),
+        hand_types=(res > 0).sum().astype(jnp.float32),
+        affordable=affordable.sum().astype(jnp.float32),
+        road_lead=jnp.clip(road_counts[p] - jnp.max(road_others), -5.0, 5.0),
+        port_count=has_2to1.sum().astype(jnp.float32) + has_3to1,
+        reach2=jnp.max(jnp.where(reach2_spot, v_pips, 0.0)),
     )
 
 

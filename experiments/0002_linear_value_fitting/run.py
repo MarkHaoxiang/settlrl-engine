@@ -12,6 +12,9 @@ hand-tuned weights. Pick a variant::
 - ``self_play`` — iterated maximise: each round's opponent is the current
   champion (round 0: the hand weights), challengers accepted only by
   beating it; rounds are configurable
+- ``self_play_4p`` — the same ladder in a four-player arena (one challenger
+  seat rotating against a champion table; acceptance and the gate clear the
+  1/players chance line)
 """
 
 import sys
@@ -23,6 +26,7 @@ from value_fitting import HAND_WEIGHTS, run_experiment
 
 BASE = {
     "seed": 0,
+    "players": 2,  # the optimization arena's player count
     "features": list(HAND_WEIGHTS),  # BoardFeatures names to optimize
     "collect": {"steps": 12_000, "batch_size": 64, "snapshot_every": 4},
     "maximise": {
@@ -44,6 +48,22 @@ VARIANTS = {
     "predict": {"target": "predict", "opponent": "greedy", "rounds": 1},
     "maximise": {"target": "maximise", "opponent": "greedy", "rounds": 1},
     "self_play": {"target": "maximise", "opponent": "self", "rounds": 3},
+    "self_play_4p": {
+        "target": "maximise",
+        "opponent": "self",
+        "rounds": 2,
+        "players": 4,
+        "maximise": {
+            "iterations": 2,
+            "population": 5,
+            "elites": 2,
+            "eval_games": 80,
+            "sigma": 0.3,
+        },
+        "probe_games": 160,
+        "eval_players": [4],
+        "games_multi": 200,
+    },
 }
 
 

@@ -72,6 +72,18 @@ def seat_rotated(
     return wins, episodes
 
 
+def _match(cfg: dict):
+    """The arena's match function: seat-swapped at 2p, seat-rotated above."""
+    players = cfg.get("players", 2)
+    if players == 2:
+        return seat_swapped
+
+    def rotated(spec_a: AgentSpec, spec_b: AgentSpec, n: int, seed: int):
+        return seat_rotated(spec_a, spec_b, players, n, seed)
+
+    return rotated
+
+
 def collect(
     run: Run, cfg: dict, spec_a: AgentSpec, spec_b: AgentSpec
 ) -> tuple[np.ndarray, ...]:
@@ -185,7 +197,7 @@ def probe_best(
     """Rank candidate weights by cheap seat-swapped matches vs the opponent."""
     probes: dict[str, float] = {}
     for label, cand in candidates.items():
-        w, n = seat_swapped(_spec(cand["weights"]), opponent, cfg["probe_games"], 10)
+        w, n = _match(cfg)(_spec(cand["weights"]), opponent, cfg["probe_games"], 10)
         probes[label] = w / n
         run.log(candidate=label, probe_vs_opponent=w / n)
     return probes
@@ -215,7 +227,7 @@ def maximise(
         rates = []
         for i, w_vec in enumerate(pop):
             weights = dict(zip(terms, w_vec.tolist(), strict=True))
-            w, n = seat_swapped(
+            w, n = _match(cfg)(
                 _spec(weights), opponent, m["eval_games"], 100 + 7 * (gen + seed_offset)
             )
             rates.append(w / n)
@@ -262,8 +274,8 @@ def run_experiment(run: Run, cfg: dict) -> None:
             weights = candidates[best_label]["weights"]
         else:
             weights = maximise(run, cfg, opp_spec, init=champion, seed_offset=37 * rnd)
-        w, n = seat_swapped(_spec(weights), champ_spec, cfg["probe_games"], 500 + rnd)
-        accepted = w / n > 0.5
+        w, n = _match(cfg)(_spec(weights), champ_spec, cfg["probe_games"], 500 + rnd)
+        accepted = w / n > 1.0 / cfg.get("players", 2)
         run.log(round=rnd, challenger_vs_champion=w / n, accepted=accepted)
         if accepted:
             champion = weights

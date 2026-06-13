@@ -27,7 +27,15 @@ from catan_agents.search import (
     make_mcts,
     mcts_policy,
 )
-from catan_agents.value import Value, ValueFunction, heuristic_value, make_heuristic
+from catan_agents.value import (
+    TUNED_WEIGHTS,
+    Value,
+    ValueFunction,
+    heuristic_value,
+    make_heuristic,
+    make_linear,
+    tuned_value,
+)
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 
@@ -56,6 +64,7 @@ POLICIES: dict[str, ObservationSpec | BeliefSpec | StatefulSpec] = {
 
 __all__ = [
     "POLICIES",
+    "TUNED_WEIGHTS",
     "AgentSpec",
     "BeliefPolicy",
     "BeliefSpec",
@@ -76,9 +85,11 @@ __all__ = [
     "lookahead_policy",
     "make_greedy",
     "make_heuristic",
+    "make_linear",
     "make_mcts",
     "make_planner",
     "mcts_policy",
     "random_policy",
     "sample_world",
+    "tuned_value",
 ]
