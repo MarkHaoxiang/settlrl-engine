@@ -12,6 +12,8 @@ hand-tuned weights. Pick a variant::
 - ``self_play`` — iterated maximise: each round's opponent is the current
   champion (round 0: the hand weights), challengers accepted only by
   beating it; rounds are configurable
+- ``self_play_wide`` — the 2p ladder over *all* engineered features (new
+  terms start at weight 0; the search decides what earns weight)
 - ``self_play_4p`` — the same ladder in a four-player arena (one challenger
   seat rotating against a champion table; acceptance and the gate clear the
   1/players chance line)
@@ -22,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _lib import start_run
+from settlrl_agents.internal.feature_engineering import BoardFeatures
 from value_fitting import HAND_WEIGHTS, run_experiment
 
 BASE = {
@@ -48,6 +51,19 @@ VARIANTS = {
     "predict": {"target": "predict", "opponent": "greedy", "rounds": 1},
     "maximise": {"target": "maximise", "opponent": "greedy", "rounds": 1},
     "self_play": {"target": "maximise", "opponent": "self", "rounds": 3},
+    "self_play_wide": {
+        "target": "maximise",
+        "opponent": "self",
+        "rounds": 4,
+        "features": "ALL",  # resolved below: every BoardFeatures term
+        "maximise": {
+            "iterations": 3,
+            "population": 8,
+            "elites": 3,
+            "eval_games": 60,
+            "sigma": 0.3,
+        },
+    },
     "self_play_4p": {
         "target": "maximise",
         "opponent": "self",
@@ -72,6 +88,8 @@ def main() -> None:
     if variant not in VARIANTS:
         raise SystemExit(f"usage: run.py [{'|'.join(VARIANTS)}]")
     config = {**BASE, **VARIANTS[variant], "variant": variant}
+    if config["features"] == "ALL":
+        config["features"] = list(BoardFeatures._fields)
     run_experiment(start_run(Path(__file__).parent, config), config)
 
 

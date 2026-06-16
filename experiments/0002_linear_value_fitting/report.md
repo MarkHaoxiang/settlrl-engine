@@ -79,6 +79,16 @@ cluster up (`knights` +0.47, `held_knights` +0.54, `n_dev` +0.40 — the army
 race is underweighted by hand), `n_roads` +0.42, and `progress` down (−0.70:
 hoarding toward the closest build is overrated once opponents punish it).
 
+### 4p-arena self-play (`runs/0002_linear_value_fitting/2026-06-13T003126Z`)
+
+Two rounds in a four-player arena (challenger seat rotating against a
+champion table; chance 25%). Both challengers were accepted (38.3%, 32.2%
+vs their champion tables), and the final champion reads **30.4% ± 3.2% vs
+three hand-tuned lookaheads** — above chance but lower 2σ 24.0%, a hair
+under the strict gate at n=230 — with 69.3% vs greedy tables (hand: 67.5%).
+Suggestive (~1.7σ), not proven; `TUNED_WEIGHTS[4]` stays hand-tuned pending
+a larger confirmation match (n≈600 resolves a true 30%).
+
 ## Decision
 
 The framework is adopted (`value_fitting.py` in this directory;
@@ -93,4 +103,4 @@ Adopting the champion as `make_heuristic` defaults is gate-justified *for
 want either count-conditional weights or a self-play arena that mixes
 counts (`eval_players` now reports both; the optimization arena is the next
 thing to parametrize). Further rounds/bigger budgets are config
-changes; the nonlinear continuation is catan-learn Stage 1.
+changes; the nonlinear continuation is settlrl-learn Stage 1.

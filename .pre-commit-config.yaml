@@ -15,19 +15,19 @@ repos:
         require_serial: true
       - id: stack-bound-doc
         name: stack-bound doc up to date
-        entry: bash -c 'uv run python packages/catan-engine/tools/gen_stack_bound_doc.py && git diff --exit-code packages/catan-engine/docs/longest-road-stack-bound.html'
+        entry: bash -c 'uv run python packages/settlrl-engine/tools/gen_stack_bound_doc.py && git diff --exit-code packages/settlrl-engine/docs/longest-road-stack-bound.html'
         language: system
         pass_filenames: false
-        files: ^packages/catan-engine/(tools/gen_stack_bound_doc\.py|docs/longest-road-stack-bound\.html)$
+        files: ^packages/settlrl-engine/(tools/gen_stack_bound_doc\.py|docs/longest-road-stack-bound\.html)$
       - id: mypy
         name: mypy
-        entry: uv run mypy packages/catan-engine/src packages/catan-engine/tests packages/catan-agents/src packages/catan-agents/tests packages/catan-render/src packages/catan-reference/src packages/catan-learn/src packages/catan-learn/tests/test_learn.py
+        entry: uv run mypy packages/settlrl-engine/src packages/settlrl-engine/tests packages/settlrl-agents/src packages/settlrl-agents/tests packages/settlrl-render/src packages/settlrl-reference/src packages/settlrl-learn/src packages/settlrl-learn/tests/test_learn.py
         language: system
         pass_filenames: false
         always_run: true
       - id: pytest
         name: pytest
-        entry: uv run pytest packages/catan-engine/tests/
+        entry: uv run pytest packages/settlrl-engine/tests/
         language: system
         pass_filenames: false
         always_run: true

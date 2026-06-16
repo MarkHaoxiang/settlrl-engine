@@ -24,20 +24,20 @@ jobs:
       # JAX validates entries itself, stale ones are just misses.
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/jax-catan
-          key: jax-catan-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          restore-keys: jax-catan-${{ runner.os }}-
+          path: ~/.cache/jax-settlrl
+          key: jax-settlrl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: jax-settlrl-${{ runner.os }}-
       - run: uv sync --locked
       - run: uv run ruff check packages
       - run: uv run ruff format --check packages
       - run: >
           uv run mypy
-          packages/catan-engine/src packages/catan-engine/tests
-          packages/catan-agents/src packages/catan-agents/tests
-          packages/catan-render/src packages/catan-reference/src
-          packages/catan-learn/src packages/catan-learn/tests/test_learn.py
-      - run: uv run --package catan-engine pytest packages/catan-engine/tests
-      - run: uv run --package catan-reference pytest packages/catan-reference
-      - run: uv run --package catan-render pytest packages/catan-render
-      - run: uv run --package catan-agents pytest packages/catan-agents/tests
-      - run: uv run --package catan-learn pytest packages/catan-learn/tests
+          packages/settlrl-engine/src packages/settlrl-engine/tests
+          packages/settlrl-agents/src packages/settlrl-agents/tests
+          packages/settlrl-render/src packages/settlrl-reference/src
+          packages/settlrl-learn/src packages/settlrl-learn/tests/test_learn.py
+      - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
+      - run: uv run --package settlrl-reference pytest packages/settlrl-reference
+      - run: uv run --package settlrl-render pytest packages/settlrl-render
+      - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
+      - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests

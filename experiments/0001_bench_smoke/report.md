@@ -25,5 +25,5 @@ Seat-balanced: 27/32 seated first, 27/33 seated second.
 
 Infrastructure adopted. The pattern for every following experiment:
 `_lib.start_run` for the manifest, `metrics.jsonl` for anything stepwise,
-`catan_agents.cli.bench` (saved as `bench.json`) for strength claims, and the
+`settlrl_agents.cli.bench` (saved as `bench.json`) for strength claims, and the
 verdict computed by the script.

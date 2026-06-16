@@ -1,0 +1,26 @@
+[project]
+name = "settlrl-reference"
+version = "0.1.0"
+description = "A plain-Python gold-standard reference implementation of the Settlrl rules, used to differentially test settlrl-engine."
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+
+# Empty: makes the workspace-wide CI opt-out (UV_NO_GROUP=cuda in ci.yml) a
+# valid group name under `uv run --package <this>`. The real cuda group lives
+# in the workspace root's pyproject.
+[dependency-groups]
+cuda = []

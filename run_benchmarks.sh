@@ -8,7 +8,7 @@ set -euo pipefail
 # -n 0 turns xdist back off: pytest-benchmark needs a single process for
 # stable timings (the default addopts run the regular suites with -n auto).
 # `|| [ $? -eq 5 ]` tolerates a package where a -k filter selects nothing.
-for pkg in catan-engine catan-agents; do
+for pkg in settlrl-engine settlrl-agents; do
     uv run --package "$pkg" pytest "packages/$pkg/tests/benchmark" \
         -m benchmark --benchmark-only --no-cov -n 0 "$@" || [ "$?" -eq 5 ]
 done

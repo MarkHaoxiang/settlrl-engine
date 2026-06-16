@@ -10,20 +10,20 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "catan-agents",
-    "catan-engine",
-    "catan-learn",
-    "catan-reference",
-    "catan-render",
+    "settlrl-agents",
+    "settlrl-engine",
+    "settlrl-learn",
+    "settlrl-reference",
+    "settlrl-render",
 ]
 
 [manifest.dependency-groups]
 cuda = [{ name = "jax", extras = ["cuda13"], marker = "sys_platform == 'linux'", specifier = ">=0.7" }]
 dev = [
     { name = "beartype", specifier = ">=0.19" },
-    { name = "catan-agents", editable = "packages/catan-agents" },
-    { name = "catan-learn", editable = "packages/catan-learn" },
-    { name = "catan-reference", editable = "packages/catan-reference" },
+    { name = "settlrl-agents", editable = "packages/settlrl-agents" },
+    { name = "settlrl-learn", editable = "packages/settlrl-learn" },
+    { name = "settlrl-reference", editable = "packages/settlrl-reference" },
     { name = "expecttest", specifier = ">=0.2.1" },
     { name = "gymnasium", specifier = ">=0.29" },
     { name = "hypothesis", specifier = ">=6.131.0" },
@@ -130,11 +130,11 @@ wheels = [
 ]
 
 [[package]]
-name = "catan-agents"
+name = "settlrl-agents"
 version = "0.1.0"
-source = { editable = "packages/catan-agents" }
+source = { editable = "packages/settlrl-agents" }
 dependencies = [
-    { name = "catan-engine" },
+    { name = "settlrl-engine" },
     { name = "jax" },
     { name = "jaxtyping" },
     { name = "mctx" },
@@ -142,7 +142,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "catan-engine", editable = "packages/catan-engine" },
+    { name = "settlrl-engine", editable = "packages/settlrl-engine" },
     { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "mctx", specifier = ">=0.0.6" },
@@ -152,9 +152,9 @@ requires-dist = [
 cuda = []
 
 [[package]]
-name = "catan-engine"
+name = "settlrl-engine"
 version = "0.1.0"
-source = { editable = "packages/catan-engine" }
+source = { editable = "packages/settlrl-engine" }
 dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
@@ -183,12 +183,12 @@ provides-extras = ["rl", "cuda"]
 cuda = []
 
 [[package]]
-name = "catan-learn"
+name = "settlrl-learn"
 version = "0.1.0"
-source = { editable = "packages/catan-learn" }
+source = { editable = "packages/settlrl-learn" }
 dependencies = [
-    { name = "catan-agents" },
-    { name = "catan-engine" },
+    { name = "settlrl-agents" },
+    { name = "settlrl-engine" },
     { name = "jax" },
     { name = "jaxtyping" },
     { name = "numpy" },
@@ -196,8 +196,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "catan-agents", editable = "packages/catan-agents" },
-    { name = "catan-engine", editable = "packages/catan-engine" },
+    { name = "settlrl-agents", editable = "packages/settlrl-agents" },
+    { name = "settlrl-engine", editable = "packages/settlrl-engine" },
     { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "numpy", specifier = ">=1.26" },
@@ -207,9 +207,9 @@ requires-dist = [
 cuda = []
 
 [[package]]
-name = "catan-reference"
+name = "settlrl-reference"
 version = "0.1.0"
-source = { editable = "packages/catan-reference" }
+source = { editable = "packages/settlrl-reference" }
 
 [package.metadata]
 
@@ -217,19 +217,19 @@ source = { editable = "packages/catan-reference" }
 cuda = []
 
 [[package]]
-name = "catan-render"
+name = "settlrl-render"
 version = "0.1.0"
-source = { editable = "packages/catan-render" }
+source = { editable = "packages/settlrl-render" }
 dependencies = [
-    { name = "catan-agents" },
-    { name = "catan-engine", extra = ["rl"] },
+    { name = "settlrl-agents" },
+    { name = "settlrl-engine", extra = ["rl"] },
     { name = "fastapi", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "catan-agents", editable = "packages/catan-agents" },
-    { name = "catan-engine", extras = ["rl"], editable = "packages/catan-engine" },
+    { name = "settlrl-agents", editable = "packages/settlrl-agents" },
+    { name = "settlrl-engine", extras = ["rl"], editable = "packages/settlrl-engine" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
 ]
 

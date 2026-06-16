@@ -18,7 +18,7 @@ class of related experiments sharing machinery — committed; everything a run
   section per concluded variant, citing the `runs/` directories the numbers
   came from.
 - `JOURNAL.md` — append-only index: one verdict line per concluded finding.
-- Strength claims gate through `catan-agents bench` (`--json` emits the
+- Strength claims gate through `settlrl-agents bench` (`--json` emits the
   machine-readable verdict) or an in-run match with the threshold asserted in
   code — the script decides pass/fail, not a reading of it.
 

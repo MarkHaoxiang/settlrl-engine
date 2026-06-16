@@ -1,21 +1,21 @@
-# catan
+# settlrl
 
-A fast, batched implementation of the board game [Catan](https://www.catan.com/), built for reinforcement learning and large-scale simulation.
+A fast, batched implementation of Settlrl, a hex-tile trading board game, built for reinforcement learning and large-scale simulation.
 
 ## Packages
 
 | Package | Description |
 |---|---|
-| [`catan-engine`](packages/catan-engine/) | The game engine — board generation, rules, and actions. |
-| [`catan-reference`](packages/catan-reference/) | A plain-Python, gold-standard reference implementation of the rules, used as the differential test oracle for `catan-engine`. |
-| [`catan-agents`](packages/catan-agents/) | Agents that play the game — heuristics and search (greedy, lookahead, MCTS) — plus a CLI for matches and benchmarks. |
-| [`catan-learn`](packages/catan-learn/) | Learned value and policy functions that plug into the agents. |
-| [`catan-render`](packages/catan-render/) | A web app for viewing a board in the browser. |
+| [`settlrl-engine`](packages/settlrl-engine/) | The game engine — board generation, rules, and actions. |
+| [`settlrl-reference`](packages/settlrl-reference/) | A plain-Python, gold-standard reference implementation of the rules, used as the differential test oracle for `settlrl-engine`. |
+| [`settlrl-agents`](packages/settlrl-agents/) | Agents that play the game — heuristics and search (greedy, lookahead, MCTS) — plus a CLI for matches and benchmarks. |
+| [`settlrl-learn`](packages/settlrl-learn/) | Learned value and policy functions that plug into the agents. |
+| [`settlrl-render`](packages/settlrl-render/) | A web app for viewing a board in the browser. |
 
 ## Requirements
 
 - Python ≥ 3.12 with [uv](https://docs.astral.sh/uv/)
-- Node.js ≥ 18 (only for `catan-render`)
+- Node.js ≥ 18 (only for `settlrl-render`)
 
 ## Getting started
 

@@ -1,0 +1,323 @@
+"""One-step tactical lookahead for the planner's leaf decisions.
+
+The planner's strategic layer (plans, saving, award races, trade memory)
+stays scripted; the *tactical* picks — which setup spot, which robber cell,
+which discard, accept or reject — consult a real lookahead: rebuild a
+single-game engine board from the observation, apply every flat action with
+the env's own legality mask, and score the successors with the shipped
+heuristic from the player's seat.
+
+Public fields reconstruct exactly. Hidden ones get a neutral fill — each
+opponent's hand spread evenly over the resource types, their dev cards held
+as knights (only the count enters the opponent strength term), the dev deck
+scaled to the unseen remainder — and ``free_roads`` is inferred (a legal
+BUILD_ROAD the hand cannot pay for means at least one is owed). The mask is
+passed straight through as the availability ``apply_action`` trusts, so
+reconstruction gaps cannot make an illegal action look applied.
+"""
+
+from __future__ import annotations
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+from settlrl_engine.board.dev_cards import DEV_CARD_COUNTS, N_DEV_CARD_TYPES, DevCard
+from settlrl_engine.board.layout import BoardLayout
+from settlrl_engine.board.resources import N_RESOURCES, ROAD_COST
+from settlrl_engine.board.state import BoardState, GamePhase, KeyScalar
+from settlrl_engine.env import ActionType
+from settlrl_engine.mechanics.action import ActionParams, apply_action
+from settlrl_engine.mechanics.flat import flat_available_for
+
+from settlrl_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
+from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
+from settlrl_agents.planner.pov import Pov
+from settlrl_agents.policy import FlatMask
+from settlrl_agents.value import heuristic_value
+
+_DEV_TOTAL = int(sum(DEV_CARD_COUNTS))
+_ROAD_COST = np.asarray(ROAD_COST, np.int64)
+_BUY_DEV_ROW = int(
+    np.flatnonzero(np.asarray(_ROW_TYPE) == int(ActionType.BUY_DEVELOPMENT_CARD))[0]
+)
+
+
+def _u8(x: object) -> jax.Array:
+    return jnp.asarray(x, jnp.uint8)
+
+
+def _spread(total: int) -> np.ndarray:
+    """``total`` cards spread as evenly as possible over the resource types."""
+    base, rem = divmod(total, N_RESOURCES)
+    return base + (np.arange(N_RESOURCES) < rem).astype(np.int64)
+
+
+def reconstruct(pov: Pov, key: KeyScalar) -> tuple[BoardLayout, BoardState]:
+    """A single-game engine board consistent with the observation."""
+    n = pov.n_players
+    res = np.zeros((n, N_RESOURCES), np.int64)
+    dev = np.zeros((n, N_DEV_CARD_TYPES), np.int64)
+    pending = np.zeros((n,), np.int64)
+    for p in range(n):
+        if p == pov.me:
+            res[p] = pov.hand
+            dev[p] = pov.dev_hand
+            pending[p] = pov.pending_discard
+        else:
+            res[p] = _spread(int(pov.hand_size[p]))
+            dev[p, DevCard.KNIGHT] = int(pov.dev_card_count[p])
+    drawn = int(pov.dev_card_count.sum() + pov.knights_played.sum())
+    deck = np.asarray(DEV_CARD_COUNTS) * max(_DEV_TOTAL - drawn, 0) // _DEV_TOTAL
+    road_legal = pov.legal_rows(ActionType.BUILD_ROAD).size > 0
+    free_roads = int(road_legal and bool(np.any(pov.hand < _ROAD_COST)))
+    setup_index = int((pov.vertex_owner > 0).sum()) - (
+        pov.phase == GamePhase.SETUP_ROAD
+    )
+
+    layout = BoardLayout(
+        tile_resource=_u8(pov.tile_resource),
+        tile_number=_u8(pov.tile_number),
+        port_allocation=_u8(pov.port_allocation),
+    )
+    state = BoardState(
+        vertex_owner=_u8(pov.vertex_owner),
+        vertex_type=_u8(pov.vertex_type),
+        edge_road=_u8(pov.edge_road),
+        robber=_u8(pov.robber),
+        player_resources=_u8(res),
+        victory_points=_u8(pov.victory_points),
+        dev_deck=_u8(deck),
+        dev_hand=_u8(dev),
+        knights_played=_u8(pov.knights_played),
+        phase=_u8(pov.phase),
+        current_player=_u8(pov.current_player),
+        setup_index=_u8(setup_index),
+        dice_roll=_u8(pov.dice_roll),
+        has_rolled=_u8(pov.has_rolled),
+        dev_played=_u8(0),
+        dev_bought=_u8(np.zeros(N_DEV_CARD_TYPES, np.int64)),
+        free_roads=_u8(free_roads),
+        pending_discard=_u8(pending),
+        trade_partner=_u8(pov.trade_partner),
+        trade_give=_u8(pov.trade_give),
+        trade_receive=_u8(pov.trade_receive),
+        longest_road_owner=_u8(pov.longest_road_owner),
+        largest_army_owner=_u8(pov.largest_army_owner),
+        longest_road_len=_u8(pov.longest_road_len),
+        key=key,
+    )
+    return layout, state
+
+
+@jax.jit
+def _successor_values(
+    layout: BoardLayout, state: BoardState, player: jax.Array, mask: FlatMask
+) -> jax.Array:
+    succ, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
+        layout, state, _ROW_TYPE, _ROW_PARAMS, mask
+    )
+    return jax.vmap(heuristic_value, in_axes=(None, 0, None))(layout, succ, player)
+
+
+def _after(
+    layout: BoardLayout, state: BoardState, row: jax.Array, player: jax.Array
+) -> tuple[jax.Array, jax.Array]:
+    """Apply one (legal) row, then sweep legality and successor values of the
+    follow-up position: the second ply of an own-turn combo."""
+    params = ActionParams(idx=_ROW_PARAMS.idx[row], target=_ROW_PARAMS.target[row])
+    succ, _ = apply_action(layout, state, _ROW_TYPE[row], params, jnp.bool_(True))
+    mask2 = flat_available_for(layout, succ)
+    return mask2, _successor_values(layout, succ, player, mask2)
+
+
+# One dispatch for a fixed-size block of first actions (callers pad with a
+# repeated legal row: fixed shapes mean one trace, padding is just ignored).
+_COMBO_PAD = 32
+_after_many = jax.jit(jax.vmap(_after, in_axes=(None, None, 0, None)))
+
+
+_ROLL_OUTCOMES = jnp.arange(2, 13, dtype=jnp.int32)
+_ROLL_WEIGHTS = jnp.asarray([1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1], jnp.float32) / 36.0
+_ROLL = jnp.int32(ActionType.ROLL_DICE)
+_BUY = jnp.int32(ActionType.BUY_DEVELOPMENT_CARD)
+_ZERO = jnp.int32(0)
+
+
+@jax.jit
+def _roll_expectation(
+    layout: BoardLayout, state: BoardState, player: jax.Array
+) -> jax.Array:
+    """Exact expectation of the value after this state's pending roll, over
+    the 11 forced two-dice outcomes (the engine's chance-node seam)."""
+
+    def one(r: jax.Array) -> jax.Array:
+        succ, _ = apply_action(
+            layout, state, _ROLL, ActionParams(idx=r, target=_ZERO), jnp.bool_(True)
+        )
+        return heuristic_value(layout, succ, player)
+
+    out: jax.Array = (jax.vmap(one)(_ROLL_OUTCOMES) * _ROLL_WEIGHTS).sum()
+    return out
+
+
+@jax.jit
+def _roll_expectation_after(
+    layout: BoardLayout, state: BoardState, row: jax.Array, player: jax.Array
+) -> jax.Array:
+    """``_roll_expectation`` of the state one (legal) row later."""
+    params = ActionParams(idx=_ROW_PARAMS.idx[row], target=_ROW_PARAMS.target[row])
+    succ, _ = apply_action(layout, state, _ROW_TYPE[row], params, jnp.bool_(True))
+    out: jax.Array = _roll_expectation(layout, succ, player)
+    return out
+
+
+@jax.jit
+def _buy_dev_expectation(
+    layout: BoardLayout, state: BoardState, player: jax.Array
+) -> jax.Array:
+    """Deck-weighted expectation over the five forced dev draws (the second
+    chance-node seam), replacing the sweep's single-sample draw."""
+
+    def one(t: jax.Array) -> jax.Array:
+        succ, _ = apply_action(
+            layout, state, _BUY, ActionParams(idx=t + 1, target=_ZERO), jnp.bool_(True)
+        )
+        return heuristic_value(layout, succ, player)
+
+    vals = jax.vmap(one)(jnp.arange(N_DEV_CARD_TYPES, dtype=jnp.int32))
+    w = state.dev_deck.astype(jnp.float32)
+    return (vals * w).sum() / jnp.maximum(w.sum(), 1.0)
+
+
+# Rows an imagined opponent may not use in a reply: their reconstructed dev
+# hand is fiction, so their dev plays would be too.
+_NO_DEV_PLAYS = jnp.asarray(
+    ~np.isin(
+        np.asarray(_ROW_TYPE),
+        [
+            int(ActionType.PLAY_KNIGHT),
+            int(ActionType.PLAY_ROAD_BUILDING),
+            int(ActionType.PLAY_YEAR_OF_PLENTY),
+            int(ActionType.PLAY_MONOPOLY),
+        ],
+    )
+)
+
+
+@jax.jit
+def _best_reply(
+    layout: BoardLayout, state: BoardState, my_row: jax.Array, opp: jax.Array
+) -> jax.Array:
+    """The opponent's best answer to ``my_row``, valued from *their* seat:
+    apply my action, hand them a fabricated MAIN turn on the result, and take
+    the max over their grounded options (builds and bank trades — public
+    roads, real hand size, spread composition)."""
+    params = ActionParams(
+        idx=_ROW_PARAMS.idx[my_row], target=_ROW_PARAMS.target[my_row]
+    )
+    succ, _ = apply_action(layout, state, _ROW_TYPE[my_row], params, jnp.bool_(True))
+    theirs = succ._replace(
+        current_player=opp.astype(jnp.uint8),
+        phase=jnp.uint8(GamePhase.MAIN),
+        has_rolled=jnp.uint8(1),
+        dev_played=jnp.uint8(0),
+        free_roads=jnp.uint8(0),
+    )
+    mask = flat_available_for(layout, theirs) & _NO_DEV_PLAYS
+    vals = _successor_values(layout, theirs, opp.astype(jnp.int32), mask)
+    return jnp.max(jnp.where(mask, vals, -jnp.inf))
+
+
+_REPLY_PAD = 8
+_best_replies = jax.jit(jax.vmap(_best_reply, in_axes=(None, None, 0, None)))
+
+
+class Tactic:
+    """Per-decision successor values, computed lazily and cached per ``Pov``."""
+
+    def __init__(self, seed: int) -> None:
+        self._key = jax.random.key(seed)
+        self._cache: np.ndarray | None = None
+        self._board: tuple[BoardLayout, BoardState] | None = None
+        self._cache_for: Pov | None = None
+
+    def values(self, pov: Pov) -> np.ndarray:
+        """``(N_FLAT,)`` heuristic value of each action's successor (one
+        sampled outcome for steals; the dev draw is an exact deck-weighted
+        expectation); junk on illegal rows."""
+        if self._cache_for is not pov:
+            self._key, sub = jax.random.split(self._key)
+            self._board = reconstruct(pov, sub)
+            me = jnp.int32(pov.me)
+            vals = np.array(  # a copy: device_get views are read-only
+                jax.device_get(
+                    _successor_values(*self._board, me, jnp.asarray(pov.mask))
+                )
+            )
+            if pov.mask[_BUY_DEV_ROW]:
+                vals[_BUY_DEV_ROW] = float(_buy_dev_expectation(*self._board, me))
+            self._cache = vals
+            self._cache_for = pov
+        assert self._cache is not None
+        return self._cache
+
+    def roll_expectation(self, pov: Pov, row: int | None = None) -> float:
+        """Exact 11-outcome expectation over the pending roll — of this state,
+        or of the state after playing ``row`` first (the pre-roll knight
+        question: does moving the robber pay before the dice land?)."""
+        self.values(pov)  # ensure the board cache
+        assert self._board is not None
+        layout, state = self._board
+        me = jnp.int32(pov.me)
+        if row is None:
+            return float(_roll_expectation(layout, state, me))
+        return float(_roll_expectation_after(layout, state, jnp.int32(row), me))
+
+    def best(self, pov: Pov, rows: np.ndarray) -> int:
+        """The row among ``rows`` whose successor scores best."""
+        vals = self.values(pov)
+        return int(rows[int(np.argmax(vals[rows]))])
+
+    def best_paranoid(self, pov: Pov, rows: np.ndarray, margin: float = 1.0) -> int:
+        """``best``, with near-ties (within ``margin`` of the top) broken by
+        the opponents' best reply: among moves equally good for us, prefer
+        the one that leaves them the worst answer."""
+        vals = self.values(pov)
+        order = sorted((int(r) for r in rows), key=lambda r: -float(vals[r]))
+        top = float(vals[order[0]])
+        short = [r for r in order if vals[r] >= top - margin][:_REPLY_PAD]
+        if len(short) == 1:
+            return short[0]
+        assert self._board is not None
+        layout, state = self._board
+        padded = jnp.asarray(short + [short[0]] * (_REPLY_PAD - len(short)), jnp.int32)
+        replies = np.full(len(short), -np.inf)
+        for p in range(pov.n_players):
+            if p != pov.me:
+                per = np.asarray(_best_replies(layout, state, padded, jnp.int32(p)))
+                replies = np.maximum(replies, per[: len(short)])
+        return short[int(np.argmin(replies))]
+
+    def combo_best(
+        self, pov: Pov, enablers: list[int], follow: np.ndarray
+    ) -> tuple[int, int, float] | None:
+        """The best own-turn pair (enabler row, follow-up row) by the pair's
+        final value: the second ply lookahead alone cannot see — a bank trade
+        or dev play that *enables* a build this same turn. ``follow`` flags
+        the rows allowed as the second action. None if no pair is playable."""
+        self.values(pov)  # ensure the board cache
+        assert self._board is not None
+        layout, state = self._board
+        live = enablers[:_COMBO_PAD]
+        padded = jnp.asarray(live + [live[0]] * (_COMBO_PAD - len(live)), jnp.int32)
+        masks, vals = _after_many(layout, state, padded, jnp.int32(pov.me))
+        masks2, vals2 = np.asarray(masks), np.asarray(vals)
+        out: tuple[int, int, float] | None = None
+        for i, e in enumerate(live):
+            allowed = masks2[i] & follow
+            if not allowed.any():
+                continue
+            row2 = int(np.flatnonzero(allowed)[np.argmax(vals2[i][allowed])])
+            if out is None or vals2[i, row2] > out[2]:
+                out = (e, row2, float(vals2[i, row2]))
+        return out

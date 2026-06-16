@@ -35,7 +35,7 @@ CONFIG = {
 def main() -> None:
     run = start_run(Path(__file__).parent, CONFIG)
     # The experiment: run.log(...) per step, run.save_json(...) for artifacts.
-    # Gate any strength claim through catan_agents.cli.bench and assert the
+    # Gate any strength claim through settlrl_agents.cli.bench and assert the
     # threshold here, not by eye.
     run.finish("fail", note="not implemented")
 

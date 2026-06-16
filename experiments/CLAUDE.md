@@ -16,7 +16,7 @@ merged config / environment), `Run.log` (metrics.jsonl), `Run.save_json`,
 ## `0002_linear_value_fitting/` — linear fits over the engineered features
 
 `value_fitting.py` optimizes weights over
-`catan_agents.internal.feature_engineering.BoardFeatures`, deploys them
+`settlrl_agents.internal.feature_engineering.BoardFeatures`, deploys them
 through `value.make_linear` into one-step lookahead, and gates against the
 hand-tuned weights (pass iff the lower 2-sigma bound clears 50%). Config
 knobs: `features` (list of `BoardFeatures` names), `target`

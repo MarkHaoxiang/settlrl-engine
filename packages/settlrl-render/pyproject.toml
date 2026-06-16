@@ -1,0 +1,36 @@
+[project]
+name = "settlrl-render"
+version = "0.1.0"
+description = "Settlrl rendering library"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    # [rl] pulls in pettingzoo/gymnasium, needed by the AEC env that drives /play.
+    "settlrl-engine[rl]",
+    # Bot policies for the non-human seats.
+    "settlrl-agents",
+    "fastapi[standard]>=0.115.0",
+]
+
+[project.scripts]
+settlrl-render = "settlrl_render:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+settlrl-engine = { workspace = true }
+settlrl-agents = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto"
+
+# Empty: makes the workspace-wide CI opt-out (UV_NO_GROUP=cuda in ci.yml) a
+# valid group name under `uv run --package <this>`. The real cuda group lives
+# in the workspace root's pyproject.
+[dependency-groups]
+cuda = []

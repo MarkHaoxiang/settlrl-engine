@@ -20,3 +20,7 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   (hand: 68.1%); champion reproduced bit-identically from config (framework
   determinism verified). Adoption now 2p-conditional or needs a mixed-count
   arena.
+- 0002_linear_value_fitting/self_play_4p — near miss: the 4p-arena champion
+  reads 30.4% ± 3.2% vs three hand lookaheads (chance 25%, lower 2σ 24.0%,
+  n=230) and 69.3% vs greedy tables; 4p tuned slot stays hand-tuned pending
+  an n≈600 confirmation.

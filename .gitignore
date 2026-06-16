@@ -29,7 +29,7 @@ share/python-wheels/
 MANIFEST
 
 # The Python packaging rules above must not swallow frontend source.
-!packages/catan-render/frontend/src/lib/
+!packages/settlrl-render/frontend/src/lib/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -134,7 +134,7 @@ celerybeat.pid
 
 # Environments
 # Anchored to the repo root so a source package named ``env`` (e.g.
-# catan_engine/env, tests/env) isn't mistaken for a virtualenv.
+# settlrl_engine/env, tests/env) isn't mistaken for a virtualenv.
 .env
 .venv
 /env/

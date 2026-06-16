@@ -19,13 +19,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from _lib import Run
-from catan_agents import POLICIES
-from catan_agents.evaluate import _picker, evaluate
-from catan_agents.internal.feature_engineering import BoardFeatures, board_features
-from catan_agents.policy import AgentSpec, BeliefSpec
-from catan_agents.search.lookahead import make_greedy
-from catan_agents.value import make_linear
-from catan_engine.env import BatchedCatanEnv, flat_to_action
+from settlrl_agents import POLICIES
+from settlrl_agents.evaluate import _picker, evaluate
+from settlrl_agents.internal.feature_engineering import BoardFeatures, board_features
+from settlrl_agents.policy import AgentSpec, BeliefSpec
+from settlrl_agents.search.lookahead import make_greedy
+from settlrl_agents.value import make_linear
+from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import roc_auc_score
 
@@ -92,7 +92,7 @@ def collect(
     Rows are seat0 features minus seat1 features, labels seat0-won; episode
     ids group correlated rows, fractions locate each row within its game."""
     c = cfg["collect"]
-    env = BatchedCatanEnv(
+    env = BatchedSettlrlEnv(
         batch_size=c["batch_size"], seed=cfg["seed"], reward="sparse",
         n_players=2, track_beliefs=True,
     )  # fmt: skip

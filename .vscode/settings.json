@@ -8,8 +8,8 @@
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
   // Point discovery at the package's test suite. pytest auto-resolves its
-  // rootdir/config from packages/catan-engine/pyproject.toml ([tool.pytest]).
-  "python.testing.pytestArgs": ["packages/catan-engine/tests"],
+  // rootdir/config from packages/settlrl-engine/pyproject.toml ([tool.pytest]).
+  "python.testing.pytestArgs": ["packages/settlrl-engine/tests"],
 
   // --- Editor tooling (matches the pre-commit hooks) -----------------------
   "ruff.importStrategy": "fromEnvironment",

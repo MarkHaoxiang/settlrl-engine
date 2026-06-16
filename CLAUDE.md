@@ -1,9 +1,11 @@
-# catan-engine
+# settlrl-engine
 
 ## Rules
 
-At the start of every session, read the official Catan rulebook:
-www.catan.com/sites/default/files/2021-06/catan_base_rules_2020_200707.pdf
+At the start of every session, read the base-game rulebook this engine
+implements (the canonical source rules, kept as the external spec for rule
+fidelity):
+https://www.catan.com/sites/default/files/2021-06/catan_base_rules_2020_200707.pdf
 
 ## Documentation
 
@@ -26,7 +28,7 @@ live in the same directory, outputs land in the git-ignored `runs/` (many
 logs per framework), and `experiments/JOURNAL.md` indexes one verdict line
 per concluded finding. Prefer extending a framework's variants over
 scaffolding a new number (`uv run python experiments/new.py "<title>"` for
-genuinely new classes). Strength claims gate through `catan-agents bench` or
+genuinely new classes). Strength claims gate through `settlrl-agents bench` or
 an in-run match with the threshold asserted in code. Record evidence there,
 not in package docs — CLAUDE.md files cite experiment numbers.
 
@@ -35,14 +37,14 @@ not in package docs — CLAUDE.md files cite experiment numbers.
 Pre-commit hooks (ruff check/format, mypy over every package, the engine test
 suite) run on each commit — `uv run pre-commit install` after a fresh clone.
 CI (`.github/workflows/ci.yml`) runs the full gate on push/PR: lint, format
-check, mypy, and every package's test suite (including catan-agents, whose
+check, mypy, and every package's test suite (including settlrl-agents, whose
 suite is too slow for a commit hook).
 
 Before finishing any session, ensure the mypy checker passes:
 
 ```bash
-uv run --package catan-engine mypy packages/catan-engine/src packages/catan-engine/tests
-uv run --package catan-agents mypy packages/catan-agents/src packages/catan-agents/tests
+uv run --package settlrl-engine mypy packages/settlrl-engine/src packages/settlrl-engine/tests
+uv run --package settlrl-agents mypy packages/settlrl-agents/src packages/settlrl-agents/tests
 ```
 
 When CUDA is available (check `jax.devices("cuda")` or `nvidia-smi`), always run benchmarks directly on the GPU (`-k cuda`) — skip the CPU benchmark runs. Without CUDA, run CPU-only (`JAX_PLATFORMS=cpu`, or `-k cpu` for the benchmarks).

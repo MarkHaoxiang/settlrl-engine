@@ -6,9 +6,9 @@ dev = [
     "beartype>=0.19",
     # Workspace members in the root env, so `uv run python experiments/...`
     # imports the whole stack without --package indirection.
-    "catan-agents",
-    "catan-learn",
-    "catan-reference",
+    "settlrl-agents",
+    "settlrl-learn",
+    "settlrl-reference",
     "expecttest>=0.2.1",
     "gymnasium>=0.29",
     "hypothesis>=6.131.0",
@@ -27,7 +27,7 @@ dev = [
 # GPU support can't be marker-detected (markers see the OS, not the hardware),
 # so it's a *default* group on Linux: a plain `uv sync` no longer prunes the
 # CUDA jaxlib from dev machines. CI opts out (UV_NO_GROUP=cuda in ci.yml) to
-# avoid pulling the NVIDIA wheels on runners; same pin as catan-engine's
+# avoid pulling the NVIDIA wheels on runners; same pin as settlrl-engine's
 # user-facing `cuda` extra.
 cuda = [
     "jax[cuda13]>=0.7 ; sys_platform == 'linux'",
@@ -37,16 +37,16 @@ cuda = [
 default-groups = ["dev", "cuda"]
 
 [tool.uv.sources]
-catan-agents = { workspace = true }
-catan-learn = { workspace = true }
-catan-reference = { workspace = true }
+settlrl-agents = { workspace = true }
+settlrl-learn = { workspace = true }
+settlrl-reference = { workspace = true }
 
 [tool.mypy]
 mypy_path = [
-    "packages/catan-agents/src",
-    "packages/catan-engine/src",
-    "packages/catan-render/src",
-    "packages/catan-reference/src",
+    "packages/settlrl-agents/src",
+    "packages/settlrl-engine/src",
+    "packages/settlrl-render/src",
+    "packages/settlrl-reference/src",
 ]
 strict = true
 disallow_any_explicit = false
@@ -72,13 +72,13 @@ extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 # rules (and UP037's autofix strips the quotes they need — keep it off
 # everywhere under src, or any --fix run corrupts the annotations).
 "packages/*/src/**" = ["UP037"]
-"packages/catan-engine/src/catan_engine/board/__init__.py" = ["F722", "F821"]
-"packages/catan-engine/src/catan_engine/board/layout.py" = ["F722", "F821"]
-"packages/catan-engine/src/catan_engine/board/resources.py" = ["F722", "F821"]
-"packages/catan-engine/src/catan_engine/board/state.py" = ["F722", "F821"]
-"packages/catan-engine/src/catan_engine/env/batched.py" = ["F722", "F821"]
-"packages/catan-engine/src/catan_engine/mechanics/flat.py" = ["F722", "F821"]
-"packages/catan-agents/src/catan_agents/search/mcts.py" = ["F722", "F821"]
-"packages/catan-agents/src/catan_agents/search/smcts.py" = ["F722", "F821"]
-"packages/catan-learn/src/**" = ["F722", "F821"]
-"packages/catan-agents/src/catan_agents/evaluate.py" = ["F722", "F821"]
+"packages/settlrl-engine/src/settlrl_engine/board/__init__.py" = ["F722", "F821"]
+"packages/settlrl-engine/src/settlrl_engine/board/layout.py" = ["F722", "F821"]
+"packages/settlrl-engine/src/settlrl_engine/board/resources.py" = ["F722", "F821"]
+"packages/settlrl-engine/src/settlrl_engine/board/state.py" = ["F722", "F821"]
+"packages/settlrl-engine/src/settlrl_engine/env/batched.py" = ["F722", "F821"]
+"packages/settlrl-engine/src/settlrl_engine/mechanics/flat.py" = ["F722", "F821"]
+"packages/settlrl-agents/src/settlrl_agents/search/mcts.py" = ["F722", "F821"]
+"packages/settlrl-agents/src/settlrl_agents/search/smcts.py" = ["F722", "F821"]
+"packages/settlrl-learn/src/**" = ["F722", "F821"]
+"packages/settlrl-agents/src/settlrl_agents/evaluate.py" = ["F722", "F821"]

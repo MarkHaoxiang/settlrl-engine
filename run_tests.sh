@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full test suite (catan-engine + catan-agents + catan-learn + catan-render).
+# Run the full test suite (settlrl-engine + settlrl-agents + settlrl-learn + settlrl-render).
 # Pass extra args to pytest: ./run_tests.sh -v, ./run_tests.sh -k test_print_board
 # To accept / update expecttest snapshots: EXPECTTEST_ACCEPT=1 ./run_tests.sh
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 # the other package); treat it as success so a filtered run doesn't abort.
 run() { "$@" || [ $? -eq 5 ]; }
 
-run uv run --package catan-engine pytest packages/catan-engine/tests/ "$@"
-run uv run --package catan-agents pytest packages/catan-agents/tests/ "$@"
-run uv run --package catan-learn pytest packages/catan-learn/tests/ "$@"
-run uv run --package catan-render pytest packages/catan-render/tests/ "$@"
+run uv run --package settlrl-engine pytest packages/settlrl-engine/tests/ "$@"
+run uv run --package settlrl-agents pytest packages/settlrl-agents/tests/ "$@"
+run uv run --package settlrl-learn pytest packages/settlrl-learn/tests/ "$@"
+run uv run --package settlrl-render pytest packages/settlrl-render/tests/ "$@"

@@ -7,4 +7,4 @@
 **/.mypy_cache
 **/.ruff_cache
 **/*.egg-info
-packages/catan-render/frontend/dist
+packages/settlrl-render/frontend/dist

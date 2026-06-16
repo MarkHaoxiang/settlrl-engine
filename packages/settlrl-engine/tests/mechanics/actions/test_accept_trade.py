@@ -1,0 +1,64 @@
+"""Tests for the vectorized AcceptTrade action."""
+
+import jax.numpy as jnp
+import numpy as np
+from expecttest import assert_expected_inline
+from settlrl_engine.board import Board, give
+from settlrl_engine.board.state import NO_INDEX, GamePhase
+from settlrl_engine.mechanics.action import ActionResult
+from settlrl_engine.mechanics.trade import (
+    accept_trade_step,
+    pack_trade,
+    propose_trade_step,
+)
+
+from tests.mechanics.actions.fixtures import fmt
+
+SHEEP, WOOD = 0, 2
+
+
+def test_accept_swaps_the_cards(response_board: Board) -> None:
+    # Pending offer: player 0 gives a sheep to player 2 for a wood.
+    state, result = accept_trade_step(response_board)
+    assert_expected_inline(
+        fmt(
+            result,
+            phase=str(GamePhase(int(state.phase[0]))),
+            proposer=np.asarray(state.player_resources[0, 0]).tolist(),
+            partner=np.asarray(state.player_resources[0, 2]).tolist(),
+            cleared=int(state.trade_partner[0]) == NO_INDEX,
+        ),
+        """\
+result=OK
+phase=MAIN
+proposer=[0, 0, 1, 0, 0]
+partner=[1, 0, 2, 0, 0]
+cleared=True""",
+    )
+
+
+def test_invalid_partner_lacks_asked_card(response_board: Board) -> None:
+    # Strip player 2's wood after the offer: only Reject remains legal.
+    layout, st = response_board
+    st = st._replace(player_resources=st.player_resources.at[0, 2, WOOD].set(0))
+    state, result = accept_trade_step((layout, st))
+    assert int(result[0]) == ActionResult.INVALID.value
+    assert int(state.phase[0]) == GamePhase.TRADE_RESPONSE
+
+
+def test_invalid_wrong_phase(propose_board: Board) -> None:
+    before = np.asarray(propose_board[1].player_resources)
+    state, result = accept_trade_step(propose_board)
+    assert int(result[0]) == ActionResult.INVALID.value
+    assert np.array_equal(np.asarray(state.player_resources), before)
+
+
+def test_accept_swaps_bundles(propose_board: Board) -> None:
+    # 1 sheep for 2 wood + 1 brick: the whole multiset moves on accept.
+    board = give(propose_board, 2, [0, 0, 2, 1, 0])
+    idx, target = pack_trade([1, 0, 0, 0, 0], [0, 0, 2, 1, 0], partner=2)
+    st, _ = propose_trade_step(board, (jnp.array([idx]), jnp.array([target])))
+    state, result = accept_trade_step((board[0], st))
+    assert int(result[0]) == ActionResult.SUCCESS.value
+    assert np.asarray(state.player_resources[0, 0]).tolist() == [0, 0, 2, 1, 0]
+    assert np.asarray(state.player_resources[0, 2]).tolist() == [1, 0, 0, 0, 0]

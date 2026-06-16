@@ -9,7 +9,7 @@ run, streamed metrics, a saved bench verdict, and a gate asserted in code.
 import sys
 from pathlib import Path
 
-from catan_agents.cli import bench
+from settlrl_agents.cli import bench
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _lib import start_run
