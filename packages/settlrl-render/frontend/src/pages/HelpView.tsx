@@ -14,18 +14,18 @@ const BOARD_HELP: [string, string][] = [
   ["build_city", "A larger dot on your settlement: click it to upgrade to a city."],
   ["build_road", "A dash on an edge: click it to build a road there."],
   ["move_robber", "A 7 was rolled: click a highlighted tile, then pick who to rob."],
-  ["maritime_trade", "Click the bank pile you want: trade at 4:1, or better via your ports."],
+  ["buy_development_card", "Click the bank's development deck to buy a card."],
+  ["maritime_trade", "Click the bank pile of the resource you want: a picker shows what to give and how many (4:1, or better via your ports)."],
   ["propose_trade", "Click an opponent's hand pile: a two-sided composer shows your counts and what card counting proves about theirs — pick a card from each side and propose."],
 ];
 const HAND_HELP: [string, string][] = [
-  ["play_knight", "Click the card, then a tile for the robber (and who to rob)."],
+  ["play_knight", "Click the knight card or the robber pawn, then a tile to move the robber (and who to rob)."],
   ["play_road_building", "Click the card, then place two free roads on the board."],
   ["play_monopoly", "Click the card and pick a resource to take from everyone."],
   ["play_year_of_plenty", "Click the card and pick two resources from the bank."],
   ["discard", "A 7 costs you half your hand: click resource cards to discard them."],
 ];
 const BAR_HELP: [string, string][] = [
-  ["buy_development_card", "Buy a development card."],
   ["accept_trade", "Take a trade you've been offered."],
   ["reject_trade", "Turn a trade down."],
   ["end_turn", "End your turn."],

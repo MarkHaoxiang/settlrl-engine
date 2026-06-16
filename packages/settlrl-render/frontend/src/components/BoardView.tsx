@@ -46,11 +46,22 @@ export interface TradeTargets {
   onPartner: (p: number, at: BoardTargetPoint) => void;
 }
 
+// The robber pawn as a knight-play control: armable while a knight is in hand,
+// armed once clicked (the legal tiles then light up).
+export interface RobberControl {
+  armable: boolean;
+  armed: boolean;
+  onToggle: () => void;
+}
+
 interface Props {
   board: Board;
   interaction?: BoardInteraction;
   dice?: DiceState;
   trade?: TradeTargets;
+  robber?: RobberControl;
+  // Buy a development card by clicking the bank's deck (when affordable).
+  onBuyDev?: (at: BoardTargetPoint) => void;
   // Card motions to fly across the table this snapshot (lib/transfers).
   transfers?: FlyToken[];
 }
@@ -60,7 +71,7 @@ interface Props {
 // seat's play area on its table edge, and the dice in a corner — one SVG
 // scene that pans, zooms, and spins together (lib/viewport.ts). It fills its
 // parent container, so a parent can overlay mode-specific controls on top.
-export default function BoardView({ board, interaction, dice, trade, transfers }: Props) {
+export default function BoardView({ board, interaction, dice, trade, robber, onBuyDev, transfers }: Props) {
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
   const minX = Math.min(...pixels.map((p) => p.x));
   const maxX = Math.max(...pixels.map((p) => p.x));
@@ -158,6 +169,8 @@ export default function BoardView({ board, interaction, dice, trade, transfers }
                 cardH={CARD_H}
                 tradable={trade?.bank}
                 onPick={trade && ((r, el) => trade.onBank(r, anchorOf(el)))}
+                buyable={!!onBuyDev}
+                onBuyDev={onBuyDev && ((el) => onBuyDev(anchorOf(el)))}
               />
             )}
 
@@ -250,7 +263,16 @@ export default function BoardView({ board, interaction, dice, trade, transfers }
             {board.robber &&
               (() => {
                 const { x, y } = hexToPixel(board.robber, HEX_SIZE);
-                return <Robber cx={x + offsetX} cy={y + offsetY} size={HEX_SIZE} />;
+                return (
+                  <Robber
+                    cx={x + offsetX}
+                    cy={y + offsetY}
+                    size={HEX_SIZE}
+                    armable={robber?.armable}
+                    armed={robber?.armed}
+                    onClick={robber?.onToggle}
+                  />
+                );
               })()}
 
             {/* Settlements and cities sit on top. Keyed by vertex + kind: a city

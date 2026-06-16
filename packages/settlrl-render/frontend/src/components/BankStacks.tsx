@@ -22,6 +22,8 @@ export default function BankStacks({
   cardH,
   tradable,
   onPick,
+  buyable,
+  onBuyDev,
 }: {
   bank: Bank;
   // Grid centre.
@@ -33,6 +35,10 @@ export default function BankStacks({
   // take a click, reported with the clicked element for popover anchoring.
   tradable?: Set<ResourceKind>;
   onPick?: (r: ResourceKind, el: SVGGraphicsElement) => void;
+  // The development deck takes a click to buy when the viewer can afford one;
+  // it highlights like a tradable pile and reports the clicked element.
+  buyable?: boolean;
+  onBuyDev?: (el: SVGGraphicsElement) => void;
 }) {
   const at = (i: number) => ({
     x: cx + ((i % 2) - 0.5) * (cardW + 18),
@@ -77,24 +83,45 @@ export default function BankStacks({
           </g>
         );
       })}
-      <CardPile
-        cx={dev.x}
-        cy={dev.y}
-        w={cardW}
-        h={cardH}
-        count={bank.devCards}
-        fill={DEV_CARD_BACK.fill}
-        stroke={DEV_CARD_BACK.stroke}
-        label="development cards left"
-      >
-        <path
-          d={`M ${dev.x} ${dev.y - cardH * 0.3} l ${cardW * 0.14} ${cardH * 0.14} l ${-cardW * 0.14} ${cardH * 0.14} l ${-cardW * 0.14} ${-cardH * 0.14} z`}
-          fill="none"
-          stroke="#C9B7E8"
-          strokeWidth={2.5}
-          strokeLinejoin="round"
-        />
-      </CardPile>
+      {(() => {
+        const pile = (
+          <CardPile
+            cx={dev.x}
+            cy={dev.y}
+            w={cardW}
+            h={cardH}
+            count={bank.devCards}
+            fill={DEV_CARD_BACK.fill}
+            stroke={DEV_CARD_BACK.stroke}
+            label={buyable ? "development cards left — click to buy one" : "development cards left"}
+          >
+            <path
+              d={`M ${dev.x} ${dev.y - cardH * 0.3} l ${cardW * 0.14} ${cardH * 0.14} l ${-cardW * 0.14} ${cardH * 0.14} l ${-cardW * 0.14} ${-cardH * 0.14} z`}
+              fill="none"
+              stroke="#C9B7E8"
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+            />
+          </CardPile>
+        );
+        if (!buyable) return pile;
+        return (
+          <g className="board-ghost" onClick={(e) => onBuyDev?.(e.currentTarget)}>
+            <rect
+              className="ghost"
+              x={dev.x - cardW / 2 - 6}
+              y={dev.y - cardH / 2 - 6}
+              width={cardW + 12}
+              height={cardH + 12}
+              rx={10}
+              fill="none"
+              stroke={HIGHLIGHT}
+              strokeWidth={3}
+            />
+            {pile}
+          </g>
+        );
+      })()}
     </g>
   );
 }

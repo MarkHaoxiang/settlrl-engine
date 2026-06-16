@@ -2,7 +2,7 @@
 // (BoardModel, snake_case) to the frontend's camelCase Board.
 
 import type { components } from "./api-schema";
-import type { Cube, CubeEdge, Hex } from "./hex";
+import { cubeEq, type Cube, type CubeEdge, type Hex } from "./hex";
 
 export type Terrain = "wheat" | "sheep" | "wood" | "ore" | "brick" | "desert";
 export type ResourceKind = Exclude<Terrain, "desert">;
@@ -104,6 +104,22 @@ export const RESOURCE_LABELS: Record<ResourceKind, string> = {
 // Card colours: the development cards' purple and the face-down hand back.
 export const DEV_CARD_BACK = { fill: "#5B4B8A", stroke: "#3C3160" };
 export const HAND_CARD_BACK = { fill: "#C9A66B", stroke: "#7A5C33" };
+
+// Best maritime exchange rate for a player giving `give` — cards handed over
+// for one received: 2 with that resource's matching port, else 3 with any
+// general port, else 4. Mirrors the engine's port_ratio (mechanics/trade).
+export function maritimeRate(board: Board, player: number, give: ResourceKind): number {
+  let rate = 4;
+  for (const port of board.ports) {
+    const owns = board.buildings.some(
+      (b) => b.player === player && (cubeEq(b.cube, port.a) || cubeEq(b.cube, port.b))
+    );
+    if (!owns) continue;
+    if (port.resource === give) return 2; // nothing beats a matching 2:1 port
+    if (port.resource === null) rate = 3;
+  }
+  return rate;
+}
 
 // -- wire format (generated from the server's BoardModel) ----------------------
 

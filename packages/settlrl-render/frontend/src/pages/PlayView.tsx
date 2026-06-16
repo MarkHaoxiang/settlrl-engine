@@ -10,13 +10,14 @@ import ChatPanel from "../components/ChatPanel";
 import ChoicePopover from "../components/ChoicePopover";
 import GameOverScreen from "../components/GameOverScreen";
 import Hand, { DEV_PLAY_TYPE } from "../components/Hand";
+import MaritimePopover from "../components/MaritimePopover";
 import NewGameDialog from "../components/NewGameDialog";
 import TradePopover from "../components/TradePopover";
 import TopBar from "../components/TopBar";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import { createGame, joinGame, type GameAction, type GameSnapshot, type NewGameConfig } from "../lib/game";
-import { deriveTransfers, type FlyToken } from "../lib/transfers";
+import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import {
   parseTokens,
   rememberGame,
@@ -38,9 +39,10 @@ const VERTEX_KIND: Record<string, "settlement" | "city"> = {
 };
 const EDGE_TYPES = new Set(["setup_road", "build_road"]);
 
-// Turn-flow actions that stay on the bottom bar (display order); trading
-// happens on the table (bank piles and opponents' hand piles take the click).
-const BAR_TYPES = ["buy_development_card", "accept_trade", "reject_trade", "end_turn"];
+// Turn-flow actions that stay on the bottom bar (display order). The rest
+// happen on the table: trading on the bank piles and opponents' hand piles,
+// buying a dev card on the bank deck, ending the turn here.
+const BAR_TYPES = ["accept_trade", "reject_trade", "end_turn"];
 
 const PHASE_LABEL: Record<string, string> = {
   setup_settlement: "Setup",
@@ -120,6 +122,9 @@ export default function PlayView() {
   const [knightArming, setKnightArming] = useState(false);
   // The trade offer being composed, anchored at the partner's hand pile.
   const [tradeWith, setTradeWith] = useState<{ partner: number; x: number; y: number } | null>(null);
+  // The maritime-trade picker, anchored at the clicked bank pile (the resource
+  // to receive); choose which resource to give for one of it.
+  const [maritimeFor, setMaritimeFor] = useState<{ receive: ResourceKind; x: number; y: number } | null>(null);
   // Whether the new-game configuration dialog is open (shown on entry
   // without a game, and reopened by the New game button).
   const [configuring, setConfiguring] = useState(!gameId);
@@ -182,6 +187,7 @@ export default function PlayView() {
     setChoice(null);
     setKnightArming(false);
     setTradeWith(null);
+    setMaritimeFor(null);
   }, [snapshot]);
 
   // Card-transfer animations: read the headline motions from each single-step
@@ -193,7 +199,15 @@ export default function PlayView() {
     const prev = prevSnap.current;
     prevSnap.current = snapshot ?? null;
     if (prev && snapshot && snapshot.version === prev.version + 1) {
-      const t = deriveTransfers(prev.board, snapshot.board, String(snapshot.version));
+      const key = String(snapshot.version);
+      // A trade resolves the offer pending on the prior snapshot; its accept
+      // move is the latest log line on this one.
+      const accepted =
+        snapshot.log[snapshot.log.length - 1]?.action_type === "accept_trade";
+      const t = [
+        ...deriveTransfers(prev.board, snapshot.board, key),
+        ...tradeTransfer(prev.status.trade, accepted, key),
+      ];
       if (t.length) setTransfers(t);
     }
   }, [snapshot]);
@@ -206,6 +220,7 @@ export default function PlayView() {
         setChoice(null);
         setKnightArming(false);
         setTradeWith(null);
+        setMaritimeFor(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -298,10 +313,16 @@ export default function PlayView() {
     if (m) act(m.flat);
   };
 
+  // Arm / disarm knight targeting (the robber pawn and the knight hand chip
+  // are the two ways in; the legal tiles then light up).
+  const toggleKnight = () => {
+    setKnightArming((v) => !v);
+    setPopup(null);
+  };
+
   const onDev = (k: DevCardKind) => {
     if (k === "knight") {
-      setKnightArming((v) => !v);
-      setPopup(null);
+      toggleKnight();
       return;
     }
     const matches = byType(DEV_PLAY_TYPE[k]!);
@@ -343,10 +364,24 @@ export default function PlayView() {
       ? {
           bank: new Set(maritime.map((a) => a.receive as ResourceKind)),
           partners: new Set(proposals.map((a) => a.partner as number)),
-          onBank: (r, at) =>
-            setPopup({ actions: maritime.filter((a) => a.receive === r), x: at.x, y: at.y }),
+          onBank: (r, at) => setMaritimeFor({ receive: r, x: at.x, y: at.y }),
           onPartner: (p, at) => setTradeWith({ partner: p, x: at.x, y: at.y }),
         }
+      : undefined;
+
+  // Clicking the robber pawn is the other way to play a knight: it arms the
+  // same targeting the knight hand chip does.
+  const robberControl =
+    !status.terminal && status.your_turn && !busy && availableTypes.has("play_knight")
+      ? { armable: true, armed: knightArming, onToggle: toggleKnight }
+      : undefined;
+
+  // Buying a development card happens on the bank deck: clicking it confirms
+  // the purchase (with its cost) in a board popover.
+  const buyDevActions = byType("buy_development_card");
+  const onBuyDev =
+    !status.terminal && status.your_turn && !busy && buyDevActions.length > 0
+      ? (at: BoardTargetPoint) => setPopup({ actions: buyDevActions, x: at.x, y: at.y })
       : undefined;
 
   const barTitle = (type: string) => {
@@ -383,6 +418,8 @@ export default function PlayView() {
           board={board}
           interaction={interaction}
           trade={tradeTargets}
+          robber={robberControl}
+          onBuyDev={onBuyDev}
           transfers={transfers}
           dice={{
             sum: status.dice_roll,
@@ -427,6 +464,23 @@ export default function PlayView() {
               act(flat);
             }}
             onClose={() => setTradeWith(null)}
+          />
+        )}
+
+        {maritimeFor && (
+          <MaritimePopover
+            receive={maritimeFor.receive}
+            actions={maritime.filter((a) => a.receive === maritimeFor.receive)}
+            board={board}
+            player={status.acting_player}
+            x={maritimeFor.x}
+            y={maritimeFor.y}
+            disabled={busy}
+            onPick={(flat) => {
+              setMaritimeFor(null);
+              act(flat);
+            }}
+            onClose={() => setMaritimeFor(null)}
           />
         )}
 

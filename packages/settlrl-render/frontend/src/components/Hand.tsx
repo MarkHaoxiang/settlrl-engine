@@ -12,6 +12,7 @@ import {
   type ResourceKind,
 } from "../lib/boardData";
 import { ACCENT, ACCENT_GLOW, DIVIDER } from "../lib/ui";
+import CountBadge from "./CountBadge";
 import TerrainIcon from "./TerrainIcon";
 
 const DEV_CARDS: { key: DevCardKind; label: string; icon: string }[] = [
@@ -73,19 +74,7 @@ function Chip({
       <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {icon}
       </span>
-      <span
-        style={{
-          position: "relative",
-          fontSize: 16,
-          fontWeight: 800,
-          lineHeight: 1,
-          color: "#1a1a1a",
-          // A halo in the chip colour keeps the digit legible over the icon.
-          textShadow: `0 0 4px ${fill}, 0 0 4px ${fill}, 0 0 3px ${fill}`,
-        }}
-      >
-        {count}
-      </span>
+      <CountBadge value={count} />
     </div>
   );
 }

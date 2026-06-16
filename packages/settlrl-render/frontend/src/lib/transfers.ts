@@ -9,10 +9,14 @@
 //   steal       — one hand loses a card and one gains it, bank unchanged
 //                 (robber / knight): victim seat → thief seat.
 //
-// Everything else (builds, buys, trades, monopoly) leaves a different
-// signature and is deliberately skipped. A card's resource is only coloured
-// when it is public — the bank pile it came from, or a hand this client owns;
-// an opponent's hidden gain flies face-down (resource null).
+// Everything else (builds, buys, monopoly) leaves a different signature and is
+// deliberately skipped. A card's resource is only coloured when it is public —
+// the bank pile it came from, or a hand this client owns; an opponent's hidden
+// gain flies face-down (resource null).
+//
+// A domestic trade is the exception that count diffs can't see (one card each
+// way nets zero), so tradeTransfer derives it from the resolved offer instead
+// (both resources are public, being the offer's terms).
 
 import { RESOURCE_ORDER, type Board, type Player, type ResourceKind } from "./boardData";
 
@@ -86,4 +90,31 @@ export function deriveTransfers(prev: Board, next: Board, key: string): FlyToken
   }
 
   return [];
+}
+
+// The two cards crossing on an accepted 1:1 domestic trade: the proposer's
+// `give` to the partner, the partner's `receive` back. Both resources are
+// public (the offer's terms), so each chip flies coloured. `offer` is the
+// trade pending on the prior snapshot; `accepted` whether the move that
+// resolved it took it (a rejection moves no cards).
+export function tradeTransfer(
+  offer: { proposer: number; partner: number; give: string; receive: string } | null | undefined,
+  accepted: boolean,
+  key: string
+): FlyToken[] {
+  if (!offer || !accepted) return [];
+  return [
+    {
+      id: `${key}-trade-give`,
+      from: { kind: "seat", seat: offer.proposer },
+      to: { kind: "seat", seat: offer.partner },
+      resource: offer.give as ResourceKind,
+    },
+    {
+      id: `${key}-trade-recv`,
+      from: { kind: "seat", seat: offer.partner },
+      to: { kind: "seat", seat: offer.proposer },
+      resource: offer.receive as ResourceKind,
+    },
+  ];
 }

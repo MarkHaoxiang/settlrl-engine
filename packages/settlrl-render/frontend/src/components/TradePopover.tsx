@@ -11,6 +11,7 @@ import {
 } from "../lib/boardData";
 import { ACCENT, buttonStyle } from "../lib/ui";
 import Anchored from "./Anchored";
+import CountBadge from "./CountBadge";
 import TerrainIcon from "./TerrainIcon";
 
 const boundText = (lo: number, hi: number): string => (lo === hi ? `${lo}` : `${lo}–${hi}`);
@@ -54,18 +55,7 @@ function TradeChip({
           <TerrainIcon terrain={r} cx={0} cy={0} scale={1.05} opacity={0.85} />
         </svg>
       </span>
-      <span
-        style={{
-          position: "relative",
-          fontSize: 12,
-          fontWeight: 800,
-          color: "#1a1a1a",
-          // A halo in the chip colour keeps the text legible over the icon.
-          textShadow: `0 0 4px ${fill}, 0 0 4px ${fill}, 0 0 3px ${fill}`,
-        }}
-      >
-        {annotation}
-      </span>
+      <CountBadge value={annotation} />
     </button>
   );
 }

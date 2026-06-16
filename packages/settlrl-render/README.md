@@ -11,10 +11,13 @@ A menu lets you choose between two modes, each at its own URL:
   every placement you can currently make is marked on the board in your colour (hover to
   preview the piece) — click it and confirm in a popup there (which shows the build cost, or
   who to rob). The hand is live too: click a glowing development card to play it (resource
-  picks come from a popover) and resource cards to discard after a 7. Trading happens on the
-  table as well: click the bank pile you want for the maritime exchanges, or an opponent's
-  hand pile to compose a 1:1 offer (they accept or reject on their turn). A small bottom bar
-  keeps the rest (buy a dev card, answer a trade, end turn — the dice rest in the table
+  picks come from a popover) and resource cards to discard after a 7 — a knight can also be
+  played straight off the robber pawn, which lights up to take the click. Trading happens on
+  the table as well: click the bank pile of the resource you want and a picker shows what to
+  give and how many (your best port rate); click an opponent's hand pile to compose a 1:1
+  offer (they accept or reject on their turn, the cards then crossing the table); and buy a
+  development card by clicking the bank's deck. A small bottom bar keeps the rest (answer a
+  trade, end turn — the dice rest in the table
   corner beside whoever's turn it is and take the click to roll); the top bar holds New
   game and a light/dark theme toggle. The scene is a top-down table (zoom, pan, and spin it — mouse, touch, or keyboard:
   arrows pan, +/− zoom, [ ] spin, 0 re-fits):
@@ -264,8 +267,10 @@ packages/settlrl-render/
             ├── BoardView.tsx    # The table scene: composes everything below in one SVG
             ├── InteractionOverlay.tsx # Legal-placement markers / hover ghosts / robber tiles
             ├── BoardPopover.tsx # Anchored action chooser (confirm + cost / victim pick)
-            ├── ChoicePopover.tsx # Bottom-panel resource picker (monopoly / plenty / trades)
+            ├── ChoicePopover.tsx # Bottom-panel resource picker (monopoly / plenty)
+            ├── MaritimePopover.tsx # Bank-pile picker: which resource to give + the rate
             ├── Hand.tsx         # The acting human's chips (resources, dev cards; clickable)
+            ├── CountBadge.tsx   # Cream count badge for chip corners (matches CardPile's token)
             ├── CardPile.tsx     # Top-down card pile + count token (bank, player decks)
             ├── BankStacks.tsx   # The bank's card grid (resource piles + dev deck)
             ├── PlayerAreas.tsx  # Each seat's table edge: hand/dev piles + unbuilt pieces

@@ -117,8 +117,10 @@ function Area({
 
   return (
     <g>
+      {/* data-seat tags the resource hand pile as a fly-token endpoint, so a
+          produced or stolen card lands on the pile itself (TransferAnimations). */}
       {onHand ? (
-        <g className="board-ghost" onClick={(e) => onHand(e.currentTarget)}>
+        <g data-seat={player.player} className="board-ghost" onClick={(e) => onHand(e.currentTarget)}>
           <rect
             className="ghost"
             x={handX - cardW / 2 - 6}
@@ -133,7 +135,9 @@ function Area({
           <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards — click to offer a trade" />
         </g>
       ) : (
-        <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards" />
+        <g data-seat={player.player}>
+          <FaceDownPile cx={handX} cy={0} w={cardW} h={cardH} count={player.resourceCards} back={HAND_CARD_BACK} owner={color} label="resource cards" />
+        </g>
       )}
       <FaceDownPile cx={devX} cy={0} w={cardW} h={cardH} count={player.devCards} back={DEV_CARD_BACK} owner={color} label="development cards" />
       <g>
@@ -243,8 +247,7 @@ export default function PlayerAreas({
         const { x, y } = centre(edge);
         const builds = board.buildings.filter((b) => b.player === p.player);
         return (
-          // data-seat tags the area as a fly-token endpoint (TransferAnimations).
-          <g key={p.player} data-seat={p.player} transform={`translate(${x} ${y}) rotate(${EDGE_ANGLE[edge]})`}>
+          <g key={p.player} transform={`translate(${x} ${y}) rotate(${EDGE_ANGLE[edge]})`}>
             <Area
               player={p}
               roadsLeft={Math.max(0, ROAD_SUPPLY - board.roads.filter((r) => r.player === p.player).length)}

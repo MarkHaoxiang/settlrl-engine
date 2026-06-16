@@ -1,7 +1,8 @@
 // Flies a chip across the table for each card transfer (lib/transfers). Tokens
-// are positioned by measuring their endpoint elements (the bank piles and seat
-// areas, tagged with data-bank / data-seat) at fire time, so they track the
-// live pan / zoom / rotation without re-deriving the board geometry. Built
+// are positioned by measuring their endpoint elements (the bank piles and each
+// seat's resource hand pile, tagged with data-bank / data-seat) at fire time,
+// so they track the live pan / zoom / rotation without re-deriving the board
+// geometry. Built
 // imperatively (Web Animations API) — the chips are transient and never re-read
 // by React, so they don't belong in the render tree.
 
@@ -57,6 +58,9 @@ export default function TransferAnimations({
       const el = container.querySelector(sel);
       if (!el) return null;
       const r = el.getBoundingClientRect();
+      // A hand pile drawn empty (count 0) collapses to a zero box at the SVG
+      // origin — skip it rather than fly a chip from the corner.
+      if (r.width === 0 && r.height === 0) return null;
       return { x: r.x + r.width / 2 - c.x - CHIP_W / 2, y: r.y + r.height / 2 - c.y - CHIP_H / 2 };
     };
 
