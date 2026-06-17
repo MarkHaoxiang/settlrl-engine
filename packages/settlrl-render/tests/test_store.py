@@ -8,6 +8,7 @@ import asyncio
 import time
 from pathlib import Path
 
+from _helpers import bot_registry
 from fastapi.testclient import TestClient
 from settlrl_render.game.games import GameRegistry
 from settlrl_render.game.session import GameSession, GameSetup
@@ -28,13 +29,20 @@ def test_game_setup_round_trips_through_a_dict() -> None:
 
 
 def test_session_setup_captures_its_seats() -> None:
-    session = GameSession(seed=5, n_players=2, seats=["human", "random"])
+    session = GameSession(
+        seed=5,
+        n_players=2,
+        seats=["human", "random"],
+        external_kinds=frozenset({"random"}),
+    )
     assert session.setup == GameSetup(5, 2, "random", ["human", "random"])
 
 
 def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
     # First boot: create a game (with a bot seat), play a move, leave a chat line.
-    with TestClient(create_app(state_dir=str(tmp_path), warm=False)) as c1:
+    with TestClient(
+        create_app(state_dir=str(tmp_path), warm=False, providers=bot_registry())
+    ) as c1:
         doc = c1.post(
             "/api/games",
             json={
@@ -55,7 +63,9 @@ def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
         )
 
     # Second boot from the same dir: the game is back, at the same position.
-    with TestClient(create_app(state_dir=str(tmp_path), warm=False)) as c2:
+    with TestClient(
+        create_app(state_dir=str(tmp_path), warm=False, providers=bot_registry())
+    ) as c2:
         after = c2.get(f"/api/games/{game}", headers=hdr).json()
         assert after["id"] == game
         assert after["board"] == before["board"]  # replayed to the same state
@@ -88,7 +98,9 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
     # First boot: an all-bot game plays a few moves, journalled, then we shut
     # down cleanly (draining the queued writes).
     with TestClient(
-        create_app(state_dir=str(tmp_path), bot_delay=0.0, warm=False)
+        create_app(
+            state_dir=str(tmp_path), bot_delay=0.0, warm=False, providers=bot_registry()
+        )
     ) as c1:
         game = c1.post(
             "/api/games",
@@ -108,9 +120,12 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
             time.sleep(0.05)
 
     # A fresh app restores the position and its startup restarts the driver,
-    # which plays the game out to the end.
+    # which plays the game out to the end (random fallback even before the bot
+    # service is re-registered).
     with TestClient(
-        create_app(state_dir=str(tmp_path), bot_delay=0.0, warm=False)
+        create_app(
+            state_dir=str(tmp_path), bot_delay=0.0, warm=False, providers=bot_registry()
+        )
     ) as c2:
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:

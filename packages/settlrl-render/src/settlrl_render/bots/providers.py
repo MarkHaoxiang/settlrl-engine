@@ -1,10 +1,9 @@
-"""Bot providers: where a seat's moves are computed.
+"""Bot providers: the remote bot services that compute a seat's moves.
 
-The built-in provider runs the ``settlrl-agents`` policies in-process, exactly
-as the server always has. A **remote** provider is a separate bot service
-(:mod:`settlrl_render.bots.bot_service`) reached over HTTP, so the agent-running code
-can be deployed and scaled apart from the game server; an admin registers one at
-runtime and its bot kinds join the catalog.
+The game server runs no bot policies itself. A **remote** provider is a separate
+bot service (:mod:`settlrl_render.bots.bot_service`) reached over HTTP, so the
+agent-running code is deployed and scaled apart from the game server; an admin
+registers one at runtime and its bot kinds form the catalog.
 
 The wire contract is deliberately small and engine-version-stable: a move is
 requested by sending the game's setup plus its flat move list so far (the same
@@ -13,10 +12,9 @@ returns the chosen flat action — no engine observation pytree crosses the wire
 so the two sides only have to agree on the (stable) record format and the flat
 action indexing.
 
-:class:`ProviderRegistry` maps each bot kind to where it runs; local kinds stay
-in-process (the driver's fast path on the live env), remote kinds dispatch to
-their service over an async HTTP client. It is mutated and read only on the
-event loop (admin routes, the driver), so it needs no lock.
+:class:`ProviderRegistry` maps each bot kind to the service that serves it. It is
+mutated and read only on the event loop (admin routes, the driver), so it needs
+no lock.
 """
 
 from __future__ import annotations
@@ -25,8 +23,6 @@ from typing import Any
 
 import httpx
 from pydantic import BaseModel
-
-from settlrl_render.bots.bots import bot_catalog
 
 # A bot move request / reply on the standardized wire (the bot service's /act).
 # `game_id` only keys the service's replay cache; `setup` + `moves` fully
@@ -115,41 +111,32 @@ class RemoteBotProvider:
 
 
 class ProviderRegistry:
-    """Bot kinds -> where they run. Built-in kinds (``settlrl-agents``) run
-    locally; admins register remote services whose kinds join the catalog.
-
-    Set ``local_bots=False`` to run the game server with **no** in-process agent
-    execution: it then offers only registered remote providers' kinds, so the
-    agent-running code lives entirely in the bot service(s). (The abandoned-turn
-    auto-play still uses a trivial local random move as a liveness fallback.)
+    """Bot kinds -> the remote service that serves them. The game server runs
+    **no** bots in-process; admins register bot services whose kinds form the
+    whole catalog (an unreachable bot still falls back to a server-side random
+    move for liveness, but that is not a selectable kind).
 
     ``client`` is the shared async HTTP client for remote calls (tests inject one
     wired to a bot-service app via ``ASGITransport``)."""
 
-    def __init__(
-        self, client: httpx.AsyncClient | None = None, local_bots: bool = True
-    ) -> None:
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._client = client or httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT)
-        self._local_bots = local_bots
         self._remotes: dict[str, RemoteBotProvider] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    def _local_catalog(self) -> dict[str, dict[str, object]]:
-        return dict(bot_catalog()) if self._local_bots else {}
-
     def catalog(self) -> dict[str, dict[str, object]]:
-        """Every offered bot kind — local first, then each remote provider's —
-        in the shape ``GET /api/bots`` returns."""
-        out = self._local_catalog()
+        """Every offered bot kind (each registered provider's), in the shape
+        ``GET /api/bots`` returns."""
+        out: dict[str, dict[str, object]] = {}
         for prov in self._remotes.values():
             out.update(prov.catalog())
         return out
 
     def remote_for(self, kind: str) -> RemoteBotProvider | None:
-        """The remote provider that owns ``kind``, or None when it is local (or
-        unknown — the create route rejects unknown kinds first)."""
+        """The remote provider that owns ``kind`` (None if unknown — the create
+        route rejects unknown kinds first)."""
         for prov in self._remotes.values():
             if kind in prov.kinds:
                 return prov
@@ -162,11 +149,10 @@ class ProviderRegistry:
     async def register(self, name: str, base_url: str) -> RemoteBotProvider:
         """Register (or replace) a remote provider by name. Raises
         :class:`RemoteBotError` if it is unreachable or any of its kinds clash
-        with a local or another remote provider's kind."""
+        with another remote provider's kind."""
         provider = await RemoteBotProvider.connect(name, base_url, self._client)
-        local = set(self._local_catalog())
         others = {k for n, p in self._remotes.items() if n != name for k in p.kinds}
-        clash = provider.kinds & (local | others)
+        clash = provider.kinds & others
         if clash:
             raise RemoteBotError(
                 f"bot kind(s) already provided: {', '.join(sorted(clash))}"

@@ -9,6 +9,7 @@ import tempfile
 from collections.abc import Iterator
 
 import pytest
+from _helpers import bot_registry
 from fastapi.testclient import TestClient
 from settlrl_render.game.games import GameRegistry
 from settlrl_render.server import create_app
@@ -16,7 +17,10 @@ from settlrl_render.server import create_app
 
 @pytest.fixture()
 def client() -> Iterator[TestClient]:
-    with TestClient(create_app(GameRegistry(), warm=False)) as client:
+    # Bot-backed so the non-human seats these tests use validate and play.
+    with TestClient(
+        create_app(GameRegistry(), warm=False, providers=bot_registry())
+    ) as client:
         yield client
 
 
@@ -118,7 +122,9 @@ def test_join_ties_the_seat_to_the_account(client: TestClient) -> None:
 def test_account_seat_ownership_survives_a_restart() -> None:
     """The seat<->account tie is journalled, so a restored game still knows it."""
     with tempfile.TemporaryDirectory() as state_dir:
-        with TestClient(create_app(state_dir=state_dir, warm=False)) as first:
+        with TestClient(
+            create_app(state_dir=state_dir, warm=False, providers=bot_registry())
+        ) as first:
             token = _token(first, "a@example.com")
             game = first.post(
                 "/api/games",
@@ -127,7 +133,9 @@ def test_account_seat_ownership_survives_a_restart() -> None:
             ).json()["id"]
 
         # A fresh app restores games + accounts from the same state dir.
-        with TestClient(create_app(state_dir=state_dir, warm=False)) as restored:
+        with TestClient(
+            create_app(state_dir=state_dir, warm=False, providers=bot_registry())
+        ) as restored:
             token2 = str(
                 restored.post(
                     "/api/auth/login",

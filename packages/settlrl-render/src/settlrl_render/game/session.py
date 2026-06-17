@@ -1,10 +1,11 @@
 """A single live Settlrl game, driven through the engine's AEC wrapper.
 
-``GameSession`` wraps ``SettlrlAECEnv``: each seat is a human (hotseat) or a
-``settlrl-agents`` bot; bots advance one move at a time (:meth:`bot_step`) so
-the frontend can pace and animate them. The session exposes the board, the
-acting seat's legal flat actions, a status snapshot, the chat / move log, and
-a replayable ``GameRecord`` export.
+``GameSession`` wraps ``SettlrlAECEnv``: each seat is a human (hotseat) or a bot
+played by a remote bot service (:mod:`settlrl_render.bots.providers`) — the game
+server runs no bot policies in-process. It exposes the board, the acting seat's
+legal flat actions, a status snapshot, the chat / move log, a replayable
+``GameRecord`` export, and :meth:`auto_step` (a random legal move) for advancing
+a stalled turn or standing in for an unreachable bot.
 """
 
 from __future__ import annotations
@@ -30,18 +31,17 @@ from settlrl_render.api.models import (
     ResourceCounts,
     TradeOfferModel,
 )
-from settlrl_render.bots.bots import POLICIES, Knob, bot_act, coerce_params
 
 # A seat assignment: "human", a bot kind, or a configured bot
 # {"kind": name, "params": {knob: value}}.
 SeatLike = str | Mapping[str, object]
 
-# Seat kind for a human-controlled seat; every other kind is a POLICIES name.
-HUMAN = "human"
+# A configurable scalar build parameter of a bot family (passed through to the
+# remote provider, which validates and plays it).
+Knob = int | float | bool
 
-# Guard against a pathological non-terminating bot loop (a full game is well
-# under this many engine steps).
-_MAX_BOT_STEPS = 50_000
+# Seat kind for a human-controlled seat; every other kind names a remote bot.
+HUMAN = "human"
 
 # Oldest log entries are dropped past this many (long random games can take
 # thousands of moves; the client only ever shows the tail).
@@ -86,9 +86,9 @@ class GameSession:
     """A live game behind the single-game AEC env.
 
     ``n_players`` (2..4) is how many seats the game has. ``seats`` assigns a
-    controller to every seat: ``"human"`` or a ``settlrl-agents`` policy name
-    (default: a human on seat 0 and ``"random"`` bots elsewhere). No seat has
-    to be human -- an all-bot game is driven entirely by ``bot_step``.
+    controller to every seat: ``"human"`` or a remote bot kind (default: all
+    human). No seat has to be human -- an all-bot game is driven by the remote
+    providers, with :meth:`auto_step` as the liveness fallback.
     """
 
     def __init__(
@@ -132,21 +132,20 @@ class GameSession:
         """Start a fresh game.
 
         ``n_players`` changes the seat count (None keeps it); ``seats`` assigns
-        every seat (None means a human on seat 0 and ``"random"`` bots
-        elsewhere) and must have ``n_players`` entries, each ``"human"``, a
-        policy name, or ``{"kind": name, "params": {...}}`` with knob
-        overrides from the bot catalog. ``external_kinds`` are extra bot-kind
-        names accepted beyond the local ``POLICIES`` — seats a remote bot
-        provider plays (:mod:`settlrl_render.bots.providers`); their params are
-        stored verbatim (the provider validates them) and they are never played
-        locally. None keeps the current set.
+        every seat (None means all human) and must have ``n_players`` entries,
+        each ``"human"`` or ``{"kind": name, "params": {...}}`` (a bare kind
+        string is shorthand). Every non-human kind is a remote bot from
+        ``external_kinds`` — the kinds a registered provider serves
+        (:mod:`settlrl_render.bots.providers`); their params are stored verbatim
+        (the provider validates and plays them; the server runs no bots).
+        ``external_kinds`` None keeps the current set.
         """
         if n_players is not None:
             self.n_players = n_players
         if external_kinds is not None:
             self._external_kinds = external_kinds
         if seats is None:
-            seats = [HUMAN] + ["random"] * (self.n_players - 1)
+            seats = [HUMAN] * self.n_players
         if len(seats) != self.n_players:
             raise ValueError(f"expected {self.n_players} seats, got {len(seats)}")
         kinds: list[str] = []
@@ -165,24 +164,12 @@ class GameSession:
                 if raw:
                     raise ValueError("a human seat takes no params")
                 all_params.append({})
-            elif kind in POLICIES:
-                all_params.append(coerce_params(kind, raw))
             elif kind in self._external_kinds:
                 # A remote provider's kind: stored verbatim, validated and played
-                # there rather than against the local POLICIES.
+                # there rather than on the server.
                 all_params.append(dict(raw))
             else:
                 raise ValueError(f"unknown seat kind: {kind!r}")
-        unsupported = sorted(
-            kind
-            for kind in set(kinds) - {HUMAN}
-            if kind in POLICIES and self.n_players not in POLICIES[kind].n_players
-        )
-        if unsupported:
-            raise ValueError(
-                f"seat kind(s) not available in a {self.n_players}-player game: "
-                f"{', '.join(unsupported)}"
-            )
         self.seats: list[str] = kinds
         self.seat_params: list[dict[str, Knob]] = all_params
         self.seed = seed
@@ -292,54 +279,22 @@ class GameSession:
         self.env.step(int(flat))
         self._log_move(seat, int(flat))
 
-    def bot_choice(self) -> int | None:
-        """The flat action the acting *local* bot seat would play, without
-        applying it (the bot service's move endpoint, which replays a game and
-        must not advance past the requested move).
-
-        Returns None when no bot move is due: a human seat is acting, the game
-        is over, or the acting bot has no legal move. Only valid for a seat
-        whose kind is a local ``POLICIES`` policy.
-        """
+    def auto_step(self) -> int | None:
+        """Play a uniformly-random legal move for the acting seat, whatever its
+        kind — used to advance a stalled or abandoned turn, or to stand in for a
+        bot whose remote provider is unreachable. Returns the flat played, or
+        None when nothing is playable."""
         if self.terminal():
             return None
-        seat = self.acting_seat()
-        if self.seats[seat] == HUMAN or self.legal_flat().size == 0:
-            return None
-        self._key, k = jax.random.split(self._key)
-        return int(
-            bot_act(self.seats[seat], self.seat_params[seat], k, self.env._env, seat)
-        )
-
-    def bot_step(self) -> int | None:
-        """Play one local bot move if a bot seat is acting; return the flat
-        played (None when no bot move is due — see :meth:`bot_choice`)."""
-        seat = self.acting_seat()
-        flat = self.bot_choice()
-        if flat is None:
-            return None
-        self.env.step(flat)
-        self._log_move(seat, flat)
-        return flat
-
-    def auto_step(self) -> int | None:
-        """Play one legal move for the acting seat with the default policy,
-        whatever the seat's kind — used to advance a stalled or abandoned human
-        turn. Returns the flat played, or None when nothing is playable."""
-        if self.terminal() or self.legal_flat().size == 0:
+        legal = self.legal_flat()
+        if legal.size == 0:
             return None
         seat = self.acting_seat()
         self._key, k = jax.random.split(self._key)
-        flat = bot_act("random", {}, k, self.env._env, seat)
+        flat = int(legal[int(jax.random.randint(k, (), 0, legal.size))])
         self.env.step(flat)
         self._log_move(seat, flat)
         return flat
-
-    def _run_bots(self) -> None:
-        """Play bot moves until a human seat is acting (or the game ends)."""
-        for _ in range(_MAX_BOT_STEPS):
-            if self.bot_step() is None:
-                break
 
     # -- chat / log ---------------------------------------------------------
 

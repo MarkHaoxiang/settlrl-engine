@@ -59,22 +59,21 @@ def test_register_merges_catalog_and_routes_kind() -> None:
     async def go() -> None:
         reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("alphacatan")))
         await reg.register("svc", "http://svc")
-        catalog = reg.catalog()
-        assert "alphacatan" in catalog  # remote kind joined
-        assert "random" in catalog  # local kinds still there
+        assert "alphacatan" in reg.catalog()  # the remote kind joined
         assert reg.remote_for("alphacatan") is not None
-        assert reg.remote_for("random") is None  # local
+        assert reg.remote_for("nope") is None  # unknown kind
         assert reg.providers()[0]["name"] == "svc"
         await reg.aclose()
 
     asyncio.run(go())
 
 
-def test_register_rejects_kind_clash_with_local() -> None:
+def test_register_rejects_kind_clash_between_providers() -> None:
     async def go() -> None:
-        reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("random")))
+        reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("dup")))
+        await reg.register("a", "http://svc")
         with pytest.raises(RemoteBotError, match="already provided"):
-            await reg.register("svc", "http://svc")
+            await reg.register("b", "http://svc")  # same kind from another name
         await reg.aclose()
 
     asyncio.run(go())
@@ -103,14 +102,12 @@ def test_unregister() -> None:
     asyncio.run(go())
 
 
-def test_local_bots_off_offers_only_remote_kinds() -> None:
+def test_offers_only_remote_kinds() -> None:
     async def go() -> None:
-        reg = ProviderRegistry(
-            client=_asgi_client(_catalog_only_app("alphacatan")), local_bots=False
-        )
+        reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("alphacatan")))
         assert reg.catalog() == {}  # nothing until a provider registers
         await reg.register("svc", "http://svc")
-        assert set(reg.catalog()) == {"alphacatan"}  # no built-ins leaked
+        assert set(reg.catalog()) == {"alphacatan"}  # no built-ins
         await reg.aclose()
 
     asyncio.run(go())
@@ -199,7 +196,7 @@ def _drive_to_terminal(client: TestClient, body: dict[str, object]) -> dict[str,
 def remote_only_client() -> Iterator[TestClient]:
     """A game server with no local agent execution; all bots run in a separate
     in-process bot service, registered via the admin route once the loop is up."""
-    reg = ProviderRegistry(client=_asgi_client(create_bot_app()), local_bots=False)
+    reg = ProviderRegistry(client=_asgi_client(create_bot_app()))
     with TestClient(
         create_app(
             GameRegistry(),
@@ -234,9 +231,7 @@ def test_create_rejects_unknown_remote_kind(remote_only_client: TestClient) -> N
 def test_remote_failure_falls_back_and_game_progresses() -> None:
     """A remote service that errors on every move must not stall the game: the
     driver falls back to a local random move, so moves keep coming."""
-    reg = ProviderRegistry(
-        client=_asgi_client(_erroring_act_app("flaky")), local_bots=False
-    )
+    reg = ProviderRegistry(client=_asgi_client(_erroring_act_app("flaky")))
     with TestClient(
         create_app(
             GameRegistry(),

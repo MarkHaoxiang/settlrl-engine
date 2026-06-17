@@ -114,16 +114,16 @@ async def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
 async def _bot_move(
     handle: GameHandle, seat: int, providers: ProviderRegistry | None
 ) -> int | None:
-    """The acting bot seat's move — locally for built-in kinds, or via the
-    seat's remote provider (replay-based). A remote failure or an illegal answer
-    falls back to a local random move, so a misbehaving service never stalls the
-    game. The blocking engine steps run in a worker thread and the remote call is
-    awaited, both under the game lock; the seat being a bot's, no human request
-    races it meanwhile."""
+    """The acting bot seat's move, via the seat's remote provider (replay-based).
+    A remote failure or an illegal answer falls back to a random legal move, so a
+    misbehaving or unregistered service never stalls the game. The blocking engine
+    steps run in a worker thread and the remote call is awaited, both under the
+    game lock; the seat being a bot's, no human request races it meanwhile."""
     session = handle.session
     remote = providers.remote_for(session.seats[seat]) if providers else None
     if remote is None:
-        return await anyio.to_thread.run_sync(session.bot_step)
+        # No provider for this kind (e.g. unregistered mid-game): keep moving.
+        return await anyio.to_thread.run_sync(session.auto_step)
     setup, moves = session.setup.to_dict(), session.moves_flat()
     try:
         flat = int(await remote.act(handle.id, setup, moves, seat))

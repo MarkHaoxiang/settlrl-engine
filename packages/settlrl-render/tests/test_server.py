@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 import pytest
 import uvicorn
+from _helpers import bot_registry
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from settlrl_render.game.games import GameRegistry
@@ -33,8 +34,11 @@ def registry() -> GameRegistry:
 def client(registry: GameRegistry) -> Iterator[TestClient]:
     # The ``with`` form runs the lifespan and keeps one event loop alive for the
     # client's lifetime, so background driver tasks and the per-game asyncio
-    # locks share a single loop across requests.
-    with TestClient(create_app(registry, warm=False)) as client:
+    # locks share a single loop across requests. Bot-backed so the bot seats
+    # these tests use validate and play (the server runs no bots itself).
+    with TestClient(
+        create_app(registry, warm=False, providers=bot_registry())
+    ) as client:
         yield client
 
 
@@ -51,8 +55,9 @@ def _hdr(tokens: dict[str, str]) -> dict[str, str]:
 
 
 def test_create_claims_all_human_seats_by_default(client: TestClient) -> None:
-    game, tokens = _create(client)
-    assert sorted(tokens) == ["0"]  # default seats: human + 3 random bots
+    # One human seat among bots: claim="all" (the default) claims just it.
+    game, tokens = _create(client, seats=["human", "random", "random", "random"])
+    assert sorted(tokens) == ["0"]
     body = client.get(f"/api/games/{game}", headers=_hdr(tokens)).json()
     assert body["id"] == game
     assert body["status"]["your_turn"] and len(body["actions"]) > 0
@@ -235,7 +240,9 @@ def test_events_stream_snapshot_now_then_on_every_change() -> None:
 
 
 def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
-    with TestClient(create_app(GameRegistry(), bot_delay=0.0, warm=False)) as client:
+    with TestClient(
+        create_app(GameRegistry(), bot_delay=0.0, warm=False, providers=bot_registry())
+    ) as client:
         game, _ = _create(client, n_players=2, seats=["random", "random"])
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
@@ -328,7 +335,9 @@ def test_chat_requires_seat_ownership(client: TestClient) -> None:
 def _finished_bot_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
     """A fast all-bot app whose game the in-process driver has played to the end,
     yielding the client and the finished game's id."""
-    with TestClient(create_app(GameRegistry(), bot_delay=0.0, warm=False)) as client:
+    with TestClient(
+        create_app(GameRegistry(), bot_delay=0.0, warm=False, providers=bot_registry())
+    ) as client:
         game, _ = _create(client, seed=seed, n_players=2, seats=["random", "random"])
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
@@ -341,7 +350,9 @@ def _finished_bot_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
 
 
 def test_record_and_replay_export_finished_games_only() -> None:
-    with TestClient(create_app(GameRegistry(), bot_delay=0.0, warm=False)) as client:
+    with TestClient(
+        create_app(GameRegistry(), bot_delay=0.0, warm=False, providers=bot_registry())
+    ) as client:
         game, _ = _create(client, n_players=2, seats=["random", "random"])
         # A live game's record would reconstruct hidden hands when replayed.
         assert client.get(f"/api/games/{game}/record").status_code == 409

@@ -299,7 +299,16 @@ def _rebuild_handle(
     claims: dict[int, str] = {}
     claim_users: dict[int, str] = {}
     try:
-        session = GameSession.from_setup(GameSetup.from_dict(header))
+        setup = GameSetup.from_dict(header)
+        # The game's bot kinds are whatever it was created with; accept them as
+        # external so it restores even before its remote provider is re-registered
+        # (until then the driver plays those seats with the random fallback).
+        external = frozenset(
+            s if isinstance(s, str) else str(s.get("kind", ""))
+            for s in setup.seats
+            if (s if isinstance(s, str) else s.get("kind")) != HUMAN
+        )
+        session = GameSession.from_setup(setup, external_kinds=external)
         for event in events:
             _replay_event(session, claims, claim_users, event)
     except (KeyError, ValueError, TypeError):

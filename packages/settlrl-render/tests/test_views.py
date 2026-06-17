@@ -8,6 +8,7 @@ everyone (see ``test_terminal_reveals_every_hand``).
 """
 
 import numpy as np
+from _helpers import BOT_KINDS
 from settlrl_render.api.views import game_model
 from settlrl_render.game.games import GameHandle
 from settlrl_render.game.session import GameSession
@@ -18,7 +19,7 @@ def _handle(session: GameSession) -> GameHandle:
 
 
 def test_owner_sees_own_hand_actions_and_belief() -> None:
-    handle = _handle(GameSession(seed=0))  # human + 3 random bots
+    handle = _handle(GameSession(seed=0))  # all-human (seat 0 opens)
     view = game_model(handle, owned={0})
     assert view.status.your_turn and view.actions
     players = {p.player: p for p in view.board.players}
@@ -40,7 +41,13 @@ def test_spectator_sees_public_counts_only() -> None:
 def test_belief_follows_the_acting_owned_seat() -> None:
     # Hotseat owning two seats: the view observes through whichever owned
     # seat is acting (seat 0 opens the game).
-    handle = _handle(GameSession(seed=0, seats=["human", "human", "random", "random"]))
+    handle = _handle(
+        GameSession(
+            seed=0,
+            seats=["human", "human", "random", "random"],
+            external_kinds=BOT_KINDS,
+        )
+    )
     view = game_model(handle, owned={0, 1})
     assert view.status.your_turn
     assert view.belief is not None and view.belief.observer == 0
@@ -77,8 +84,9 @@ def test_running_views_never_leak_hidden_hands() -> None:
 
 def test_terminal_reveals_every_hand() -> None:
     # When the game is over, every hand is open — even to a spectator.
-    session = GameSession(seed=3, n_players=2, seats=["random", "random"])
-    session._run_bots()  # play it out to a winner
+    session = GameSession(seed=3, n_players=2, seats=["human", "human"])
+    while not session.terminal():  # play it out to a winner with random moves
+        session.auto_step()
     assert session.terminal()
     view = game_model(_handle(session), owned=set())
     assert all(

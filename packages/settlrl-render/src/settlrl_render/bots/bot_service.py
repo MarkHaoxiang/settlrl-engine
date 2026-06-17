@@ -24,11 +24,21 @@ from collections import OrderedDict
 from typing import Any
 
 import anyio.to_thread
+import jax
 from fastapi import FastAPI, HTTPException
 
-from settlrl_render.bots.bots import bot_catalog
+from settlrl_render.bots.bots import bot_act, bot_catalog
 from settlrl_render.bots.providers import ActRequest, ActResponse
-from settlrl_render.game.session import GameSession, GameSetup, IllegalActionError
+from settlrl_render.game.session import (
+    HUMAN,
+    GameSession,
+    GameSetup,
+    IllegalActionError,
+)
+
+# The agent kinds this service plays; the replayed game's bot seats are accepted
+# as these (the game server stores them verbatim and never plays them itself).
+_KINDS = frozenset(bot_catalog())
 
 # Distinct games kept warm for incremental replay; past this the
 # least-recently-used is dropped (its next request rebuilds from setup).
@@ -53,7 +63,10 @@ class _SessionCache:
             if cached is not None and cached[1] <= len(moves):
                 session, applied = cached  # extend the warm session
             else:
-                session, applied = GameSession.from_setup(GameSetup.from_dict(setup)), 0
+                session = GameSession.from_setup(
+                    GameSetup.from_dict(setup), external_kinds=_KINDS
+                )
+                applied = 0
             for flat in moves[applied:]:
                 session.apply(flat)
             self._by_id[game_id] = (session, len(moves))
@@ -61,6 +74,22 @@ class _SessionCache:
             while len(self._by_id) > self._cap:
                 self._by_id.popitem(last=False)
             return session
+
+
+def _choose(session: GameSession, seat: int) -> int | None:
+    """The flat move the seat's bot plays in ``session`` (None when no bot move
+    is due: the game is over, the seat is human, or it has no legal move)."""
+    if session.terminal() or session.seats[seat] == HUMAN:
+        return None
+    if session.legal_flat().size == 0:
+        return None
+    # Reproducible per position, independent of the engine's own randomness.
+    key = jax.random.fold_in(jax.random.key(0), len(session.moves_flat()))
+    return int(
+        bot_act(
+            session.seats[seat], session.seat_params[seat], key, session.env._env, seat
+        )
+    )
 
 
 def create_bot_app() -> FastAPI:
@@ -83,7 +112,7 @@ def create_bot_app() -> FastAPI:
             ) from exc
         if session.acting_seat() != req.seat:
             raise HTTPException(status_code=409, detail="requested seat is not acting")
-        flat = await anyio.to_thread.run_sync(session.bot_choice)
+        flat = await anyio.to_thread.run_sync(_choose, session, req.seat)
         if flat is None:
             raise HTTPException(
                 status_code=409, detail="no bot move available for that seat"

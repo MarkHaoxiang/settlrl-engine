@@ -43,8 +43,7 @@ def _warm_jit_cache() -> None:
     for n_players in (4, 2):
         scratch = GameSession(seed=0, n_players=n_players)
         scratch.apply(int(scratch.legal_flat()[0]))  # compiles the env step
-        scratch.apply(int(scratch.legal_flat()[0]))
-        scratch.bot_step()  # compiles the default bot policy
+        scratch.auto_step()  # compiles a second step + the random fallback
 
 
 def _build_registry(
@@ -86,7 +85,6 @@ def create_app(
     user_db: str | None = None,
     admin_emails: frozenset[str] = frozenset(),
     providers: ProviderRegistry | None = None,
-    local_bots: bool = True,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -107,9 +105,7 @@ def create_app(
     database = _database(user_db, state_dir)
     registry, store = _build_registry(games, database, state_dir, max_active)
     auth = Auth(database, admin_emails=admin_emails)
-    bots = (
-        providers if providers is not None else ProviderRegistry(local_bots=local_bots)
-    )
+    bots = providers if providers is not None else ProviderRegistry()
     bots_owned = providers is None  # only close the HTTP client we created
     # The live bot/timeout driver tasks, so the lifespan can cancel them on
     # shutdown; each removes itself when it ends (game over or evicted).
@@ -210,5 +206,4 @@ app = create_app(
     max_active=int(os.environ.get("SETTLRL_RENDER_MAX_ACTIVE", "16")),
     user_db=os.environ.get("SETTLRL_RENDER_USER_DB") or None,
     admin_emails=_admin_emails(),
-    local_bots=os.environ.get("SETTLRL_RENDER_LOCAL_BOTS", "1") != "0",
 )

@@ -10,7 +10,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 from settlrl_render.bots.bot_service import create_bot_app
-from settlrl_render.game.session import GameSession
+from settlrl_render.game.session import GameSession, GameSetup
 
 
 @pytest.fixture()
@@ -19,7 +19,17 @@ def client() -> Iterator[TestClient]:
 
 
 def _all_bot_setup() -> dict[str, object]:
-    return GameSession(seed=3, n_players=2, seats=["random", "random"]).setup.to_dict()
+    # The game server stores bot seats verbatim, so build the setup dict directly
+    # (a GameSession would need the kinds in external_kinds, which the service has).
+    return GameSetup(
+        seed=3, n_players=2, number_placement="random", seats=["random", "random"]
+    ).to_dict()
+
+
+def _mirror() -> GameSession:
+    """A legality oracle for the same position; seat kinds don't affect what's
+    legal, so a plain all-human session mirrors the bot game's legal moves."""
+    return GameSession(seed=3, n_players=2, seats=["human", "human"])
 
 
 def test_catalog_lists_built_in_kinds(client: TestClient) -> None:
@@ -37,15 +47,14 @@ def test_act_returns_a_legal_move_for_the_acting_seat(client: TestClient) -> Non
     assert resp.status_code == 200, resp.text
     flat = resp.json()["flat"]
     # The returned move is legal in a freshly replayed copy of the same position.
-    sess = GameSession(seed=3, n_players=2, seats=["random", "random"])
-    assert flat in {int(f) for f in sess.legal_flat()}
+    assert flat in {int(f) for f in _mirror().legal_flat()}
 
 
 def test_act_advances_move_by_move(client: TestClient) -> None:
     """Feeding back each chosen move (growing the trace) keeps producing legal
     moves — exercising the service's incremental replay cache."""
     setup = _all_bot_setup()
-    mirror = GameSession(seed=3, n_players=2, seats=["random", "random"])
+    mirror = _mirror()
     moves: list[int] = []
     for _ in range(8):
         seat = mirror.acting_seat()
