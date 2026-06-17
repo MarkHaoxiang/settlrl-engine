@@ -7,8 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..deps import Deps
-from ..providers import RemoteBotError
+from settlrl_render.api.deps import Deps
+from settlrl_render.bots.providers import RemoteBotError
 
 
 class _ProviderRequest(BaseModel):

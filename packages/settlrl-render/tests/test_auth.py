@@ -9,7 +9,7 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from settlrl_render.games import GameRegistry
+from settlrl_render.game.games import GameRegistry
 from settlrl_render.server import create_app
 
 

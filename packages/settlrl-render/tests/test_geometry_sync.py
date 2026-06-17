@@ -8,7 +8,7 @@ that the derived tables are internally consistent (no stray placeholders).
 """
 
 from settlrl_engine.board.layout import N_EDGES, N_PORTS, N_TILES, N_VERTICES
-from settlrl_render.convert import (
+from settlrl_render.api.convert import (
     _TILE_CUBES,
     EDGE_VERTICES,
     PORT_VERTEX_COORDS,

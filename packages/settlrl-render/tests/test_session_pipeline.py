@@ -11,10 +11,10 @@ decode layer to real engine behaviour rather than to a parallel reconstruction.
 import pytest
 from settlrl_engine.board.state import GamePhase
 from settlrl_engine.env import N_FLAT
-from settlrl_render.actions import decode_actions
-from settlrl_render.convert import board_to_model
-from settlrl_render.models import BoardModel, CubeModel
-from settlrl_render.session import GameSession, IllegalActionError
+from settlrl_render.api.actions import decode_actions
+from settlrl_render.api.convert import board_to_model
+from settlrl_render.api.models import BoardModel, CubeModel
+from settlrl_render.game.session import GameSession, IllegalActionError
 
 
 def _cube(c: CubeModel) -> tuple[int, int, int]:

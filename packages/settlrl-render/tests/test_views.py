@@ -8,9 +8,9 @@ everyone (see ``test_terminal_reveals_every_hand``).
 """
 
 import numpy as np
-from settlrl_render.games import GameHandle
-from settlrl_render.session import GameSession
-from settlrl_render.views import game_model
+from settlrl_render.api.views import game_model
+from settlrl_render.game.games import GameHandle
+from settlrl_render.game.session import GameSession
 
 
 def _handle(session: GameSession) -> GameHandle:

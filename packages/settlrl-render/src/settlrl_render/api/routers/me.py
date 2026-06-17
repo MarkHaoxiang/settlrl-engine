@@ -5,8 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from ..db import User
-from ..deps import Deps
+from settlrl_render.api.deps import Deps
+from settlrl_render.storage.db import User
 
 
 class _MyGameModel(BaseModel):

@@ -8,7 +8,7 @@ regenerated together.
 
 import json
 
-from .server import create_app
+from settlrl_render.server import create_app
 
 
 def main() -> None:

@@ -25,7 +25,7 @@ from settlrl_engine.board.layout import (
     vertex_index,
 )
 from settlrl_engine.board.port import Port
-from settlrl_render.convert import _DEV_CARD_NAMES, _RESOURCE_NAMES, board_to_model
+from settlrl_render.api.convert import _DEV_CARD_NAMES, _RESOURCE_NAMES, board_to_model
 
 # Known cube coordinates to build on (all valid vertices / edge / tile).
 SETTLEMENT_CUBE = (1, 0, 0)

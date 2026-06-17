@@ -21,7 +21,7 @@ dependencies = [
 
 [project.scripts]
 settlrl-render = "settlrl_render:main"
-settlrl-render-bot = "settlrl_render.bot_service:main"
+settlrl-render-bot = "settlrl_render.bots.bot_service:main"
 
 [build-system]
 requires = ["hatchling"]

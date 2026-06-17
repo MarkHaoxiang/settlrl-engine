@@ -20,10 +20,9 @@ from settlrl_engine.board.state import NO_INDEX, GamePhase
 from settlrl_engine.env.aec import SettlrlAECEnv
 from settlrl_engine.record import GameRecord, Move
 
-from .actions import decode_actions
-from .bots import POLICIES, Knob, bot_act, coerce_params
-from .convert import _RESOURCE_NAMES
-from .models import (
+from settlrl_render.api.actions import decode_actions
+from settlrl_render.api.convert import _RESOURCE_NAMES
+from settlrl_render.api.models import (
     BeliefModel,
     GameStatusModel,
     LogEntryModel,
@@ -31,6 +30,7 @@ from .models import (
     ResourceCounts,
     TradeOfferModel,
 )
+from settlrl_render.bots.bots import POLICIES, Knob, bot_act, coerce_params
 
 # A seat assignment: "human", a bot kind, or a configured bot
 # {"kind": name, "params": {knob: value}}.
@@ -137,7 +137,7 @@ class GameSession:
         policy name, or ``{"kind": name, "params": {...}}`` with knob
         overrides from the bot catalog. ``external_kinds`` are extra bot-kind
         names accepted beyond the local ``POLICIES`` — seats a remote bot
-        provider plays (:mod:`settlrl_render.providers`); their params are
+        provider plays (:mod:`settlrl_render.bots.providers`); their params are
         stored verbatim (the provider validates them) and they are never played
         locally. None keeps the current set.
         """

@@ -17,13 +17,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.responses import Response
 
-from ..db import User
-from ..deps import Deps, SeatTokens, needs_driver, tokens, uid
-from ..games import QueuePosition, RegistryFullError
-from ..models import GameModel, ReplayStateModel
-from ..session import HUMAN, GameSession, IllegalActionError
-from ..views import game_model
-from .replay import load_replay
+from settlrl_render.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
+from settlrl_render.api.models import GameModel, ReplayStateModel
+from settlrl_render.api.routers.replay import load_replay
+from settlrl_render.api.views import game_model
+from settlrl_render.game.games import QueuePosition, RegistryFullError
+from settlrl_render.game.session import HUMAN, GameSession, IllegalActionError
+from settlrl_render.storage.db import User
 
 
 class _SeatSpec(BaseModel):

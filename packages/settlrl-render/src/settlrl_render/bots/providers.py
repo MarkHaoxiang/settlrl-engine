@@ -2,7 +2,7 @@
 
 The built-in provider runs the ``settlrl-agents`` policies in-process, exactly
 as the server always has. A **remote** provider is a separate bot service
-(:mod:`settlrl_render.bot_service`) reached over HTTP, so the agent-running code
+(:mod:`settlrl_render.bots.bot_service`) reached over HTTP, so the agent-running code
 can be deployed and scaled apart from the game server; an admin registers one at
 runtime and its bot kinds join the catalog.
 
@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from .bots import bot_catalog
+from settlrl_render.bots.bots import bot_catalog
 
 # A bot move request / reply on the standardized wire (the bot service's /act).
 # `game_id` only keys the service's replay cache; `setup` + `moves` fully

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from settlrl_engine.record import GameRecord, initial_board, replay
 
-from .actions import decode_actions
-from .convert import board_to_model
-from .models import BoardModel, LogEntryModel, ReplayStateModel
+from settlrl_render.api.actions import decode_actions
+from settlrl_render.api.convert import board_to_model
+from settlrl_render.api.models import BoardModel, LogEntryModel, ReplayStateModel
 
 # Refuse pathologically long records (snapshots are kept in memory).
 _MAX_MOVES = 20_000

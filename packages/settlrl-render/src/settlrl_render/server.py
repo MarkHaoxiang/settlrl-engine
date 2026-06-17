@@ -1,8 +1,8 @@
 """The FastAPI app: the composition root. ``create_app`` wires the one async
-:class:`~settlrl_render.db.Database`, the game registry and its journal store,
+:class:`~settlrl_render.storage.db.Database`, the game registry and its journal store,
 the auth system, the bot providers, and the bot/timeout driver tasks into a
-shared :class:`~settlrl_render.deps.Deps`, then mounts the routers
-(:mod:`settlrl_render.routers`) and the SPA. Tests build isolated apps with
+shared :class:`~settlrl_render.api.deps.Deps`, then mounts the routers
+(:mod:`settlrl_render.api.routers`) and the SPA. Tests build isolated apps with
 their own registries instead of sharing module state.
 """
 
@@ -20,15 +20,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
-from . import routers
-from .auth import Auth
-from .db import Database
-from .deps import Deps, ReplaySlot, needs_driver
-from .driver import start_game_driver
-from .games import GameHandle, GameRegistry, restore_games
-from .providers import ProviderRegistry
-from .session import GameSession
-from .store import GameStore
+from settlrl_render.api import routers
+from settlrl_render.api.deps import Deps, ReplaySlot, needs_driver
+from settlrl_render.bots.providers import ProviderRegistry
+from settlrl_render.game.driver import start_game_driver
+from settlrl_render.game.games import GameHandle, GameRegistry, restore_games
+from settlrl_render.game.session import GameSession
+from settlrl_render.storage.auth import Auth
+from settlrl_render.storage.db import Database
+from settlrl_render.storage.store import GameStore
 
 
 def _warm_jit_cache() -> None:

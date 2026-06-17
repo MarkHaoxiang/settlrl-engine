@@ -9,8 +9,8 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from settlrl_render.bot_service import create_bot_app
-from settlrl_render.session import GameSession
+from settlrl_render.bots.bot_service import create_bot_app
+from settlrl_render.game.session import GameSession
 
 
 @pytest.fixture()

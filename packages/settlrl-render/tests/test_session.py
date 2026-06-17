@@ -9,8 +9,8 @@ itself, and that a full game can be driven to a terminal state with a winner.
 import numpy as np
 import pytest
 from settlrl_engine.record import GameRecord, replay
-from settlrl_render.bots import bot_catalog
-from settlrl_render.session import HUMAN, GameSession
+from settlrl_render.bots.bots import bot_catalog
+from settlrl_render.game.session import HUMAN, GameSession
 
 # Bot kinds usable at each seat count the renderer offers.
 _FOUR_PLAYER_KINDS = sorted(

@@ -15,7 +15,7 @@ from settlrl_engine.board.layout import (
     vertex_cube,
 )
 from settlrl_engine.env import N_FLAT, ActionType, flat_to_action
-from settlrl_render.actions import _RESOURCE_NAMES, _decode, decode_actions
+from settlrl_render.api.actions import _RESOURCE_NAMES, _decode, decode_actions
 
 _row_type, _row_params = flat_to_action(jnp.arange(N_FLAT))
 _ATYPE = np.asarray(_row_type)

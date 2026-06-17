@@ -6,7 +6,7 @@ renderer needs each legal index turned into something the frontend can act on:
 the action type, a human label, and — for placement / robber / resource moves —
 the board geometry or resources involved, expressed in the same cube/axial
 coordinates the SVG board already uses (reused from
-:mod:`settlrl_render.convert`).
+:mod:`settlrl_render.api.convert`).
 """
 
 from __future__ import annotations
@@ -16,8 +16,14 @@ import numpy as np
 from settlrl_engine.env import N_FLAT, ActionType, flat_to_action
 from settlrl_engine.mechanics.trade import _COUNT_BITS, _COUNT_MASK, _PARTNER_BITS
 
-from .convert import _RESOURCE_NAMES, EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS, _cube
-from .models import ActionModel, EdgeModel, HexModel
+from settlrl_render.api.convert import (
+    _RESOURCE_NAMES,
+    EDGE_VERTICES,
+    TILE_COORDS,
+    VERTEX_COORDS,
+    _cube,
+)
+from settlrl_render.api.models import ActionModel, EdgeModel, HexModel
 
 __all__ = ["_RESOURCE_NAMES", "_decode", "decode_actions"]
 

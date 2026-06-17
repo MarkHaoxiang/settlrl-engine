@@ -17,9 +17,9 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from settlrl_render.bot_service import create_bot_app
-from settlrl_render.games import GameRegistry
-from settlrl_render.providers import ActRequest, ProviderRegistry, RemoteBotError
+from settlrl_render.bots.bot_service import create_bot_app
+from settlrl_render.bots.providers import ActRequest, ProviderRegistry, RemoteBotError
+from settlrl_render.game.games import GameRegistry
 from settlrl_render.server import create_app
 
 

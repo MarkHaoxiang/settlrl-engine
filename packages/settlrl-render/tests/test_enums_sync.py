@@ -6,8 +6,8 @@ enums are reordered the renderer would mislabel hands. Pin them here.
 
 from settlrl_engine.board.dev_cards import DevCard
 from settlrl_engine.board.tile import Tile
-from settlrl_render.actions import _RESOURCE_NAMES
-from settlrl_render.models import DevCardCounts, ResourceCounts, Terrain
+from settlrl_render.api.actions import _RESOURCE_NAMES
+from settlrl_render.api.models import DevCardCounts, ResourceCounts, Terrain
 
 # The five non-desert resources, in engine (Tile) order.
 _RESOURCES = tuple(t.name.lower() for t in Tile if t is not Tile.DESERT)

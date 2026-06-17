@@ -1,5 +1,5 @@
 """The bot service: the agent-running half of the renderer, behind the
-standardized bot API (:mod:`settlrl_render.providers`).
+standardized bot API (:mod:`settlrl_render.bots.providers`).
 
 It runs the ``settlrl-agents`` policies and answers two requests:
 
@@ -26,9 +26,9 @@ from typing import Any
 import anyio.to_thread
 from fastapi import FastAPI, HTTPException
 
-from .bots import bot_catalog
-from .providers import ActRequest, ActResponse
-from .session import GameSession, GameSetup, IllegalActionError
+from settlrl_render.bots.bots import bot_catalog
+from settlrl_render.bots.providers import ActRequest, ActResponse
+from settlrl_render.game.session import GameSession, GameSetup, IllegalActionError
 
 # Distinct games kept warm for incremental replay; past this the
 # least-recently-used is dropped (its next request rebuilds from setup).
@@ -100,7 +100,7 @@ def main() -> None:
     import uvicorn
 
     uvicorn.run(
-        "settlrl_render.bot_service:app",
+        "settlrl_render.bots.bot_service:app",
         host=os.environ.get("BOT_HOST", "0.0.0.0"),
         port=int(os.environ.get("BOT_PORT", "8100")),
         reload=bool(int(os.environ.get("RELOAD", "0"))),

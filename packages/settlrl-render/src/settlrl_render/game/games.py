@@ -27,9 +27,9 @@ from typing import cast
 
 import anyio.to_thread
 
-from .models import BotMoveModel
-from .session import HUMAN, GameSession, GameSetup
-from .store import GameJournal, GameStore
+from settlrl_render.api.models import BotMoveModel
+from settlrl_render.game.session import HUMAN, GameSession, GameSetup
+from settlrl_render.storage.store import GameJournal, GameStore
 
 # Games are addressed by unguessable ids; tokens prove seat ownership. The id
 # is the only thing gating a game's public snapshot and its finished-game

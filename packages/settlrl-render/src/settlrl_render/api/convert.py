@@ -25,7 +25,7 @@ from settlrl_engine.board.port import Port
 from settlrl_engine.board.resources import BANK_INITIAL
 from settlrl_engine.board.tile import Tile
 
-from .models import (
+from settlrl_render.api.models import (
     BankModel,
     BoardModel,
     BuildingModel,
@@ -48,7 +48,7 @@ Cube = tuple[int, int, int]
 # The engine indexes resource arrays (hands, costs, ports, monopoly / trade
 # targets) by the ``Tile`` enum, skipping the non-resource desert. Derive the
 # ordered resource names from the enum once and reuse everywhere the renderer
-# indexes positionally (here and in ``settlrl_render.actions``); this is also the
+# indexes positionally (here and in ``settlrl_render.api.actions``); this is also the
 # order ``models.ResourceCounts`` / ``PortModel`` declare their fields in.
 _RESOURCE_NAMES: tuple[PortResource, ...] = tuple(
     t.name.lower()  # type: ignore[misc]

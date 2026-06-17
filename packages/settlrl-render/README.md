@@ -284,26 +284,30 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 
 ```
 packages/settlrl-render/
-├── src/settlrl_render/
+├── src/settlrl_render/      # grouped by layer; server.py wires them together
 │   ├── __init__.py      # CLI entry point (uvicorn)
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
-│   ├── routers/         # API routes by area: games, replay, bots, me (build(deps))
-│   ├── deps.py          # Shared request helpers + the runtime context (Deps) routers close over
-│   ├── auth.py          # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB
-│   ├── db.py            # The one async SQLAlchemy DB: users, login tokens, and game journals
-│   ├── driver.py        # Per-game asyncio task: bot pacing (local or remote) + idle-turn timeouts
-│   ├── views.py         # Per-seat snapshots: the hidden-information boundary
-│   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
-│   ├── store.py         # Crash-recovery journals on the shared DB (write-behind), replay on boot
-│   ├── openapi.py       # Schema dump backing the generated frontend types
-│   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
-│   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots
-│   ├── bots.py          # settlrl-agents registry adapted to the single game (bot_act)
-│   ├── providers.py     # Bot kinds -> where they run: local vs registered remote services
-│   ├── bot_service.py   # Standalone bot service (settlrl-render-bot): /catalog + /act
-│   ├── actions.py       # Decode AEC flat actions -> wire ActionModels
-│   ├── convert.py       # settlrl-engine Board -> BoardModel
-│   └── models.py        # Pydantic board / game / action models
+│   ├── api/             # the HTTP layer
+│   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over
+│   │   ├── routers/       # Routes by area: games, replay, bots, me (each build(deps) -> APIRouter)
+│   │   ├── models.py      # Pydantic board / game / action wire models
+│   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
+│   │   ├── actions.py     # Decode AEC flat actions -> wire ActionModels
+│   │   ├── convert.py     # settlrl-engine Board -> BoardModel
+│   │   └── openapi.py     # Schema dump backing the generated frontend types
+│   ├── game/            # the live game and its engine seam
+│   │   ├── session.py     # GameSession: one live game vs bots (wraps the AEC env)
+│   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens)
+│   │   ├── driver.py      # Per-game asyncio task: bot pacing (local or remote) + idle-turn timeouts
+│   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
+│   ├── bots/            # where bot moves are computed
+│   │   ├── bots.py        # settlrl-agents registry adapted to the single game (bot_act)
+│   │   ├── providers.py   # Bot kinds -> where they run: local vs registered remote services
+│   │   └── bot_service.py # Standalone bot service (settlrl-render-bot): /catalog + /act
+│   └── storage/         # the one async DB: identity + persistence
+│       ├── db.py          # The async SQLAlchemy engine: users, login tokens, and game journals
+│       ├── auth.py        # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB
+│       └── store.py       # Crash-recovery journals on the shared DB (write-behind), replay on boot
 ├── tests/               # Pytest: renderer<->engine sync checks (geometry, actions, enums)
 └── frontend/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)

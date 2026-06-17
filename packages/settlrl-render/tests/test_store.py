@@ -9,11 +9,11 @@ import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from settlrl_render.db import Database
-from settlrl_render.games import GameRegistry
+from settlrl_render.game.games import GameRegistry
+from settlrl_render.game.session import GameSession, GameSetup
 from settlrl_render.server import create_app
-from settlrl_render.session import GameSession, GameSetup
-from settlrl_render.store import GameStore
+from settlrl_render.storage.db import Database
+from settlrl_render.storage.store import GameStore
 
 
 def test_game_setup_round_trips_through_a_dict() -> None:
