@@ -187,12 +187,12 @@ def learn(
     arena_games: int = 0,
     arena_every: int = 1,
     seed: int = 0,
-    on_iter: Callable[[int, dict[str, float]], None] | None = None,
+    on_iter: Callable[[int, dict[str, float], AZParams], None] | None = None,
 ) -> AZParams:
     """One full AlphaZero loop: each iteration self-plays, buffers, and trains;
     every ``arena_every`` iterations (when ``arena_games`` > 0) it scores the net
-    vs. ``lookahead(heuristic)``. ``on_iter(i, metrics)`` receives per-iteration
-    metrics for the experiment to log. Returns the final params."""
+    vs. ``lookahead(heuristic)``. ``on_iter(i, metrics, params)`` runs after each
+    iteration (the experiment logs / checkpoints). Returns the final params."""
     optimizer = optax.adamw(lr, weight_decay=weight_decay)
     opt_state = optimizer.init(params)
     step = make_train_step(optimizer, value_weight)
@@ -233,5 +233,5 @@ def learn(
                 seed=seed + 20_000 + i,
             )
         if on_iter is not None:
-            on_iter(i, metrics)
+            on_iter(i, metrics, params)
     return params

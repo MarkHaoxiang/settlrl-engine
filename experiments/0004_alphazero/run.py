@@ -10,10 +10,12 @@ with a config, per-iteration logging, and the gate verdict.
 
 import sys
 from pathlib import Path
+from typing import Literal
 
 import jax
+import wandb
 from settlrl_agents.experiment import Config, Run, start_run
-from settlrl_learn import init_az_params, save_az_params
+from settlrl_learn import AZParams, init_az_params, save_az_params
 from settlrl_learn.alphazero import arena, learn
 
 
@@ -41,6 +43,10 @@ class AlphaZeroConfig(Config):
     arena_games: int = 80
     arena_every: int = 5
     gate_winrate: float = 0.55  # pass iff the final net clears this vs lookahead
+    # logging / checkpointing
+    wandb_mode: Literal["online", "offline", "disabled"] = "online"
+    wandb_project: str = "settlrl-0004-alphazero"
+    checkpoint_every: int = 5  # iterations between rolling latest.npz saves
 
 
 VARIANTS: dict[str, dict[str, object]] = {
@@ -58,37 +64,58 @@ VARIANTS: dict[str, dict[str, object]] = {
         "buffer_min": 4,
         "arena_games": 4,
         "arena_every": 1,
+        "wandb_mode": "disabled",
     },
 }
 
 
 def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     params = init_az_params(jax.random.key(cfg.seed), (cfg.width,) * cfg.depth)
-
-    def on_iter(i: int, metrics: dict[str, float]) -> None:
-        run.log(iteration=i, **metrics)
-
-    params = learn(
-        params,
-        n_iterations=cfg.n_iterations,
-        selfplay_samples=cfg.selfplay_samples,
-        selfplay_batch=cfg.selfplay_batch,
-        num_simulations=cfg.num_simulations,
-        max_num_considered_actions=cfg.max_num_considered_actions,
-        temperature=cfg.temperature,
-        buffer_max=cfg.buffer_max,
-        buffer_min=cfg.buffer_min,
-        batch_size=cfg.batch_size,
-        train_steps=cfg.train_steps,
-        lr=cfg.lr,
-        weight_decay=cfg.weight_decay,
-        value_weight=cfg.value_weight,
-        arena_games=cfg.arena_games,
-        arena_every=cfg.arena_every,
-        seed=cfg.seed,
-        on_iter=on_iter,
+    wb = wandb.init(
+        project=cfg.wandb_project,
+        mode=cfg.wandb_mode,
+        config=cfg.dump(),
+        reinit=True,
+        dir=str(run.dir),
     )
-    save_az_params(run.dir / "params.npz", params)
+    best = -1.0  # best arena win rate so far -> best.npz
+
+    def on_iter(i: int, metrics: dict[str, float], p: AZParams) -> None:
+        nonlocal best
+        run.log(iteration=i, **metrics)
+        wb.log({"iteration": i, **metrics})
+        if (i + 1) % cfg.checkpoint_every == 0:
+            save_az_params(run.dir / "latest.npz", p)  # rolling, for resume
+        winrate = metrics.get("arena_winrate")
+        if winrate is not None and winrate > best:
+            best = winrate
+            save_az_params(run.dir / "best.npz", p)  # strongest net so far
+
+    try:
+        params = learn(
+            params,
+            n_iterations=cfg.n_iterations,
+            selfplay_samples=cfg.selfplay_samples,
+            selfplay_batch=cfg.selfplay_batch,
+            num_simulations=cfg.num_simulations,
+            max_num_considered_actions=cfg.max_num_considered_actions,
+            temperature=cfg.temperature,
+            buffer_max=cfg.buffer_max,
+            buffer_min=cfg.buffer_min,
+            batch_size=cfg.batch_size,
+            train_steps=cfg.train_steps,
+            lr=cfg.lr,
+            weight_decay=cfg.weight_decay,
+            value_weight=cfg.value_weight,
+            arena_games=cfg.arena_games,
+            arena_every=cfg.arena_every,
+            seed=cfg.seed,
+            on_iter=on_iter,
+        )
+    finally:
+        wb.finish()
+
+    save_az_params(run.dir / "params.npz", params)  # final
     winrate = arena(
         params,
         n_games=cfg.arena_games,
@@ -97,7 +124,9 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         seed=cfg.seed + 99,
     )
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
-    run.finish(verdict, arena_winrate=winrate, gate=cfg.gate_winrate)
+    run.finish(
+        verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
+    )
 
 
 def main() -> None:
