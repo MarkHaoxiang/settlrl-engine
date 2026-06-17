@@ -15,7 +15,27 @@ from settlrl_render.game.session import GameSession
 
 
 def _handle(session: GameSession) -> GameHandle:
-    return GameHandle("g", session)
+    # A started game: every human seat claimed, so it is past the lobby gate
+    # (see test_lobby_gates_actions_until_seats_filled) and actually playing.
+    handle = GameHandle("g", session)
+    for seat in handle.human_seats():
+        handle.claim(seat)
+    return handle
+
+
+def test_lobby_gates_actions_until_seats_filled() -> None:
+    # An online game with an unclaimed human seat waits in its lobby: even the
+    # claimed owner gets no turn or actions until every human seat is filled.
+    session = GameSession(
+        seed=0, seats=["human", "human", "random", "random"], external_kinds=BOT_KINDS
+    )
+    handle = GameHandle("g", session)
+    handle.claim(0)  # seat 1 still open
+    waiting = game_model(handle, owned={0})
+    assert not waiting.status.your_turn and waiting.actions == []
+    handle.claim(1)  # last human seat filled
+    ready = game_model(handle, owned={0})
+    assert ready.status.your_turn and ready.actions
 
 
 def test_owner_sees_own_hand_actions_and_belief() -> None:

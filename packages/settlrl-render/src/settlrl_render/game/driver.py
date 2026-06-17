@@ -96,13 +96,18 @@ async def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
         async with handle.lock:
             if handle.closed or handle.session.terminal():
                 return None
-            if _bot_due(handle):
+            timeout: float | None
+            if not handle.ready():
+                # Waiting in the lobby: do nothing until a claim wakes us.
+                clock.reset()
+                timeout = None
+            elif _bot_due(handle):
                 return _Due.BOT
-            if clock.on and _human_acting(handle):
+            elif clock.on and _human_acting(handle):
                 remaining = clock.remaining(handle.version)
                 if remaining <= 0:
                     return _Due.TIMEOUT
-                timeout: float | None = remaining
+                timeout = remaining
             else:
                 clock.reset()
                 timeout = None

@@ -25,7 +25,9 @@ hand arrives in full, everyone else's only as public counts, and the legal-move 
 ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
 link, and opening it claims a free human seat (or spectates when none is left); the 🔑 button
 copies a resume link that carries your seat tokens, so you can restore the exact seats you
-hold on another device or after clearing storage. The server
+hold on another device or after clearing storage. A game with unclaimed human seats waits in
+a **lobby** — it serves no moves and advances neither bots nor turn timeouts — until every
+human seat is filled, then begins on its own. The server
 pushes state: each client holds an event stream (`GET /api/games/{id}/events`, SSE) and
 receives its per-seat snapshot on every change, and bot seats are played by a server-side
 driver pacing one move at a time so each lands as its own pushed snapshot — games advance

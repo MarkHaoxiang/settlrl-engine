@@ -22,7 +22,9 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
     """
     session = handle.session
     status = session.status()
-    status.your_turn = (not status.terminal) and status.acting_player in owned
+    # A game waiting in its lobby (unclaimed human seats) serves no actions and
+    # nobody's turn is live, so play can't begin before every player is in.
+    status.your_turn = handle.ready() and (not status.terminal) and status.acting_player in owned
     actions = decode_actions(session.legal_flat()) if status.your_turn else []
     observer = (
         status.acting_player

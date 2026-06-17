@@ -124,6 +124,13 @@ class GameHandle:
     def human_seats(self) -> list[int]:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
 
+    def ready(self) -> bool:
+        """Whether every human seat is claimed. Until then the game waits in its
+        lobby: it serves no legal actions and the driver advances neither bots
+        nor idle-turn timeouts, so play begins only once all players are in.
+        (All-bot and fully-claimed hotseat games are ready from the start.)"""
+        return all(s in self.claims for s in self.human_seats())
+
     def claim(
         self, seat: int | None = None, user_id: str | None = None
     ) -> tuple[int, str]:

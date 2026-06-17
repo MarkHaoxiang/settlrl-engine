@@ -14,7 +14,7 @@ import MaritimePopover from "../components/MaritimePopover";
 import NewGameDialog from "../components/NewGameDialog";
 import TradePopover from "../components/TradePopover";
 import TopBar from "../components/TopBar";
-import { BotIcon } from "../components/icons";
+import { BotIcon, HumanIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import { createGame, joinGame, type GameAction, type GameSnapshot, type NewGameConfig } from "../lib/game";
@@ -143,6 +143,8 @@ export default function PlayView() {
   const [configuring, setConfiguring] = useState(!gameId);
   // The end-game overlay shows once a game finishes; "View board" dismisses it.
   const [endDismissed, setEndDismissed] = useState(false);
+  // Brief "Copied!" feedback on the lobby's invite-link button.
+  const [linkCopied, setLinkCopied] = useState(false);
   // Set while waiting in line when the server is at its concurrency cap.
   const [queue, setQueue] = useState<{ position: number; total: number } | null>(null);
   const queueTimer = useRef<number | null>(null);
@@ -293,6 +295,12 @@ export default function PlayView() {
   if (!snapshot) return <div style={overlayMsgStyle}>Loading game…</div>;
 
   const { status, board } = snapshot;
+  // Lobby gate: an online game waits until every human seat is claimed (the
+  // server serves no actions and advances nothing until then). Derived from the
+  // public seat kinds + claims, so spectators see the wait too.
+  const humanSeats = status.seats.flatMap((k, i) => (k === "human" ? [i] : []));
+  const claimedSeats = new Set(snapshot.seats_claimed);
+  const waiting = !status.terminal && humanSeats.some((s) => !claimedSeats.has(s));
   // The hand panel follows whichever owned seat is acting (falling back to
   // this client's first seat). Owning no seats means spectating: no hand.
   const handSeat = mySeats.includes(status.acting_player)
@@ -465,6 +473,82 @@ export default function PlayView() {
             New game
           </button>
         </TopBar>
+
+        {waiting && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "rgba(0,0,0,0.35)",
+              zIndex: 15,
+            }}
+          >
+            <div
+              style={{
+                ...panelStyle,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                padding: "24px 28px",
+                borderRadius: 16,
+                minWidth: 320,
+                maxWidth: 420,
+                boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
+              }}
+            >
+              <span style={{ fontSize: 20, fontWeight: 700 }}>Waiting for players…</span>
+              <span style={{ fontSize: 13, opacity: 0.7 }}>
+                {humanSeats.filter((s) => claimedSeats.has(s)).length} / {humanSeats.length} joined — the
+                game starts once every seat is filled.
+              </span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {status.seats.map((kind, i) => {
+                  const human = kind === "human";
+                  const filled = !human || claimedSeats.has(i);
+                  const mine = mySeats.includes(i);
+                  return (
+                    <div
+                      key={i}
+                      style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, opacity: filled ? 1 : 0.55 }}
+                    >
+                      <span
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          background: PLAYER_COLORS[i] ?? "#888",
+                        }}
+                      />
+                      {human ? <HumanIcon size={16} /> : <BotIcon size={16} />}
+                      <span style={{ fontWeight: 700 }}>
+                        {playerName(i)}
+                        {mine ? " (you)" : ""}
+                      </span>
+                      <span style={{ marginLeft: "auto", opacity: 0.7 }}>
+                        {!human ? kind : filled ? "joined" : "open"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                style={buttonStyle}
+                title="Others join the open seats by opening this link"
+                onClick={() => {
+                  void navigator.clipboard.writeText(window.location.href);
+                  setLinkCopied(true);
+                  window.setTimeout(() => setLinkCopied(false), 1500);
+                }}
+              >
+                {linkCopied ? "Copied!" : "🔗 Copy invite link"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {tradeWith && me && (
           <TradePopover
