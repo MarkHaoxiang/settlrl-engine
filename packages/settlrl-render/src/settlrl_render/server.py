@@ -23,7 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
-from .auth import Auth, UserStore
+from .auth import Auth, User, UserStore
 from .driver import start_game_driver
 from .games import (
     GameHandle,
@@ -206,6 +206,13 @@ class _ProviderRequest(BaseModel):
     base_url: str
 
 
+class _MyGameModel(BaseModel):
+    """A live game the signed-in user owns a seat in."""
+
+    id: str
+    seats: list[int]
+
+
 def create_app(
     games: GameRegistry | None = None,
     bot_delay: float = 0.65,
@@ -285,9 +292,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="no such game")
         return handle
 
+    # The signed-in requester (None when anonymous); a FastAPI dependency.
+    CurrentUser = Annotated[User | None, Depends(auth.optional_user)]
+
+    def _uid(user: User | None) -> int | None:
+        return user.id if user is not None else None
+
     @app.post("/api/games")
     def post_create(
-        req: _CreateRequest, response: Response
+        req: _CreateRequest, response: Response, user: CurrentUser = None
     ) -> _CreatedModel | _QueuedModel:
         """Create a game, or return the caller's place in line when the server
         is at its concurrency cap (a ``202`` they re-POST with ``ticket``)."""
@@ -321,36 +334,45 @@ def create_app(
         claiming = (
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
-        tokens = dict(seated.claim(seat) for seat in claiming)
+        tokens = dict(seated.claim(seat, _uid(user)) for seat in claiming)
         if _needs_driver(seated, turn_timeout):
             start_game_driver(seated, bot_delay, turn_timeout, bots)
         return _CreatedModel(id=seated.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
-    def post_join(game_id: str, req: _JoinRequest) -> _JoinedModel:
+    def post_join(
+        game_id: str, req: _JoinRequest, user: CurrentUser = None
+    ) -> _JoinedModel:
         handle = handle_of(game_id)
         with handle.lock:
             try:
-                seat, token = handle.claim(req.seat)
+                seat, token = handle.claim(req.seat, _uid(user))
             except (LookupError, ValueError) as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             handle.bump()
         return _JoinedModel(id=game_id, seat=seat, token=token)
 
     @app.get("/api/games/{game_id}")
-    def get_game(game_id: str, x_seat_tokens: SeatTokens = None) -> GameModel:
+    def get_game(
+        game_id: str, user: CurrentUser = None, x_seat_tokens: SeatTokens = None
+    ) -> GameModel:
         handle = handle_of(game_id)
         with handle.lock:
-            return game_model(handle, handle.owned_seats(_tokens(x_seat_tokens)))
+            return game_model(
+                handle, handle.owned_seats(_tokens(x_seat_tokens), _uid(user))
+            )
 
     @app.post("/api/games/{game_id}/action")
     def post_action(
-        game_id: str, req: _ActionRequest, x_seat_tokens: SeatTokens = None
+        game_id: str,
+        req: _ActionRequest,
+        user: CurrentUser = None,
+        x_seat_tokens: SeatTokens = None,
     ) -> GameModel:
         """Apply the acting seat's move; the request must prove that seat."""
         handle = handle_of(game_id)
         with handle.lock:
-            owned = handle.owned_seats(_tokens(x_seat_tokens))
+            owned = handle.owned_seats(_tokens(x_seat_tokens), _uid(user))
             if handle.session.acting_seat() not in owned:
                 raise HTTPException(status_code=403, detail="not your seat")
             try:
@@ -362,12 +384,15 @@ def create_app(
             return game_model(handle, owned)
 
     @app.get("/api/games/{game_id}/events")
-    def get_events(game_id: str, x_seat_tokens: SeatTokens = None) -> StreamingResponse:
+    def get_events(
+        game_id: str, user: CurrentUser = None, x_seat_tokens: SeatTokens = None
+    ) -> StreamingResponse:
         """Server-sent events: the requester's snapshot now, then again on
         every state change (moves, bot plays, chat, joins). Comment lines
         keep idle connections alive."""
         handle = handle_of(game_id)
         tokens = _tokens(x_seat_tokens)
+        uid = _uid(user)
         if not sse_gate.acquire(blocking=False):
             raise HTTPException(
                 status_code=503, detail="too many event streams; try again"
@@ -386,7 +411,7 @@ def create_app(
                             body = None  # idle: fall through to a keepalive
                         else:
                             seen = handle.version
-                            model = game_model(handle, handle.owned_seats(tokens))
+                            model = game_model(handle, handle.owned_seats(tokens, uid))
                             body = model.model_dump_json()
                     yield f"data: {body}\n\n" if body else ": keepalive\n\n"
             finally:
@@ -396,7 +421,10 @@ def create_app(
 
     @app.post("/api/games/{game_id}/chat")
     def post_chat(
-        game_id: str, req: _ChatRequest, x_seat_tokens: SeatTokens = None
+        game_id: str,
+        req: _ChatRequest,
+        user: CurrentUser = None,
+        x_seat_tokens: SeatTokens = None,
     ) -> GameModel:
         """Append a chat message to the game log."""
         text = req.text.strip()
@@ -406,7 +434,7 @@ def create_app(
             )
         handle = handle_of(game_id)
         with handle.lock:
-            owned = handle.owned_seats(_tokens(x_seat_tokens))
+            owned = handle.owned_seats(_tokens(x_seat_tokens), _uid(user))
             if req.player is not None and req.player not in owned:
                 raise HTTPException(status_code=403, detail="not your seat")
             handle.session.add_chat(req.player, text)
@@ -486,6 +514,16 @@ def create_app(
                 raise HTTPException(status_code=404, detail="no replay loaded")
             body = replays.session.record.to_json()
         return Response(content=body, media_type="application/json")
+
+    @app.get("/api/me/games")
+    def my_games(user: Annotated[User, Depends(auth.current_user)]) -> list[_MyGameModel]:
+        """The signed-in user's games — those still live where their account
+        owns a seat — so they can resume on any device without a seat token."""
+        return [
+            _MyGameModel(id=handle.id, seats=seats)
+            for handle in registry.all_handles()
+            if (seats := handle.seats_for_user(user.id))
+        ]
 
     @app.get("/api/bots")
     def get_bots() -> dict[str, dict[str, object]]:

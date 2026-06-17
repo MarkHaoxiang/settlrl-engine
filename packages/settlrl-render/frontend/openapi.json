@@ -49,13 +49,23 @@
        }
       }
      }
-    }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
    }
   },
   "/api/games/{game_id}/join": {
    "post": {
     "summary": "Post Join",
     "operationId": "post_join_api_games__game_id__join_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
     "parameters": [
      {
       "name": "game_id",
@@ -105,6 +115,11 @@
    "get": {
     "summary": "Get Game",
     "operationId": "get_game_api_games__game_id__get",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
     "parameters": [
      {
       "name": "game_id",
@@ -161,6 +176,11 @@
     "summary": "Post Action",
     "description": "Apply the acting seat's move; the request must prove that seat.",
     "operationId": "post_action_api_games__game_id__action_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
     "parameters": [
      {
       "name": "game_id",
@@ -227,6 +247,11 @@
     "summary": "Get Events",
     "description": "Server-sent events: the requester's snapshot now, then again on\nevery state change (moves, bot plays, chat, joins). Comment lines\nkeep idle connections alive.",
     "operationId": "get_events_api_games__game_id__events_get",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
     "parameters": [
      {
       "name": "game_id",
@@ -281,6 +306,11 @@
     "summary": "Post Chat",
     "description": "Append a chat message to the game log.",
     "operationId": "post_chat_api_games__game_id__chat_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
     "parameters": [
      {
       "name": "game_id",
@@ -517,6 +547,34 @@
       }
      }
     }
+   }
+  },
+  "/api/me/games": {
+   "get": {
+    "summary": "My Games",
+    "description": "The signed-in user's games \u2014 those still live where their account\nowns a seat \u2014 so they can resume on any device without a seat token.",
+    "operationId": "my_games_api_me_games_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/_MyGameModel"
+         },
+         "type": "array",
+         "title": "Response My Games Api Me Games Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
    }
   },
   "/api/bots": {
@@ -1253,6 +1311,14 @@
       },
       "type": "array",
       "title": "Seats Claimed",
+      "default": []
+     },
+     "your_seats": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Your Seats",
       "default": []
      }
     },
@@ -2012,6 +2078,28 @@
      "token"
     ],
     "title": "_JoinedModel"
+   },
+   "_MyGameModel": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "seats": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Seats"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "seats"
+    ],
+    "title": "_MyGameModel",
+    "description": "A live game the signed-in user owns a seat in."
    },
    "_ProviderRequest": {
     "properties": {

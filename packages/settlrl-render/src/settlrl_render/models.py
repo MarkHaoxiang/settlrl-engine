@@ -256,3 +256,6 @@ class GameModel(BaseModel):
     belief: BeliefModel | None = None
     # Which seats are claimed (join offers the rest).
     seats_claimed: list[int] = []
+    # The seats this requester owns — by seat token or by signed-in account — so
+    # an account holder is recognised on any device without the seat token.
+    your_seats: list[int] = []

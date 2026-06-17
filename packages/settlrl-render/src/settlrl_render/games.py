@@ -75,6 +75,9 @@ class GameHandle:
         self.lock = threading.Condition()
         # seat -> token for claimed human seats.
         self.claims: dict[int, str] = {}
+        # seat -> owning user id, for seats claimed by a signed-in account (so
+        # the seat follows the user across devices, without the seat token).
+        self.claim_users: dict[int, int] = {}
         self.touched = time.monotonic()
         # Monotonic change counter: every state change bumps it, and waiters
         # re-serialise their view when it moves.
@@ -100,8 +103,12 @@ class GameHandle:
     def human_seats(self) -> list[int]:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
 
-    def claim(self, seat: int | None = None) -> tuple[int, str]:
+    def claim(
+        self, seat: int | None = None, user_id: int | None = None
+    ) -> tuple[int, str]:
         """Claim ``seat`` (or the first unclaimed human seat) and mint its token.
+        When ``user_id`` is given (a signed-in claimer) the seat is also tied to
+        that account, so they own it on any device without the token.
 
         Raises ``LookupError`` when no seat is free and ``ValueError`` when the
         requested seat is not a human seat or is already claimed.
@@ -117,14 +124,24 @@ class GameHandle:
             raise ValueError(f"seat {seat} is already claimed")
         token = secrets.token_urlsafe(_TOKEN_BYTES)
         self.claims[seat] = token
+        if user_id is not None:
+            self.claim_users[seat] = user_id
         if self.journal is not None:
-            self.journal.claim(seat, token)
+            self.journal.claim(seat, token, user_id)
         return seat, token
 
-    def owned_seats(self, tokens: list[str]) -> set[int]:
-        """The seats proven by ``tokens`` (unknown tokens are ignored)."""
+    def owned_seats(self, tokens: list[str], user_id: int | None = None) -> set[int]:
+        """The seats the requester owns: any proven by ``tokens`` plus any tied
+        to their ``user_id`` (unknown tokens are ignored)."""
         presented = set(tokens)
-        return {s for s, t in self.claims.items() if t in presented}
+        owned = {s for s, t in self.claims.items() if t in presented}
+        if user_id is not None:
+            owned |= {s for s, uid in self.claim_users.items() if uid == user_id}
+        return owned
+
+    def seats_for_user(self, user_id: int) -> list[int]:
+        """The seats this account owns in this game (for the user's game list)."""
+        return sorted(s for s, uid in self.claim_users.items() if uid == user_id)
 
 
 class GameRegistry:
@@ -267,15 +284,17 @@ def _rebuild_handle(
     """Reconstruct one game from its header and event log, or None if it can't
     be replayed (a corrupt file is dropped rather than failing the boot)."""
     claims: dict[int, str] = {}
+    claim_users: dict[int, int] = {}
     try:
         session = GameSession.from_setup(GameSetup.from_dict(header))
         for event in events:
-            _replay_event(session, claims, event)
+            _replay_event(session, claims, claim_users, event)
     except (KeyError, ValueError, TypeError):
         return None
     game_id = str(header["id"])
     handle = GameHandle(game_id, session)
     handle.claims = claims
+    handle.claim_users = claim_users
     handle.version = len(events)
     moves = sum(1 for e in events if e.get("t") == "move")
     handle.journal = store.reopen(game_id, moves_written=moves)
@@ -283,7 +302,10 @@ def _rebuild_handle(
 
 
 def _replay_event(
-    session: GameSession, claims: dict[int, str], event: dict[str, object]
+    session: GameSession,
+    claims: dict[int, str],
+    claim_users: dict[int, int],
+    event: dict[str, object],
 ) -> None:
     """Apply one journalled event back onto the rebuilding game."""
     match event.get("t"):
@@ -294,4 +316,8 @@ def _replay_event(
                 cast("int | None", event.get("player")), str(event["text"])
             )
         case "claim":
-            claims[cast(int, event["seat"])] = str(event["token"])
+            seat = cast(int, event["seat"])
+            claims[seat] = str(event["token"])
+            user_id = event.get("user_id")
+            if user_id is not None:
+                claim_users[seat] = cast(int, user_id)

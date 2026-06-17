@@ -229,6 +229,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/games": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Games
+         * @description The signed-in user's games — those still live where their account
+         *     owns a seat — so they can resume on any device without a seat token.
+         */
+        get: operations["my_games_api_me_games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/bots": {
         parameters: {
             query?: never;
@@ -567,6 +588,11 @@ export interface components {
              * @default []
              */
             seats_claimed: number[];
+            /**
+             * Your Seats
+             * @default []
+             */
+            your_seats: number[];
         };
         /**
          * GameStatusModel
@@ -884,6 +910,16 @@ export interface components {
             seat: number;
             /** Token */
             token: string;
+        };
+        /**
+         * _MyGameModel
+         * @description A live game the signed-in user owns a seat in.
+         */
+        _MyGameModel: {
+            /** Id */
+            id: string;
+            /** Seats */
+            seats: number[];
         };
         /**
          * _ProviderRequest
@@ -1290,6 +1326,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    my_games_api_me_games_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_MyGameModel"][];
                 };
             };
         };

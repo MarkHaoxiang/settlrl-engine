@@ -54,8 +54,11 @@ class GameJournal:
             )
         self._moves_written = len(moves)
 
-    def claim(self, seat: int, token: str) -> None:
-        self._store._append(self._game_id, {"t": "claim", "seat": seat, "token": token})
+    def claim(self, seat: int, token: str, user_id: int | None = None) -> None:
+        self._store._append(
+            self._game_id,
+            {"t": "claim", "seat": seat, "token": token, "user_id": user_id},
+        )
 
     def chat(self, player: int | None, text: str) -> None:
         self._store._append(
