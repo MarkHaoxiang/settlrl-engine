@@ -191,16 +191,17 @@ def learn(
     seed: int = 0,
     checkpoint_dir: str | Path | None = None,
     checkpoint_every: int = 1,
-    resume: bool = False,
+    resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], TrainState], None] | None = None,
 ) -> TrainState:
     """One full AlphaZero loop: each iteration self-plays, buffers, and trains;
     every ``arena_every`` iterations (when ``arena_games`` > 0) it scores the net
     vs. ``lookahead(heuristic)``. Per-iteration RNG derives from ``seed`` and the
-    iteration index, so with ``resume`` the run continues bit-exactly from the
-    full-state checkpoint under ``checkpoint_dir`` (written every
-    ``checkpoint_every`` iterations). ``on_iter(i, metrics, state)`` runs after
-    each iteration. Returns the final :class:`TrainState`."""
+    iteration index, so ``resume_from`` (a prior ``trainstate`` checkpoint)
+    continues the run bit-exactly; the full-state checkpoint is written to
+    ``checkpoint_dir`` every ``checkpoint_every`` iterations.
+    ``on_iter(i, metrics, state)`` runs after each iteration. Returns the final
+    :class:`TrainState`."""
     optimizer = optax.adamw(lr, weight_decay=weight_decay)
     buffer = replay_buffer(
         max_size=buffer_max, min_size=buffer_min, batch_size=batch_size
@@ -215,11 +216,7 @@ def learn(
         best=jnp.float32(-1.0),
     )
     ckpt = Path(checkpoint_dir) / "trainstate" if checkpoint_dir is not None else None
-    state = (
-        load_train_state(ckpt, fresh)
-        if resume and ckpt is not None and ckpt.exists()
-        else fresh
-    )
+    state = load_train_state(resume_from, fresh) if resume_from is not None else fresh
     params, opt_state, buf_state = state.params, state.opt_state, state.buffer_state
     best = float(state.best)
 

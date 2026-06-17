@@ -48,7 +48,7 @@ class AlphaZeroConfig(Config):
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str = "settlrl-0004-alphazero"
     checkpoint_every: int = 5  # iterations between full-state checkpoints
-    resume: bool = False  # continue bit-exactly from the run dir's checkpoint
+    resume_from: str = ""  # prior run dir to continue bit-exactly (its trainstate)
 
 
 VARIANTS: dict[str, dict[str, object]] = {
@@ -74,19 +74,35 @@ VARIANTS: dict[str, dict[str, object]] = {
 
 def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     params = init_az_params(jax.random.key(cfg.seed), (cfg.width,) * cfg.depth)
+
+    # Resume: restore the prior run's TrainState and continue its wandb run so
+    # the dashboard is one unbroken curve.
+    resume_dir = Path(cfg.resume_from) if cfg.resume_from else None
+    resume_from = None
+    wandb_id = None
+    if resume_dir is not None:
+        trainstate = resume_dir / "trainstate"
+        resume_from = trainstate if trainstate.exists() else None
+        id_file = resume_dir / "wandb_id.txt"
+        wandb_id = id_file.read_text().strip() if id_file.exists() else None
+
     wb = wandb.init(
         project=cfg.wandb_project,
         mode=cfg.wandb_mode,
         config=cfg.dump(),
         reinit=True,
         dir=str(run.dir),
+        id=wandb_id,
+        resume="allow" if wandb_id else None,
     )
+    (run.dir / "wandb_id.txt").write_text(str(wb.id))  # so a later run can resume it
+
     best = -1.0  # best arena win rate seen -> best.npz (the shippable net)
 
     def on_iter(i: int, metrics: dict[str, float], state: TrainState) -> None:
         nonlocal best
         run.log(iteration=i, **metrics)
-        wb.log({"iteration": i, **metrics})
+        wb.log({"iteration": i, **metrics}, step=i)  # explicit step: resume-safe
         winrate = metrics.get("arena_winrate")
         if winrate is not None and winrate > best:
             best = winrate
@@ -94,7 +110,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
     try:
         # learn writes the full-state checkpoint (run.dir/trainstate) for
-        # bit-exact resume; resume=True continues from it.
+        # bit-exact resume; resume_from continues a prior run's checkpoint.
         final = learn(
             params,
             n_iterations=cfg.n_iterations,
@@ -115,7 +131,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             seed=cfg.seed,
             checkpoint_dir=run.dir,
             checkpoint_every=cfg.checkpoint_every,
-            resume=cfg.resume,
+            resume_from=resume_from,
             on_iter=on_iter,
         )
     finally:
