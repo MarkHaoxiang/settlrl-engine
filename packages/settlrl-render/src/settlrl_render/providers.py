@@ -128,7 +128,6 @@ class ProviderRegistry:
         self, client: httpx.Client | None = None, local_bots: bool = True
     ) -> None:
         self._client = client or httpx.Client(timeout=_DEFAULT_TIMEOUT)
-        self._owns_client = client is None
         self._local_bots = local_bots
         self._remotes: dict[str, RemoteBotProvider] = {}
         self._lock = threading.Lock()
@@ -186,7 +185,3 @@ class ProviderRegistry:
                 {"name": n, "base_url": p.base_url, "kinds": sorted(p.kinds)}
                 for n, p in self._remotes.items()
             ]
-
-    def close(self) -> None:
-        if self._owns_client:
-            self._client.close()

@@ -283,8 +283,7 @@ class Auth:
                 )
             # Configured admin emails are kept in sync on each login.
             if self._is_admin_email(user.email) and not user.is_admin:
-                self.store.set_admin(user.email, True)
-                user = User(id=user.id, email=user.email, is_admin=True)
+                user = self.store.set_admin(user.email) or user
             token = self.store.mint_session(user.id, self.session_ttl)
             return TokenModel(access_token=token, user=UserModel.of(user))
 
