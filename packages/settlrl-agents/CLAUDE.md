@@ -148,7 +148,7 @@ One search algorithm lives in `search/__init__.py` — `make_search`, a
 re-determinizing Gumbel-MuZero (the ISMCTS fix for hidden state). It replaced
 the former `mcts` (frozen-world PIMC) / `smcts` (chance-node) / `ismcts` /
 `lookahead` quartet; the consolidation rationale and the evidence retired with
-each are below. `docs/ismcts.md` holds the taxonomy and the frame audit.
+each are below.
 
 The embedding is the **action path from the root**, not a state: `mctx` calls
 `recurrent_fn` exactly once per simulation with a fresh rng, so that call draws

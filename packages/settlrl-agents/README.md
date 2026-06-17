@@ -16,15 +16,13 @@ All kinds work at any player count. `POLICIES` maps every shipped agent by name 
 - `greedy` — scripted priorities (city > settlement > dev card > road), pip-weighted placement and robber moves; trades with intent — ports surplus into whatever its next build is missing and accepts offers paid from surplus that advance it (it never proposes).
 - `planner` — a stateful decision tree with tactical lookahead: adopts a build goal (city upgrade, road-path-plus-settlement expansion, a Longest Road grab, dev buy) scored by production-weighted value against the rounds it takes to afford — and against the *race*: a spot an opponent's road already touches is theirs, not yours. It saves toward the goal across turns and switches only when a rival goal clearly outscores it. Tactical picks — setup spots, robber targets, discards, trade responses, surplus spending — argmax a one-step lookahead, near-ties broken by the opponents' best reply; it also chains own-turn pairs the one-ply agents cannot see (a port trade that enables a build this same turn). Overflow hands bank into dev cards; an idle robber gets a spare knight.
 - `lookahead` — one-step lookahead: applies every legal action to a sampled world and picks the successor the value function scores best.
-- `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator, the value function at the leaves, and the one-step value sweep as its root prior; searches an ensemble of sampled worlds and averages their action weights.
+- `mcts` — Gumbel-MuZero tree search ([mctx](https://github.com/google-deepmind/mctx)) using the engine as its simulator and the value function at the leaves; it samples a fresh world from the seat's belief each simulation, so the search integrates over opponents' hidden cards rather than fixing one guess. `lookahead` is the same search at zero simulations.
 
 The search agents act on a sampled world consistent with everything the seat knows: stochastic outcomes are their own samples (not the environment's), opponents' hidden cards are dealt from the player's honest belief — they never act on information the seat could not know. With two players the belief pins the opponent's resources exactly, so only dev-card identities are ever sampled.
 
-Two-player strength (seat-swapped, 200–800-game matches): `planner` and `mcts` are tied at the top — planner vs mcts reads ~48–50% across runs, and both beat `lookahead` (planner ~52–55%, mcts 56%) — all well over `greedy` (planner 85%, lookahead 84–87% against it), with greedy beating random 99%. With seats rotated, one lookahead wins 65% against two greedies at three players (chance 33%), and one mcts wins 62% against two lookaheads (36% against three at four players, chance 25% — measured before the June 12 trade/value upgrade, which both sides share).
-
 ## Value functions
 
-A `ValueFunction` scores a board for one player (higher is better). `heuristic_value` is the shipped hand-written one: victory points (weighted up superlinearly near the win), pip-weighted production (wheat and ore at a premium) and its diversity across both resources and dice numbers, expansion (roads and reachable settlement spots), progress toward the next build, hand quality with a discard-risk penalty and a scarcity premium on cards the player cannot produce, dev cards (held knights counting toward the army race), and Largest Army progress — all relative to the strongest opponent. `make_heuristic(**weights)` builds a variant with your own weights, and `make_linear(weights)` builds a value from any named-coefficient fit over the engineered features; `lookahead` and `mcts` accept any value function via `make_greedy(value)` / `make_mcts(value)`.
+A `ValueFunction` scores a board for one player (higher is better). `heuristic_value` is the shipped hand-written one: it weighs victory points, production and its diversity, expansion and progress toward the next build, hand quality, and the development-card and Largest Army races — all relative to the strongest opponent. `make_heuristic(**weights)` builds a variant with your own weights, and `make_linear(weights)` builds a value from any named-coefficient fit over the engineered features. `lookahead` and `mcts` accept any value function via `make_search(value)`.
 
 ## Evaluation
 
@@ -61,8 +59,6 @@ a=113 b=87 n=200 rate=56.5% se=3.5% (chance 50.0%)
 
 `--json` emits the result as one JSON object — the machine-readable form the
 experiment gates consume (see `experiments/README.md` at the repo root).
-
-Future tools (tournaments, ...) will hang off the same entry point as subcommands.
 
 ## Layout
 

@@ -3,8 +3,8 @@
 Learned value and policy functions for [settlrl-agents](../settlrl-agents).
 
 Models plug into the agents through their existing seams: a value model is a
-`ValueFunction` and a policy model a `PolicyPrior`, so `lookahead`, `mcts`,
-and `smcts` consume them unchanged — `make_mcts(make_net_value(params),
+`ValueFunction` and a policy model a `PolicyPrior`, so the search agents consume
+them unchanged — `make_search(make_net_value(params),
 prior=make_net_prior(params))`.
 
 - `features(layout, state, player)` — the position as a flat vector from one
@@ -17,8 +17,3 @@ prior=make_net_prior(params))`.
   loss (the scalar head is a win-probability logit); `save_params` /
   `load_params` move params through `.npz` artifacts, so a trained model
   needs nothing beyond jax to run.
-
-Roadmap (gated): outcome regression on lookahead self-play, adopted only if
-`lookahead(net)` beats `lookahead(heuristic)` head-to-head; then the
-depth-scaling rerun in mcts/smcts; then policy distillation and self-play
-iteration.

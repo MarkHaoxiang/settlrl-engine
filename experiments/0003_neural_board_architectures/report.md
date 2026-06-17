@@ -77,7 +77,7 @@ representation is the right seam for settlrl-learn Stage 1. Before promoting:
 close the last gap to (and ideally past) the engineered baseline on `win` with
 more data / capacity / tuning, then gate a `lookahead(gnn_value)` through
 `settlrl-agents bench` per the staged plan. The leaf-is-the-ceiling finding in
-`settlrl-agents/docs/ismcts.md` is the reason this matters: search only starts
+`settlrl-agents`'s search notes is the reason this matters: search only starts
 paying once the leaf improves, and this shows a learnable leaf is within reach.
 
 Open levers: deeper/wider GNN, more samples, lookahead-agent data (greedy

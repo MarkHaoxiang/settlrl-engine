@@ -2,43 +2,20 @@
 
 Web-based renderer for settlrl-engine. FastAPI serves board state over a JSON API; a Vite + React + TypeScript frontend renders the board as SVG.
 
-A menu lets you choose between two modes, each at its own URL:
+A menu lets you choose between two modes, each at its own URL.
 
-- **Play** (`/play`) — a live, playable game. Each seat is configured per game as a human
-  sharing the screen (hotseat) or a bot (a `settlrl-agents` policy, e.g. random or greedy —
-  search bots expose their build parameters, like `mcts`'s simulation budget, behind the seat's gear button);
-  with no human seats the game plays itself as a spectated bot match. Input follows the board:
-  every placement you can currently make is marked on the board in your colour (hover to
-  preview the piece) — click it and confirm in a popup there (which shows the build cost, or
-  who to rob). The hand is live too: click a glowing development card to play it (resource
-  picks come from a popover) and resource cards to discard after a 7 — a knight can also be
-  played straight off the robber pawn, which lights up to take the click. Trading happens on
-  the table as well: click the bank pile of the resource you want and a picker shows what to
-  give and how many (your best port rate); click an opponent's hand pile to compose a 1:1
-  offer (they accept or reject on their turn, the cards then crossing the table); and buy a
-  development card by clicking the bank's deck. A small bottom bar keeps the rest (answer a
-  trade, end turn — the dice rest in the table
-  corner beside whoever's turn it is and take the click to roll); the top bar holds New
-  game and a light/dark theme toggle. The scene is a top-down table (zoom, pan, and spin it — mouse, touch, or keyboard:
-  arrows pan, +/− zoom, [ ] spin, 0 re-fits):
-  the bank's card piles (true to card scale) sit left of the board, and each seat's play
-  area lines its table edge — face-down hand and dev piles plus their unbuilt roads,
-  settlements, and cities, so supplies are read straight off the table. The bar
-  also shows the acting human's hand (resources + dev cards by type). The right column opens
-  with the seats in playing order (⭐ points, 🎴 cards, 🃏 devs — and 🔍 to inspect an
-  opponent's proven hand bounds, i.e. public card counting) over the chat panel, which doubles
-  as the game log: the server logs every move as it is played (and the win), and
-  humans can post messages. A help page (`/help`, the **?** button top-left) documents the
-  controls and icons. On entry — and from the
-  **New game** button — a dialog configures the next game: player count (2 or 4), what controls
-  each seat, seating with several humans (hotseat on this screen, or online — you take the first
-  seat and the others join through the invite link), number-token placement (random or spiral),
-  and an optional seed; cancelling keeps the game in progress.
-- **Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the
-  JSON from `GET /api/game/record`) or the live game as played so far, then scrub anywhere
-  with the slider, step move by move, or press play; the log panel fills in as the game
-  advances, and the record can be saved back to a file. The server replays the record through
-  the engine once and serves the board after every move.
+**Play** (`/play`) — a live, playable game. Each seat is configured per game as a human sharing the screen (hotseat) or a bot (a `settlrl-agents` policy); with no human seats the game plays itself as a spectated bot match. Search bots expose their build parameters, like `mcts`'s simulation budget, behind the seat's gear button. The interface is the table itself:
+
+- **Board** — every placement you can currently make is marked in your colour (hover to preview the piece); click it and confirm in a popup that shows the build cost or who to rob.
+- **Hand** — click a glowing development card to play it (resource picks come from a popover), or resource cards to discard after a 7; a knight can also be played straight off the robber pawn, which lights up to take the click.
+- **Trading** — click a bank resource pile to maritime-trade at your best port rate, or an opponent's hand pile to compose a 1:1 offer they answer on their turn; buy a development card from the bank's deck.
+- **Table scene** — top-down, with zoom, pan, and spin (mouse, touch, or keyboard: arrows pan, `+`/`−` zoom, `[` `]` spin, `0` re-fits). The bank's card piles sit left of the board; each seat's play area lines its table edge with its face-down hand and dev piles and unbuilt roads, settlements, and cities. The dice rest in the corner beside the acting seat and take the click to roll.
+- **Bars and panels** — a bottom bar shows the acting human's hand and the remaining actions (answer a trade, end turn); the top bar holds New game and a light/dark theme toggle. The right column lists the seats in playing order (points, cards, devs, and 🔍 to inspect an opponent's proven hand bounds) above a chat panel that doubles as the game log.
+- **New game** — a dialog (on entry and from the New game button) sets player count (2 or 4), what controls each seat, seating across several humans (hotseat here, or online via an invite link), number-token placement (random or spiral), and an optional seed.
+
+A help page (`/help`, the **?** button) documents the controls and icons.
+
+**Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the JSON from `GET /api/games/{id}/record`) or the live game so far, then scrub with the slider, step move by move, or press play; the log fills in as the game advances, and the record can be saved back to a file.
 
 Each game is driven through `settlrl-engine`'s single-game PettingZoo-AEC env
 (`settlrl_engine.env.aec`); the server holds many live games at once, addressed by id.
@@ -153,8 +130,8 @@ games.example.com {
 
 ## Accounts
 
-Accounts are optional: anonymous play (claim a seat, get a per-seat token) works
-exactly as before. Registering gives a player a persistent identity and lets an
+Accounts are optional: anonymous play — claim a seat, get a per-seat token —
+works without one. Registering gives a player a persistent identity and lets an
 operator mark some users as **admins**, who manage the bot services below.
 
 Accounts are handled by [fastapi-users](https://fastapi-users.github.io/fastapi-users/).
@@ -176,9 +153,9 @@ snapshot's `your_seats` lists the seats the requester owns either way.
 ## Bot services
 
 Where a seat's bot moves are computed is pluggable. By default the built-in
-`settlrl-agents` policies run **in-process** (no change to how games are
-served). They can instead — or additionally — run in a separate **bot service**,
-so the agent compute is deployed and scaled apart from the game server.
+`settlrl-agents` policies run **in-process**. They can instead — or
+additionally — run in a separate **bot service**, so the agent compute is
+deployed and scaled apart from the game server.
 
 A bot service is a small, stateless HTTP app (`settlrl-render-bot`) speaking a
 standardized two-call API:
