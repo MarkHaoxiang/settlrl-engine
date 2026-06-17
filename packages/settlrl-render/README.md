@@ -166,6 +166,12 @@ scrypt and accounts persist in SQLite (`users.db` under the state dir, or
 `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
 `GET /api/auth/me`.
 
+**Seats follow the account.** A seat claimed while signed in is tied to your
+user id, not just the per-device seat token, so you are recognised — and can
+resume your games (`GET /api/me/games`) — on any device without carrying the
+token. Send the bearer token alongside (or instead of) `X-Seat-Tokens`; each
+snapshot's `your_seats` lists the seats the requester owns either way.
+
 ## Bot services
 
 Where a seat's bot moves are computed is pluggable. By default the built-in
@@ -251,6 +257,7 @@ BASE=http://localhost:8000 npm run e2e
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
 | `GET /api/bots` | Bot kinds available for seats (built-in + registered remote services), each with the player counts it supports and its configurable parameters |
 | `POST /api/auth/register` · `/login` · `/logout` · `GET /api/auth/me` | Optional accounts (OAuth2 password flow; see [Accounts](#accounts)) |
+| `GET /api/me/games` | The signed-in user's live games — seats follow the account across devices |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
