@@ -110,16 +110,17 @@ every slot) to make room.
 
 **Persistence.** Without `SETTLRL_RENDER_STATE_DIR`, games live only in memory and
 a restart loses them. Point it at a (mounted) directory and each game is
-journalled there — its setup plus every move, seat claim, and chat line — and
-replayed back into the registry on the next startup, so a deploy or crash
-resumes games in progress, seat tokens and all. Bot pacing restarts for resumed
-games. Evicted games' files are removed.
+journalled — its setup plus every move, seat claim, and chat line — into the same
+SQLite database as accounts (`settlrl.db` there) and replayed back into the
+registry on the next startup, so a deploy or crash resumes games in progress,
+seat tokens and all. Bot pacing restarts for resumed games. Evicted games are
+dropped from the database.
 
 Anyone can create games; the concurrency cap queues them past
 `SETTLRL_RENDER_MAX_ACTIVE`. For a public deployment, front the server with a
-proxy that rate-limits — the built-in caps (stream cap, a 2 MB request-body
-limit, a replay move-count cap, and high-entropy game ids) bound resource use
-but are not a substitute for one.
+proxy that rate-limits — the built-in caps (a 2 MB request-body limit, a replay
+move-count cap, and high-entropy game ids) bound resource use but are not a
+substitute for one.
 
 The repo-root `Dockerfile` builds a self-contained image (frontend compiled
 in, CPU JAX):
@@ -156,13 +157,15 @@ Accounts are optional: anonymous play (claim a seat, get a per-seat token) works
 exactly as before. Registering gives a player a persistent identity and lets an
 operator mark some users as **admins**, who manage the bot services below.
 
+Accounts are handled by [fastapi-users](https://fastapi-users.github.io/fastapi-users/).
 Login uses the OAuth2 password flow (`POST /api/auth/login` returns a bearer
-token presented as `Authorization: Bearer …`); passwords are hashed with stdlib
-scrypt and accounts persist in SQLite (`users.db` under the state dir, or
+token presented as `Authorization: Bearer …`); tokens are stored server-side, so
+`POST /api/auth/logout` truly revokes one. Accounts, tokens, and games all share
+the one SQLite database (`settlrl.db` under the state dir, or
 `SETTLRL_RENDER_USER_DB`). Emails listed in `SETTLRL_RENDER_ADMIN_EMAILS`
 (comma-separated) are granted admin on register and login. Endpoints:
 `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
-`GET /api/auth/me`.
+`GET /api/users/me`.
 
 **Seats follow the account.** A seat claimed while signed in is tied to your
 user id, not just the per-device seat token, so you are recognised — and can
@@ -254,7 +257,7 @@ BASE=http://localhost:8000 npm run e2e
 | `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board). `404` until a replay is loaded |
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
 | `GET /api/bots` | Bot kinds available for seats (built-in + registered remote services), each with the player counts it supports and its configurable parameters |
-| `POST /api/auth/register` · `/login` · `/logout` · `GET /api/auth/me` | Optional accounts (OAuth2 password flow; see [Accounts](#accounts)) |
+| `POST /api/auth/register` · `/login` · `/logout` · `GET /api/users/me` | Optional accounts (OAuth2 password flow; see [Accounts](#accounts)) |
 | `GET /api/me/games` | The signed-in user's live games — seats follow the account across devices |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
@@ -283,12 +286,15 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/settlrl-render/
 ├── src/settlrl_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
-│   ├── server.py        # create_app + thin routes: auth, locking, status codes, SSE
-│   ├── auth.py          # Optional accounts: sqlite UserStore + OAuth2 login + deps
-│   ├── driver.py        # Per-game daemon: bot pacing (local or remote) + idle-turn timeouts
+│   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
+│   ├── routers/         # API routes by area: games, replay, bots, me (build(deps))
+│   ├── deps.py          # Shared request helpers + the runtime context (Deps) routers close over
+│   ├── auth.py          # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB
+│   ├── db.py            # The one async SQLAlchemy DB: users, login tokens, and game journals
+│   ├── driver.py        # Per-game asyncio task: bot pacing (local or remote) + idle-turn timeouts
 │   ├── views.py         # Per-seat snapshots: the hidden-information boundary
 │   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
-│   ├── store.py         # Crash-recovery journals: persist games, replay on boot
+│   ├── store.py         # Crash-recovery journals on the shared DB (write-behind), replay on boot
 │   ├── openapi.py       # Schema dump backing the generated frontend types
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
 │   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots
