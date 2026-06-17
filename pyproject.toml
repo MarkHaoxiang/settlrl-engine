@@ -29,6 +29,7 @@ dev = [
     "equinox>=0.13.8",
     "wandb>=0.27.2",
     "jraph>=0.0.6.dev0",
+    "flashbax>=0.1.0",
 ]
 # GPU support can't be marker-detected (markers see the OS, not the hardware),
 # so it's a *default* group on Linux: a plain `uv sync` no longer prunes the
@@ -64,7 +65,7 @@ module = ["jax.*", "jaxlib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pettingzoo.*", "gymnasium.*", "sklearn.*", "jraph.*", "optax.*", "wandb.*"]
+module = ["pettingzoo.*", "gymnasium.*", "sklearn.*", "jraph.*", "optax.*", "wandb.*", "flashbax.*"]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
