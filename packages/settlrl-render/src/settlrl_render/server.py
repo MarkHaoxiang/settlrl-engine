@@ -256,6 +256,7 @@ def create_app(
     bots = (
         providers if providers is not None else ProviderRegistry(local_bots=local_bots)
     )
+    bots_owned = providers is None  # only close the HTTP client we created
     replays = _ReplaySlot()
     # The live bot/timeout driver tasks, so the lifespan can cancel them on
     # shutdown; each removes itself when it ends (game over or evicted).
@@ -283,6 +284,8 @@ def create_app(
             task.cancel()
         if store is not None:
             await store.aclose()  # flush queued writes before the engine closes
+        if bots_owned:
+            await bots.aclose()
         await database.dispose()
 
     app = FastAPI(title="Settlrl Render", lifespan=lifespan, root_path=root_path)
@@ -557,14 +560,14 @@ def create_app(
         return bots.providers()
 
     @app.post("/api/admin/bot-providers", status_code=201)
-    def register_bot_provider(
+    async def register_bot_provider(
         req: _ProviderRequest, _: Annotated[object, Depends(auth.admin_user)]
     ) -> dict[str, object]:
         """Register (or replace) a remote bot service by name + base URL; its
         bot kinds join the catalog. ``400`` if it is unreachable or a kind
         clashes with an existing one (admin only)."""
         try:
-            provider = bots.register(req.name, req.base_url)
+            provider = await bots.register(req.name, req.base_url)
         except RemoteBotError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {

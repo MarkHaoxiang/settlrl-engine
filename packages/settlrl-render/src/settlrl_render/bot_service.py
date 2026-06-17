@@ -23,6 +23,7 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
+import anyio.to_thread
 from fastapi import FastAPI, HTTPException
 
 from .bots import bot_catalog
@@ -37,7 +38,7 @@ _CACHE_CAP = 64
 class _SessionCache:
     """One replayed :class:`GameSession` per ``game_id``, at its applied move
     count, so a request only replays moves beyond what's cached. Bounded LRU;
-    thread-safe (the worker handles requests in a threadpool)."""
+    thread-safe (replay is offloaded to a worker thread)."""
 
     def __init__(self, cap: int = _CACHE_CAP) -> None:
         self._cap = cap
@@ -71,16 +72,18 @@ def create_bot_app() -> FastAPI:
         return bot_catalog()
 
     @app.post("/act")
-    def act(req: ActRequest) -> ActResponse:
+    async def act(req: ActRequest) -> ActResponse:
         try:
-            session = cache.session_for(req.game_id, req.setup, req.moves)
+            session = await anyio.to_thread.run_sync(
+                cache.session_for, req.game_id, req.setup, req.moves
+            )
         except (KeyError, ValueError, TypeError, IllegalActionError) as exc:
             raise HTTPException(
                 status_code=422, detail=f"cannot reconstruct game: {exc}"
             ) from exc
         if session.acting_seat() != req.seat:
             raise HTTPException(status_code=409, detail="requested seat is not acting")
-        flat = session.bot_choice()
+        flat = await anyio.to_thread.run_sync(session.bot_choice)
         if flat is None:
             raise HTTPException(
                 status_code=409, detail="no bot move available for that seat"

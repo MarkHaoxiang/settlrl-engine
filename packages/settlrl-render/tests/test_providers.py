@@ -1,15 +1,19 @@
 """Tests for the bot-provider layer: the registry, the admin API that mutates
 it, and end-to-end remote dispatch through the driver.
 
-In-process remote services are reached with a FastAPI ``TestClient`` as the
-registry's HTTP client (a sync client bound to an ASGI app), so no sockets are
-opened.
+In-process remote services are reached with an ``httpx.AsyncClient`` over an
+``ASGITransport`` bound to a bot-service app, so no sockets are opened. The
+registry's ``register`` is async; the unit tests drive it under ``asyncio.run``,
+while the end-to-end tests register through the admin route so everything runs
+on the app's own event loop.
 """
 
+import asyncio
 import time
 from collections.abc import Iterator
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -17,6 +21,13 @@ from settlrl_render.bot_service import create_bot_app
 from settlrl_render.games import GameRegistry
 from settlrl_render.providers import ActRequest, ProviderRegistry, RemoteBotError
 from settlrl_render.server import create_app
+
+
+def _asgi_client(app: FastAPI) -> httpx.AsyncClient:
+    """An async client that dispatches in-process to ``app`` (no sockets)."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://svc"
+    )
 
 
 def _catalog_only_app(kind: str, counts: tuple[int, ...] = (2, 3, 4)) -> FastAPI:
@@ -45,44 +56,64 @@ def _erroring_act_app(kind: str) -> FastAPI:
 
 
 def test_register_merges_catalog_and_routes_kind() -> None:
-    reg = ProviderRegistry(client=TestClient(_catalog_only_app("alphacatan")))
-    reg.register("svc", "http://svc")
-    catalog = reg.catalog()
-    assert "alphacatan" in catalog  # remote kind joined
-    assert "random" in catalog  # local kinds still there
-    assert reg.remote_for("alphacatan") is not None
-    assert reg.remote_for("random") is None  # local
-    assert reg.providers()[0]["name"] == "svc"
+    async def go() -> None:
+        reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("alphacatan")))
+        await reg.register("svc", "http://svc")
+        catalog = reg.catalog()
+        assert "alphacatan" in catalog  # remote kind joined
+        assert "random" in catalog  # local kinds still there
+        assert reg.remote_for("alphacatan") is not None
+        assert reg.remote_for("random") is None  # local
+        assert reg.providers()[0]["name"] == "svc"
+        await reg.aclose()
+
+    asyncio.run(go())
 
 
 def test_register_rejects_kind_clash_with_local() -> None:
-    reg = ProviderRegistry(client=TestClient(_catalog_only_app("random")))
-    with pytest.raises(RemoteBotError, match="already provided"):
-        reg.register("svc", "http://svc")
+    async def go() -> None:
+        reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("random")))
+        with pytest.raises(RemoteBotError, match="already provided"):
+            await reg.register("svc", "http://svc")
+        await reg.aclose()
+
+    asyncio.run(go())
 
 
 def test_register_unreachable_service_errors() -> None:
-    # A client pointed at an app with no /catalog route -> 404 -> RemoteBotError.
-    reg = ProviderRegistry(client=TestClient(FastAPI()))
-    with pytest.raises(RemoteBotError):
-        reg.register("svc", "http://svc")
+    async def go() -> None:
+        # A client pointed at an app with no /catalog route -> 404 -> error.
+        reg = ProviderRegistry(client=_asgi_client(FastAPI()))
+        with pytest.raises(RemoteBotError):
+            await reg.register("svc", "http://svc")
+        await reg.aclose()
+
+    asyncio.run(go())
 
 
 def test_unregister() -> None:
-    reg = ProviderRegistry(client=TestClient(_catalog_only_app("alphacatan")))
-    reg.register("svc", "http://svc")
-    assert reg.unregister("svc")
-    assert "alphacatan" not in reg.catalog()
-    assert not reg.unregister("svc")
+    async def go() -> None:
+        reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("alphacatan")))
+        await reg.register("svc", "http://svc")
+        assert reg.unregister("svc")
+        assert "alphacatan" not in reg.catalog()
+        assert not reg.unregister("svc")
+        await reg.aclose()
+
+    asyncio.run(go())
 
 
 def test_local_bots_off_offers_only_remote_kinds() -> None:
-    reg = ProviderRegistry(
-        client=TestClient(_catalog_only_app("alphacatan")), local_bots=False
-    )
-    assert reg.catalog() == {}  # nothing until a provider registers
-    reg.register("svc", "http://svc")
-    assert set(reg.catalog()) == {"alphacatan"}  # no built-ins leaked
+    async def go() -> None:
+        reg = ProviderRegistry(
+            client=_asgi_client(_catalog_only_app("alphacatan")), local_bots=False
+        )
+        assert reg.catalog() == {}  # nothing until a provider registers
+        await reg.register("svc", "http://svc")
+        assert set(reg.catalog()) == {"alphacatan"}  # no built-ins leaked
+        await reg.aclose()
+
+    asyncio.run(go())
 
 
 # -- admin API ----------------------------------------------------------------
@@ -97,8 +128,19 @@ def _login(client: TestClient, email: str) -> str:
     )
 
 
+def _register_remote(client: TestClient, name: str = "svc") -> None:
+    """Register the remote service via the admin route (on the app's loop)."""
+    tok = _login(client, "a@x.com")
+    resp = client.post(
+        "/api/admin/bot-providers",
+        json={"name": name, "base_url": "http://svc"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+
 def test_admin_register_provider_requires_admin() -> None:
-    reg = ProviderRegistry(client=TestClient(_catalog_only_app("alphacatan")))
+    reg = ProviderRegistry(client=_asgi_client(_catalog_only_app("alphacatan")))
     with TestClient(
         create_app(
             GameRegistry(),
@@ -136,6 +178,7 @@ def test_admin_register_provider_requires_admin() -> None:
             client.delete("/api/admin/bot-providers/svc", headers=h).status_code == 404
         )
         assert "alphacatan" not in client.get("/api/bots").json()
+    asyncio.run(reg.aclose())
 
 
 # -- end-to-end dispatch ------------------------------------------------------
@@ -155,14 +198,20 @@ def _drive_to_terminal(client: TestClient, body: dict[str, object]) -> dict[str,
 @pytest.fixture()
 def remote_only_client() -> Iterator[TestClient]:
     """A game server with no local agent execution; all bots run in a separate
-    in-process bot service. The ``with`` form keeps one loop alive so the bot
-    driver task runs across requests."""
-    reg = ProviderRegistry(client=TestClient(create_bot_app()), local_bots=False)
-    reg.register("svc", "http://svc")
+    in-process bot service, registered via the admin route once the loop is up."""
+    reg = ProviderRegistry(client=_asgi_client(create_bot_app()), local_bots=False)
     with TestClient(
-        create_app(GameRegistry(), providers=reg, bot_delay=0.0, warm=False)
+        create_app(
+            GameRegistry(),
+            providers=reg,
+            bot_delay=0.0,
+            warm=False,
+            admin_emails=frozenset({"a@x.com"}),
+        )
     ) as client:
+        _register_remote(client)
         yield client
+    asyncio.run(reg.aclose())
 
 
 def test_remote_bots_play_a_game_to_completion(remote_only_client: TestClient) -> None:
@@ -186,12 +235,18 @@ def test_remote_failure_falls_back_and_game_progresses() -> None:
     """A remote service that errors on every move must not stall the game: the
     driver falls back to a local random move, so moves keep coming."""
     reg = ProviderRegistry(
-        client=TestClient(_erroring_act_app("flaky")), local_bots=False
+        client=_asgi_client(_erroring_act_app("flaky")), local_bots=False
     )
-    reg.register("svc", "http://svc")
     with TestClient(
-        create_app(GameRegistry(), providers=reg, bot_delay=0.0, warm=False)
+        create_app(
+            GameRegistry(),
+            providers=reg,
+            bot_delay=0.0,
+            warm=False,
+            admin_emails=frozenset({"a@x.com"}),
+        )
     ) as client:
+        _register_remote(client)
         gid = client.post(
             "/api/games",
             json={
@@ -211,3 +266,4 @@ def test_remote_failure_falls_back_and_game_progresses() -> None:
                 break
             time.sleep(0.05)
         assert snap["status"]["terminal"] or len(snap["log"]) > 12
+    asyncio.run(reg.aclose())

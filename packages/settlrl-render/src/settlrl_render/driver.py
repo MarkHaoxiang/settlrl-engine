@@ -117,17 +117,16 @@ async def _bot_move(
     """The acting bot seat's move — locally for built-in kinds, or via the
     seat's remote provider (replay-based). A remote failure or an illegal answer
     falls back to a local random move, so a misbehaving service never stalls the
-    game. The (blocking) engine and remote calls run in a worker thread under the
-    game lock; the seat being a bot's, no human request races it meanwhile."""
+    game. The blocking engine steps run in a worker thread and the remote call is
+    awaited, both under the game lock; the seat being a bot's, no human request
+    races it meanwhile."""
     session = handle.session
     remote = providers.remote_for(session.seats[seat]) if providers else None
     if remote is None:
         return await anyio.to_thread.run_sync(session.bot_step)
     setup, moves = session.setup.to_dict(), session.moves_flat()
     try:
-        flat = int(
-            await anyio.to_thread.run_sync(remote.act, handle.id, setup, moves, seat)
-        )
+        flat = int(await remote.act(handle.id, setup, moves, seat))
         await anyio.to_thread.run_sync(session.apply, flat)
         return flat
     except (RemoteBotError, IllegalActionError):
