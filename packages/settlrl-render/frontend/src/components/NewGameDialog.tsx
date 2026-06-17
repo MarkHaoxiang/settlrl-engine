@@ -29,19 +29,22 @@ const labelStyle: React.CSSProperties = {
 const botLabel = (kind: string) =>
   kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1);
 
-// A labelled row of toggle buttons, one per option.
+// A labelled row of toggle buttons, one per option. `optionTitle` adds per-
+// option hover help.
 function Toggle<T extends string | number>({
   label,
   options,
   value,
   onChange,
   trailing,
+  optionTitle,
 }: {
   label: string;
   options: readonly T[];
   value: T;
   onChange: (v: T) => void;
   trailing?: React.ReactNode;
+  optionTitle?: (o: T) => string;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -49,6 +52,7 @@ function Toggle<T extends string | number>({
       {options.map((o) => (
         <button
           key={o}
+          title={optionTitle?.(o)}
           style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12, ...(value === o ? selectedStyle : {}) }}
           onClick={() => onChange(o)}
         >
@@ -59,6 +63,12 @@ function Toggle<T extends string | number>({
     </div>
   );
 }
+
+// Hover help for the number-placement options.
+const PLACEMENT_HELP: Record<NumberPlacement, string> = {
+  random: "Number tokens shuffled uniformly across the land tiles.",
+  spiral: "The rulebook's variable setup: tokens A–R laid alphabetically along a counter-clockwise spiral.",
+};
 
 // The parameter rows for one configured bot seat. Values not overridden show
 // (and reset to) the catalog defaults; only overrides are sent to the server.
@@ -115,9 +125,8 @@ export default function NewGameDialog({
 }) {
   const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
   const [numberPlacement, setNumberPlacement] = useState<NumberPlacement>("random");
-  const [seed, setSeed] = useState("");
-  // The map shown when the seed box is left blank; "🎲 New map" rerolls it.
-  const [randomSeed, setRandomSeed] = useState(() => Math.floor(Math.random() * 65536));
+  // The concrete map seed (always shown); the dice rerolls it, the input sets it.
+  const [seed, setSeed] = useState(() => Math.floor(Math.random() * 65536));
   const [preview, setPreview] = useState<Board | null>(null);
   // With several human seats: all on this screen, or just yours (the others
   // join through the invite link).
@@ -131,6 +140,8 @@ export default function NewGameDialog({
   ]);
   // The seat whose bot is being picked (the in-dialog bot page), or null.
   const [pickerSeat, setPickerSeat] = useState<number | null>(null);
+  // Whether the in-dialog map picker page is open.
+  const [mapOpen, setMapOpen] = useState(false);
   const [bots, setBots] = useState<Record<string, BotSpec>>({});
 
   useEffect(() => {
@@ -151,27 +162,23 @@ export default function NewGameDialog({
     );
   }, [nPlayers, bots]);
 
-  // Escape backs out of the bot picker first, then closes the dialog.
+  // Escape backs out of a sub-page (bot / map) first, then closes the dialog.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (pickerSeat !== null) setPickerSeat(null);
+      else if (mapOpen) setMapOpen(false);
       else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, pickerSeat]);
-
-  // The concrete seed the preview shows and Start uses: the typed one, else the
-  // current random map.
-  const typed = Number(seed);
-  const effectiveSeed = seed.trim() === "" || Number.isNaN(typed) ? randomSeed : typed;
+  }, [onClose, pickerSeat, mapOpen]);
 
   // Keep a live board preview for the chosen seed / count / number placement.
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
-      fetchPreview(effectiveSeed, nPlayers, numberPlacement)
+      fetchPreview(seed, nPlayers, numberPlacement)
         .then((b) => !cancelled && setPreview(b))
         .catch(() => !cancelled && setPreview(null));
     }, 150);
@@ -179,7 +186,7 @@ export default function NewGameDialog({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [effectiveSeed, nPlayers, numberPlacement]);
+  }, [seed, nPlayers, numberPlacement]);
 
   // Just the ocean board (no bank / seats) for the picker.
   const previewBoard = useMemo<Board | null>(
@@ -187,10 +194,7 @@ export default function NewGameDialog({
     [preview]
   );
 
-  const reroll = () => {
-    setSeed("");
-    setRandomSeed(Math.floor(Math.random() * 65536));
-  };
+  const reroll = () => setSeed(Math.floor(Math.random() * 65536));
 
   const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
 
@@ -204,7 +208,7 @@ export default function NewGameDialog({
 
   const start = () => {
     onStart({
-      seed: effectiveSeed,  // the seed the preview showed
+      seed,  // the seed the preview showed
       nPlayers,
       numberPlacement,
       seats: seats.slice(0, nPlayers),
@@ -278,6 +282,67 @@ export default function NewGameDialog({
     );
   }
 
+  // The map-picker page: number layout (with hover help), the seed (rerolled by
+  // the dice or typed in), and the live preview.
+  if (mapOpen) {
+    return (
+      <Overlay onClose={onClose}>
+        <div style={panelInner} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button style={{ ...buttonStyle, padding: "4px 10px", fontSize: 12 }} onClick={() => setMapOpen(false)}>
+              ‹ Back
+            </button>
+            <span style={{ fontSize: 16, fontWeight: 700 }}>Map</span>
+          </div>
+          <Toggle
+            label="Numbers"
+            options={["random", "spiral"] as const}
+            value={numberPlacement}
+            onChange={setNumberPlacement}
+            optionTitle={(o) => PLACEMENT_HELP[o]}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={labelStyle}>Seed</span>
+            <button
+              style={{ ...buttonStyle, padding: "5px 10px", fontSize: 14 }}
+              onClick={reroll}
+              title="Roll a new random map"
+            >
+              🎲
+            </button>
+            <input
+              type="number"
+              value={seed}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (e.target.value !== "" && Number.isFinite(v)) setSeed(Math.max(0, Math.round(v)));
+              }}
+              title="The map seed — reroll for a new one, or type a specific seed"
+              style={{ ...buttonStyle, cursor: "text", width: 110, padding: "5px 10px", fontSize: 12 }}
+            />
+          </div>
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              height: 240,
+              borderRadius: 8,
+              overflow: "hidden",
+              background: "#0D3B66",
+            }}
+          >
+            {previewBoard && <BoardView board={previewBoard} />}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button style={{ ...buttonStyle, ...selectedStyle }} onClick={() => setMapOpen(false)}>
+              Done
+            </button>
+          </div>
+        </div>
+      </Overlay>
+    );
+  }
+
   return (
     <Overlay onClose={onClose}>
       <div style={panelInner} onClick={(e) => e.stopPropagation()}>
@@ -317,41 +382,22 @@ export default function NewGameDialog({
             }
           />
         )}
-        <Toggle
-          label="Numbers"
-          options={["random", "spiral"] as const}
-          value={numberPlacement}
-          onChange={setNumberPlacement}
-        />
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={labelStyle}>Map</span>
           <button
-            style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12 }}
-            onClick={reroll}
-            title="Generate a new random map"
+            style={{
+              ...buttonStyle,
+              padding: "5px 12px",
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+            onClick={() => setMapOpen(true)}
+            title="Choose the map: seed and number layout"
           >
-            🎲 New map
+            🗺️ <span style={{ opacity: 0.8 }}>{numberPlacement} · #{seed}</span>
           </button>
-          <input
-            type="number"
-            placeholder="seed"
-            value={seed}
-            onChange={(e) => setSeed(e.target.value)}
-            title="Type a seed for a specific map, or leave blank and reroll"
-            style={{ ...buttonStyle, cursor: "text", width: 90, padding: "5px 10px", fontSize: 12 }}
-          />
-        </div>
-        <div
-          style={{
-            position: "relative",
-            width: "100%",
-            height: 200,
-            borderRadius: 8,
-            overflow: "hidden",
-            background: "#0D3B66",
-          }}
-        >
-          {previewBoard && <BoardView board={previewBoard} />}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button style={buttonStyle} onClick={onClose}>

@@ -26,7 +26,10 @@ const page = async () => {
 const A = await page();
 await A.goto(`${BASE}/play`);
 await A.waitForTimeout(600);
-await A.getByPlaceholder("seed").fill("7");
+// Pin a deterministic seed through the map picker (selector icon → seed → Done).
+await A.getByTitle(/choose the map/i).click();
+await A.getByTitle(/map seed/i).fill("7");
+await A.getByRole("button", { name: "Done", exact: true }).click();
 await A.getByRole("button", { name: "Start", exact: true }).click();
 await A.waitForTimeout(1500);
 check("create navigates to /play/{id}", A.url().includes("/play/"));
