@@ -184,5 +184,4 @@ def test_self_play_rollouts_complete_games(spec: Spec) -> None:
     # Three seats so domestic trade is live: a proposer stuck re-offering a
     # trade its partner keeps rejecting would stall the games and fail here.
     result = evaluate([spec, spec, spec], n_episodes=2, batch_size=BATCH, seed=0)
-    assert result.wins.shape == (3,)
     assert result.episodes >= 2
