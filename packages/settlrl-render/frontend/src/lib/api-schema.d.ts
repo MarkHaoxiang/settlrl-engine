@@ -130,9 +130,9 @@ export interface paths {
         };
         /**
          * Get Record
-         * @description The finished game as ``settlrl_engine.record`` JSON -- a
-         *     self-contained, replayable transcript. 409 while running: replaying a
-         *     record reconstructs hidden hands, so live games don't export.
+         * @description The finished game as ``GameRecord`` JSON -- a self-contained,
+         *     replayable transcript. 409 while running: replaying a record
+         *     reconstructs hidden hands, so live games don't export.
          */
         get: operations["get_record_api_games__game_id__record_get"];
         put?: never;
@@ -175,9 +175,9 @@ export interface paths {
         put?: never;
         /**
          * Post Replay
-         * @description Load a game record (the ``settlrl_engine.record`` JSON document) for
-         *     replay; returns the opening state. ``422`` if the record is malformed
-         *     or fails replay validation.
+         * @description Load a game record (the ``GameRecord`` JSON document) for replay;
+         *     returns the opening state. ``422`` if the record is malformed or fails
+         *     replay validation.
          */
         post: operations["post_replay_api_replay_post"];
         delete?: never;
@@ -412,10 +412,10 @@ export interface components {
     schemas: {
         /**
          * ActionModel
-         * @description One legal move for the acting player, decoded from the AEC flat action set.
+         * @description One legal move for the acting player.
          *
-         *     ``flat`` is the engine's flat action index (post it back to apply the move).
-         *     ``type`` is the lowercased :class:`ActionType` name. Depending on the type, at
+         *     ``flat`` is the renderer's flat action index (post it back to apply the
+         *     move). ``type`` is the lowercased action type. Depending on the type, at
          *     most one geometry/resource group below is populated; the rest stay ``None``.
          */
         ActionModel: {
@@ -461,7 +461,7 @@ export interface components {
          * BeliefModel
          * @description Card counting from one human seat's perspective.
          *
-         *     Everything here is derivable from public information (the engine's belief
+         *     Everything here is derivable from public information (the card-counting
          *     tracker), so showing it to that seat never leaks hidden state. The
          *     observer's own row is omitted — their hand is already on screen.
          */
@@ -547,7 +547,7 @@ export interface components {
         };
         /**
          * CubeModel
-         * @description A board vertex, in the engine's cube coordinates (q + r + s = ±1).
+         * @description A board vertex, in cube coordinates (q + r + s = ±1).
          */
         CubeModel: {
             /** Q */

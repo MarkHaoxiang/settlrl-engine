@@ -26,7 +26,7 @@ __all__ = ["N_FLAT", "decode_actions", "flat_for_action", "legal_flats", "to_act
 
 _NR = len(ref.RESOURCES)
 # Victim slots a robber/knight row can name: "no one" plus the four seats (the
-# full domain at every player count, exactly as the engine's flat table).
+# full domain at every player count, so the flat space is constant).
 _VICTIMS = (-1, 0, 1, 2, 3)
 
 # A row is (type, a, b, c): the lowercased action type and up to three int

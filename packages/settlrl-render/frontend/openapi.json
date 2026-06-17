@@ -375,7 +375,7 @@
   "/api/games/{game_id}/record": {
    "get": {
     "summary": "Get Record",
-    "description": "The finished game as ``settlrl_engine.record`` JSON -- a\nself-contained, replayable transcript. 409 while running: replaying a\nrecord reconstructs hidden hands, so live games don't export.",
+    "description": "The finished game as ``GameRecord`` JSON -- a self-contained,\nreplayable transcript. 409 while running: replaying a record\nreconstructs hidden hands, so live games don't export.",
     "operationId": "get_record_api_games__game_id__record_get",
     "parameters": [
      {
@@ -1297,7 +1297,7 @@
      "label"
     ],
     "title": "ActionModel",
-    "description": "One legal move for the acting player, decoded from the AEC flat action set.\n\n``flat`` is the engine's flat action index (post it back to apply the move).\n``type`` is the lowercased :class:`ActionType` name. Depending on the type, at\nmost one geometry/resource group below is populated; the rest stay ``None``."
+    "description": "One legal move for the acting player.\n\n``flat`` is the renderer's flat action index (post it back to apply the\nmove). ``type`` is the lowercased action type. Depending on the type, at\nmost one geometry/resource group below is populated; the rest stay ``None``."
    },
    "BankModel": {
     "properties": {
@@ -1355,7 +1355,7 @@
      "players"
     ],
     "title": "BeliefModel",
-    "description": "Card counting from one human seat's perspective.\n\nEverything here is derivable from public information (the engine's belief\ntracker), so showing it to that seat never leaks hidden state. The\nobserver's own row is omitted \u2014 their hand is already on screen."
+    "description": "Card counting from one human seat's perspective.\n\nEverything here is derivable from public information (the card-counting\ntracker), so showing it to that seat never leaks hidden state. The\nobserver's own row is omitted \u2014 their hand is already on screen."
    },
    "BoardModel": {
     "properties": {
@@ -1551,7 +1551,7 @@
      "s"
     ],
     "title": "CubeModel",
-    "description": "A board vertex, in the engine's cube coordinates (q + r + s = \u00b11)."
+    "description": "A board vertex, in cube coordinates (q + r + s = \u00b11)."
    },
    "DevCardCounts": {
     "properties": {

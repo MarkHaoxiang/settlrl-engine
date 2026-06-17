@@ -1,21 +1,21 @@
 """Persistence so live games survive a restart, on the shared async DB.
 
 A game is recorded as a header row -- the immutable ``(seed, n_players,
-number_placement, seats)`` it is fully determined by, per
-``settlrl_engine.record`` -- plus an ordered event log (a move, seat claim, or
-chat line per row), the :class:`~settlrl_render.storage.db.GameRow` / ``GameEvent``
-tables of the one :class:`~settlrl_render.storage.db.Database`.
+number_placement, seats)`` it is fully determined by -- plus an ordered event
+log (a move, seat claim, or chat line per row), the
+:class:`~settlrl_render.storage.db.GameRow` / ``GameEvent`` tables of the one
+:class:`~settlrl_render.storage.db.Database`.
 
 Writes are **write-behind**: callers (the registry, a mutator's ``bump``) enqueue
 synchronously and never await, and a single background task drains the queue
-against the DB in order. So the engine-driving code stays synchronous and the
+against the DB in order. So the game-driving code stays synchronous and the
 event loop never blocks on a commit. :meth:`GameStore.start` launches the writer;
 :meth:`GameStore.aclose` enqueues a sentinel and waits, draining everything
 queued before it -- so a clean shutdown loses nothing (only a hard crash can
 lose the last unwritten events).
 
-Reconstructing a live ``GameSession`` from a loaded game (replaying its moves
-through the engine) lives in ``games``, which owns the engine and bot drivers.
+Reconstructing a live ``GameSession`` from a loaded game (replaying its moves)
+lives in ``games``, which owns the game and bot drivers.
 """
 
 from __future__ import annotations

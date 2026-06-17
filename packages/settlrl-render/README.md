@@ -17,8 +17,8 @@ A help page (`/help`, the **?** button) documents the controls and icons.
 
 **Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the JSON from `GET /api/games/{id}/record`) or the live game so far, then scrub with the slider, step move by move, or press play; the log fills in as the game advances, and the record can be saved back to a file.
 
-Each game is driven through `settlrl-engine`'s single-game PettingZoo-AEC env
-(`settlrl_engine.env.aec`); the server holds many live games at once, addressed by id.
+Each game is a plain-Python `settlrl-reference` game; the server holds many live
+games at once, addressed by id.
 Claiming a human seat (creating or joining a game) issues a bearer token, and every request
 proves its seats via the `X-Seat-Tokens` header: snapshots are per-seat views — your own
 hand arrives in full, everyone else's only as public counts, and the legal-move list only
@@ -161,10 +161,11 @@ A bot service is a small, stateless HTTP app (`settlrl-render-bot`) speaking a
 standardized two-call API:
 
 - `GET /catalog` — the bot kinds it offers (same shape as `GET /api/bots`).
-- `POST /act` — given a game's setup and its flat moves so far (the data a
-  `settlrl_engine.record` carries), it replays them and returns the acting
-  seat's chosen flat action. No engine observation crosses the wire, so the two
-  sides only agree on the (stable) record format and flat action indexing.
+- `POST /act` — given a game's setup and its flat moves so far, it replays them
+  on a reference game and returns the acting seat's chosen flat action. The
+  agent reasons on an engine board bridged from that reference position; no
+  observation crosses the wire, so the two sides only agree on the (stable)
+  setup + flat action indexing.
 
 ```bash
 BOT_PORT=8100 uv run settlrl-render-bot
@@ -179,25 +180,22 @@ be seated like any built-in:
 | `POST /api/admin/bot-providers` | Register one `{ "name", "base_url" }` (admin); `400` if unreachable or a kind clashes |
 | `DELETE /api/admin/bot-providers/{name}` | Unregister one (admin) |
 
-Set `SETTLRL_RENDER_LOCAL_BOTS=0` to run the game server with **no** in-process
-agent execution at all: it then offers only registered services' kinds, so every
-bot move is delegated over the API (an abandoned-turn auto-play still uses a
-trivial local random move as a liveness fallback). A remote service that is slow
-or fails simply falls back to a local random move, so a game never stalls.
-Registrations live in memory, so re-register services after a restart.
+The game server runs **no** agent code in-process: it offers only registered
+services' kinds, and every bot move is delegated over the API. A remote service
+that is slow or fails (or an abandoned human turn) falls back to a trivial local
+random move, so a game never stalls. Registrations live in memory, so
+re-register services after a restart.
 
 ## Tests
 
-The renderer builds its board coordinate tables directly from the engine's
-authoritative geometry lookups, and derives resource / dev-card orderings from
-the engine enums, so those can't drift. It still mirrors the AEC flat action
-table; the test suite pins that decode against the engine's own lookups, checks
-the enum-derived orderings, and exercises the conversion layer — if the engine
-reindexes the board, reorders an enum, or changes the action table, these tests
-fail.
+The renderer builds its board coordinate tables and resource / dev-card
+orderings from `settlrl-reference`'s geometry and enums, and defines its own
+flat action space over reference actions; the test suite checks the geometry is
+well-formed, pins the enum-derived orderings, and round-trips the flat table
+(every legal flat reconstructs a legal reference action and maps back to itself).
 
 The server tests follow its layering: `test_games.py` covers the registry and
-seat claims without the engine, `test_views.py` covers the per-seat snapshots —
+seat claims, `test_views.py` covers the per-seat snapshots —
 including a sweep asserting that no observer's view ever leaks another hand —
 and `test_server.py` covers only what routes own (auth, status codes, locking),
 each test building its own app via `create_app`. The wire contract is pinned
@@ -228,7 +226,7 @@ BASE=http://localhost:8000 npm run e2e
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
 | `GET /api/games/{id}/events` | Server-sent events: the requester's snapshot immediately, then again on every change (`bot_move` carries the server-paced bot play just made) |
 | `POST /api/games/{id}/chat` | Append a chat message `{ "text", "player"?: <owned seat> }` (no seat: spectator) |
-| `GET /api/games/{id}/record` | The finished game as a replayable `settlrl_engine.record` transcript (`409` while running: a record reconstructs hidden hands) |
+| `GET /api/games/{id}/record` | The finished game as a replayable `GameRecord` transcript (`409` while running: a record reconstructs hidden hands) |
 | `POST /api/games/{id}/replay` | Load a finished game for replay (`409` while running) |
 | `POST /api/replay` | Load a game record (the record JSON) for replay; returns the opening state. `422` if malformed |
 | `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board). `404` until a replay is loaded |
@@ -269,23 +267,25 @@ packages/settlrl-render/
 │   │   ├── routers/       # Routes by area: games, replay, bots, me (each build(deps) -> APIRouter)
 │   │   ├── models.py      # Pydantic board / game / action wire models
 │   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
-│   │   ├── actions.py     # Decode AEC flat actions -> wire ActionModels
-│   │   ├── convert.py     # settlrl-engine Board -> BoardModel
+│   │   ├── actions.py     # Flat action space over reference actions + wire ActionModels
+│   │   ├── convert.py     # settlrl-reference Game -> BoardModel
 │   │   └── openapi.py     # Schema dump backing the generated frontend types
-│   ├── game/            # the live game and its engine seam
-│   │   ├── session.py     # GameSession: one live game vs bots (wraps the AEC env)
+│   ├── game/            # the live game
+│   │   ├── session.py     # GameSession: one live game over a settlrl-reference Game
+│   │   ├── record.py      # Replayable GameRecord (seed + flat moves + resolved outcomes)
 │   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens)
-│   │   ├── driver.py      # Per-game asyncio task: bot pacing (local or remote) + idle-turn timeouts
+│   │   ├── driver.py      # Per-game asyncio task: bot pacing (remote) + idle-turn timeouts
 │   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots/            # where bot moves are computed
 │   │   ├── bots.py        # settlrl-agents registry adapted to the single game (bot_act)
-│   │   ├── providers.py   # Bot kinds -> where they run: local vs registered remote services
+│   │   ├── bridge.py      # reference Game -> engine board/belief, so agents reason on the real board
+│   │   ├── providers.py   # Bot kinds -> the registered remote services that serve them
 │   │   └── bot_service.py # Standalone bot service (settlrl-render-bot): /catalog + /act
 │   └── storage/         # the one async DB: identity + persistence
 │       ├── db.py          # The async SQLAlchemy engine: users, login tokens, and game journals
 │       ├── auth.py        # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB
 │       └── store.py       # Crash-recovery journals on the shared DB (write-behind), replay on boot
-├── tests/               # Pytest: renderer<->engine sync checks (geometry, actions, enums)
+├── tests/               # Pytest: board conversion, flat-table round-trip, per-seat views, server
 └── frontend/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)

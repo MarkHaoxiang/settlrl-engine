@@ -28,7 +28,7 @@ class TileModel(BaseModel):
 
 
 class CubeModel(BaseModel):
-    """A board vertex, in the engine's cube coordinates (q + r + s = ±1)."""
+    """A board vertex, in cube coordinates (q + r + s = ±1)."""
 
     q: int
     r: int
@@ -127,10 +127,10 @@ class EdgeModel(BaseModel):
 
 
 class ActionModel(BaseModel):
-    """One legal move for the acting player, decoded from the AEC flat action set.
+    """One legal move for the acting player.
 
-    ``flat`` is the engine's flat action index (post it back to apply the move).
-    ``type`` is the lowercased :class:`ActionType` name. Depending on the type, at
+    ``flat`` is the renderer's flat action index (post it back to apply the
+    move). ``type`` is the lowercased action type. Depending on the type, at
     most one geometry/resource group below is populated; the rest stay ``None``.
     """
 
@@ -226,7 +226,7 @@ class PlayerBeliefModel(BaseModel):
 class BeliefModel(BaseModel):
     """Card counting from one human seat's perspective.
 
-    Everything here is derivable from public information (the engine's belief
+    Everything here is derivable from public information (the card-counting
     tracker), so showing it to that seat never leaks hidden state. The
     observer's own row is omitted — their hand is already on screen.
     """

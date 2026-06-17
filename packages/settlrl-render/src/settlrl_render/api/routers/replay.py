@@ -1,9 +1,8 @@
 """Replay tooling routes (``/api/replay*``) and the shared replay loader.
 
 One replay is loaded server-wide at a time (the :class:`~settlrl_render.api.deps.
-ReplaySlot`); :func:`load_replay` builds it — offloading the engine replay to a
-worker thread — and is reused by the game router's replay-from-a-finished-game
-route.
+ReplaySlot`); :func:`load_replay` builds it — offloading the replay to a worker
+thread — and is reused by the game router's replay-from-a-finished-game route.
 """
 
 import json

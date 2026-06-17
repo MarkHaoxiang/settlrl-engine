@@ -270,9 +270,9 @@ def build(deps: Deps) -> APIRouter:
 
     @router.get("/api/games/{game_id}/record")
     async def get_record(game_id: str) -> Response:
-        """The finished game as ``settlrl_engine.record`` JSON -- a
-        self-contained, replayable transcript. 409 while running: replaying a
-        record reconstructs hidden hands, so live games don't export."""
+        """The finished game as ``GameRecord`` JSON -- a self-contained,
+        replayable transcript. 409 while running: replaying a record
+        reconstructs hidden hands, so live games don't export."""
         handle = deps.handle_of(game_id)
         async with handle.lock:
             if not handle.session.terminal():

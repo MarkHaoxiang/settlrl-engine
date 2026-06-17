@@ -41,7 +41,7 @@ class AccessToken(SQLAlchemyBaseAccessTokenTableUUID, Base):
 
 
 class GameRow(Base):
-    """A persisted game's immutable header (its ``settlrl_engine.record`` setup)."""
+    """A persisted game's immutable header (its setup)."""
 
     __tablename__ = "game"
 
