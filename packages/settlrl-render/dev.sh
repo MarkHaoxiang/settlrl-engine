@@ -36,7 +36,7 @@ pids+=($!)
 
 # 2. Bot service — hosts the settlrl-agents policies the game server delegates to.
 echo "starting bot service on http://localhost:${BOT_PORT} ..."
-BOT_PORT="$BOT_PORT" uv run settlrl-render-bot &
+BOT_PORT="$BOT_PORT" uv run --package settlrl-agents settlrl-bot-service &
 pids+=($!)
 
 # 3. Wait for both, then seed the admin account and register the bot service.

@@ -8,11 +8,9 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     # The shared game model: reference rules, serialization, session/replay.
+    # The game server runs no engine/agents code — bot moves are delegated to a
+    # remote bot service (settlrl-agents[service]) over HTTP.
     "settlrl-game",
-    # [rl] pulls in pettingzoo/gymnasium, needed by the AEC env that drives /play.
-    "settlrl-engine[rl]",
-    # Bot policies for the non-human seats.
-    "settlrl-agents",
     "fastapi[standard]>=0.115.0",
     # Accounts + the single async storage layer: fastapi-users on async
     # SQLAlchemy (it bundles password hashing, so we don't hand-roll it).
@@ -23,7 +21,6 @@ dependencies = [
 
 [project.scripts]
 settlrl-render = "settlrl_render:main"
-settlrl-render-bot = "settlrl_render.bots.bot_service:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -31,8 +28,6 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 settlrl-game = { workspace = true }
-settlrl-engine = { workspace = true }
-settlrl-agents = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

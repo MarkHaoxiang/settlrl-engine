@@ -1,7 +1,7 @@
 """Bot providers: the remote bot services that compute a seat's moves.
 
 The game server runs no bot policies itself. A **remote** provider is a separate
-bot service (:mod:`settlrl_render.bots.bot_service`) reached over HTTP, so the
+bot service (:mod:`settlrl_agents.service.app`) reached over HTTP, so the
 agent-running code is deployed and scaled apart from the game server; an admin
 registers one at runtime and its bot kinds form the catalog.
 
@@ -22,22 +22,9 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
+from settlrl_game.botproto import ActRequest, ActResponse
 
-# A bot move request / reply on the standardized wire (the bot service's /act).
-# `game_id` only keys the service's replay cache; `setup` + `moves` fully
-# determine the position.
-
-
-class ActRequest(BaseModel):
-    game_id: str
-    setup: dict[str, Any]
-    moves: list[int]
-    seat: int
-
-
-class ActResponse(BaseModel):
-    flat: int
+__all__ = ["ActRequest", "ActResponse", "RemoteBotError", "RemoteBotProvider", "ProviderRegistry"]
 
 
 class RemoteBotError(Exception):

@@ -2622,15 +2622,24 @@ dependencies = [
     { name = "settlrl-engine" },
 ]
 
+[package.optional-dependencies]
+service = [
+    { name = "fastapi", extra = ["standard"] },
+    { name = "settlrl-game" },
+]
+
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", extras = ["standard"], marker = "extra == 'service'", specifier = ">=0.115.0" },
     { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "mctx", specifier = ">=0.0.6" },
     { name = "omegaconf", specifier = ">=2.3.1" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
+    { name = "settlrl-game", marker = "extra == 'service'", editable = "packages/settlrl-game" },
 ]
+provides-extras = ["service"]
 
 [package.metadata.requires-dev]
 cuda = []
@@ -2712,8 +2721,6 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
-    { name = "settlrl-agents" },
-    { name = "settlrl-engine", extra = ["rl"] },
     { name = "settlrl-game" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
@@ -2723,8 +2730,6 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=13.0.0" },
-    { name = "settlrl-agents", editable = "packages/settlrl-agents" },
-    { name = "settlrl-engine", extras = ["rl"], editable = "packages/settlrl-engine" },
     { name = "settlrl-game", editable = "packages/settlrl-game" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
 ]

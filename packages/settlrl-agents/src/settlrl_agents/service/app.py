@@ -1,5 +1,5 @@
-"""The bot service: the agent-running half of the renderer, behind the
-standardized bot API (:mod:`settlrl_render.bots.providers`).
+"""The bot service: the agents' move-serving endpoint, behind the standardized
+bot wire protocol (:mod:`settlrl_game.botproto`).
 
 It runs the ``settlrl-agents`` policies and answers two requests:
 
@@ -13,7 +13,7 @@ game record, so it can be deployed and scaled independently of the game server.
 A small per-``game_id`` LRU cache keeps a replayed session around so a move
 request only has to apply the new tail rather than the whole game each time.
 
-Run it with ``settlrl-render-bot`` (``BOT_HOST`` / ``BOT_PORT`` / ``RELOAD``).
+Run it with ``settlrl-bot-service`` (``BOT_HOST`` / ``BOT_PORT`` / ``RELOAD``).
 """
 
 from __future__ import annotations
@@ -27,15 +27,16 @@ import anyio.to_thread
 import jax
 from fastapi import FastAPI, HTTPException
 
-from settlrl_render.bots.bots import bot_act, bot_catalog
-from settlrl_render.bots.bridge import engine_env, renderer_flat
-from settlrl_render.bots.providers import ActRequest, ActResponse
+from settlrl_game.botproto import ActRequest, ActResponse
 from settlrl_game.session import (
     HUMAN,
     GameSession,
     GameSetup,
     IllegalActionError,
 )
+
+from settlrl_agents.service.bots import bot_act, bot_catalog
+from settlrl_agents.service.bridge import engine_env, renderer_flat
 
 # The agent kinds this service plays; the replayed game's bot seats are accepted
 # as these (the game server stores them verbatim and never plays them itself).
@@ -134,7 +135,7 @@ def main() -> None:
     import uvicorn
 
     uvicorn.run(
-        "settlrl_render.bots.bot_service:app",
+        "settlrl_agents.service.app:app",
         host=os.environ.get("BOT_HOST", "0.0.0.0"),
         port=int(os.environ.get("BOT_PORT", "8100")),
         reload=bool(int(os.environ.get("RELOAD", "0"))),

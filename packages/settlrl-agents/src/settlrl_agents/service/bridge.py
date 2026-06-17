@@ -96,9 +96,9 @@ def _engine_layout_state(game: ref.Game) -> tuple[BoardLayout, BoardState]:
                 break
 
     layout = layout0._replace(
-        tile_resource=jnp.asarray(tile_resource[None]),
-        tile_number=jnp.asarray(tile_number[None]),
-        port_allocation=jnp.asarray(port_alloc[None]),
+        tile_resource=jnp.asarray(tile_resource[None], jnp.uint8),
+        tile_number=jnp.asarray(tile_number[None], jnp.uint8),
+        port_allocation=jnp.asarray(port_alloc[None], jnp.uint8),
     )
 
     n = game.n_players

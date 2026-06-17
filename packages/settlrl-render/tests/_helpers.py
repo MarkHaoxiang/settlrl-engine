@@ -9,8 +9,8 @@ against when a ``GameSession`` is built directly.
 
 import httpx
 from fastapi import FastAPI
-from settlrl_render.bots.bot_service import create_bot_app
-from settlrl_render.bots.bots import bot_catalog
+from settlrl_agents.service.app import create_bot_app
+from settlrl_agents.service.bots import bot_catalog
 from settlrl_render.bots.providers import ProviderRegistry, RemoteBotProvider
 
 # The bot kinds the in-process service offers (used as ``external_kinds`` when a

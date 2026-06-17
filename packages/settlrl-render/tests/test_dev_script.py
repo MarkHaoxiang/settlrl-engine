@@ -13,7 +13,7 @@ from pathlib import Path
 import tomllib
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from settlrl_render.bots.bot_service import create_bot_app
+from settlrl_agents.service.app import create_bot_app
 from settlrl_render.game.games import GameRegistry
 from settlrl_render.server import create_app
 
@@ -32,10 +32,16 @@ def test_dev_script_is_valid_executable_bash() -> None:
 
 
 def test_dev_script_uses_real_cli_entry_points() -> None:
-    scripts = tomllib.loads((PKG / "pyproject.toml").read_text())["project"]["scripts"]
     text = SCRIPT.read_text()
-    for name in ("settlrl-render", "settlrl-render-bot"):
-        assert name in scripts, f"{name} is no longer a project script"
+    # The game server's own entry point lives in this package; the bot service's
+    # is in settlrl-agents (its [service] extra).
+    render_scripts = tomllib.loads((PKG / "pyproject.toml").read_text())["project"]["scripts"]
+    agents_scripts = tomllib.loads(
+        (PKG.parent / "settlrl-agents" / "pyproject.toml").read_text()
+    )["project"]["scripts"]
+    assert "settlrl-render" in render_scripts
+    assert "settlrl-bot-service" in agents_scripts
+    for name in ("settlrl-render", "settlrl-bot-service"):
         assert name in text, f"dev.sh no longer launches {name}"
 
 
