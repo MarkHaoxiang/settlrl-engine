@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import AccountMenu from "../components/AccountMenu";
 import ThemeToggle from "../components/ThemeToggle";
 import { panelStyle } from "../lib/ui";
 
@@ -40,7 +41,17 @@ export default function Menu() {
       <h1 style={{ fontSize: 48, margin: 0, letterSpacing: 1 }}>
         Settlrl
       </h1>
-      <div style={{ position: "fixed", top: 16, right: 16 }}>
+      <div
+        style={{
+          position: "fixed",
+          top: 16,
+          right: 16,
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+        }}
+      >
+        <AccountMenu />
         <ThemeToggle />
       </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
