@@ -8,7 +8,7 @@ import Building from "./Building";
 import Robber from "./Robber";
 import Port from "./Port";
 import BankStacks from "./BankStacks";
-import PlayerAreas, { seatEdge, type Edge } from "./PlayerAreas";
+import PlayerAreas, { seatEdge, seatFaceAngle, type Edge } from "./PlayerAreas";
 import TableDice from "./TableDice";
 import TransferAnimations from "./TransferAnimations";
 import InteractionOverlay, { type BoardInteraction, type BoardTargetPoint } from "./InteractionOverlay";
@@ -64,6 +64,9 @@ interface Props {
   onBuyDev?: (at: BoardTargetPoint) => void;
   // Card motions to fly across the table this snapshot (lib/transfers).
   transfers?: FlyToken[];
+  // The seat to face: the table opens rotated so this seat sits at the bottom.
+  // Undefined (spectating / hotseat) keeps the default bottom-facing view.
+  faceSeat?: number;
 }
 
 // The whole table seen from above: the ocean board in the middle (tiles,
@@ -71,7 +74,7 @@ interface Props {
 // seat's play area on its table edge, and the dice in a corner — one SVG
 // scene that pans, zooms, and spins together (lib/viewport.ts). It fills its
 // parent container, so a parent can overlay mode-specific controls on top.
-export default function BoardView({ board, interaction, dice, trade, robber, onBuyDev, transfers }: Props) {
+export default function BoardView({ board, interaction, dice, trade, robber, onBuyDev, transfers, faceSeat }: Props) {
   const pixels = board.tiles.map((t) => hexToPixel(t.hex, HEX_SIZE));
   const minX = Math.min(...pixels.map((p) => p.x));
   const maxX = Math.max(...pixels.map((p) => p.x));
@@ -88,8 +91,9 @@ export default function BoardView({ board, interaction, dice, trade, robber, onB
   const offsetX = -minX + HEX_SIZE + PADDING + oceanX;
   const offsetY = -minY + HEX_SIZE + PADDING + oceanY;
 
+  const faceAngle = faceSeat != null ? seatFaceAngle(board.players.length, faceSeat) : 0;
   const { containerRef, sceneTransform, rotationTransform, rotate } =
-    useTableViewport(width, height);
+    useTableViewport(width, height, faceAngle);
 
   // Anchor for the caller's popover: top-centre of the clicked SVG element,
   // converted to this container's coordinate space.
@@ -308,7 +312,7 @@ export default function BoardView({ board, interaction, dice, trade, robber, onB
       {/* Cards flying between the bank and seats on production / steals */}
       <TransferAnimations tokens={transfers ?? []} containerRef={containerRef} />
 
-      {/* Spin the table a quarter turn at a time (e.g. to face your seat) */}
+      {/* Spin the table a quarter turn at a time (it opens facing your seat) */}
       <div
         style={{ position: "absolute", bottom: 16, left: 16, display: "flex", gap: 6, zIndex: 9 }}
         onPointerDown={(e) => e.stopPropagation()}

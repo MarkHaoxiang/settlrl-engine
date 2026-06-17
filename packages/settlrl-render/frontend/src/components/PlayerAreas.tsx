@@ -186,9 +186,11 @@ function Area({
   );
 }
 
-// Seats around the table in playing order, clockwise from the bottom edge
-// (you): bottom, left, top, right — two-player games face each other. Each
-// area is rotated to face its player, like looking down at a real table.
+// Seats around the table in playing order, clockwise from the bottom edge:
+// bottom, left, top, right — two-player games face each other. The layout is
+// server-canonical (seat 0 is always at the bottom); the client rotates the
+// whole table to face the viewer's seat (seatFaceAngle). Each area is rotated
+// to face its player, like looking down at a real table.
 const EDGES_4 = ["bottom", "left", "top", "right"] as const;
 const EDGES_2 = ["bottom", "top"] as const;
 export type Edge = (typeof EDGES_4)[number];
@@ -198,6 +200,12 @@ const EDGE_ANGLE: Record<Edge, number> = { bottom: 0, left: 90, top: 180, right:
 // The table edge a seat sits on, shared with the dice placement (BoardView).
 export const seatEdge = (nPlayers: number, seat: number): Edge =>
   (nPlayers === 2 ? EDGES_2 : EDGES_4)[seat] ?? "bottom";
+
+// The table rotation (degrees) that brings a seat's edge to the bottom, so the
+// board faces that player. Purely a viewer-side rotation — the seat layout is
+// identical for everyone.
+export const seatFaceAngle = (nPlayers: number, seat: number): number =>
+  -EDGE_ANGLE[seatEdge(nPlayers, seat)];
 
 export default function PlayerAreas({
   board,

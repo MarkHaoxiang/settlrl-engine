@@ -429,6 +429,9 @@ export default function PlayView() {
         <BoardView
           board={board}
           interaction={interaction}
+          // Face the viewer's seat when they hold exactly one (online play);
+          // a hotseat (many seats) or spectator keeps the canonical view.
+          faceSeat={soloSeat ? mySeats[0] : undefined}
           trade={tradeTargets}
           robber={robberControl}
           onBuyDev={onBuyDev}

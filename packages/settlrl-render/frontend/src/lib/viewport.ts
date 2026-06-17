@@ -18,13 +18,28 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 // `sceneTransform` on a layer inside it, and `rotationTransform` on a second
 // layer inside that — rotation gets its own (transitioned) layer so spinning
 // animates without dragging on pan/zoom updates.
-export function useTableViewport(sceneW: number, sceneH: number) {
+//
+// `faceAngle` is the rotation that orients the table toward the viewer's seat
+// (0 = the default bottom-facing view). The view opens at it, manual spins are
+// relative to it, and reset / re-facing return to it.
+export function useTableViewport(sceneW: number, sceneH: number, faceAngle = 0) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // Cumulative degrees, so each quarter turn animates the short way round
   // instead of unwinding.
-  const [rotation, setRotation] = useState(0);
+  const [rotation, setRotation] = useState(faceAngle);
+
+  // Snap rotation to faceAngle (keeping the accumulated full turns, so it spins
+  // the short way). Used by reset and when the viewer's seat resolves.
+  const reface = (deg: number) => (r: number) => deg + Math.round((r - deg) / 360) * 360;
+
+  // Re-face when the viewer's seat resolves (e.g. after an auto-join): spin to
+  // put their seat at the bottom. Manual spins survive — they don't change
+  // faceAngle, so this effect doesn't re-run.
+  useEffect(() => {
+    setRotation(reface(faceAngle));
+  }, [faceAngle]);
   // Latest zoom, so pinch can seed its scale from the current value.
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -108,8 +123,8 @@ export function useTableViewport(sceneW: number, sceneH: number) {
         case "0":
           setZoom(fitZoom());
           setPan({ x: 0, y: 0 });
-          // Unwind to the nearest full turn so the reset spins the short way.
-          setRotation((r) => Math.round(r / 360) * 360);
+          // Back to the viewer's facing, the short way round.
+          setRotation(reface(faceAngle));
           break;
         default:
           return;
@@ -119,7 +134,7 @@ export function useTableViewport(sceneW: number, sceneH: number) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneW, sceneH]);
+  }, [sceneW, sceneH, faceAngle]);
 
   return {
     containerRef,
