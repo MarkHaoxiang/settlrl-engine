@@ -17,8 +17,8 @@ import sys
 from pathlib import Path
 
 from data import generate, split
-from models import make_model
 from settlrl_agents.experiment import Config, Run, start_run
+from settlrl_learn.architectures import make_model
 from train import train
 
 ARCHS = ("mlp_engineered", "mlp_flat", "deepset", "gnn")

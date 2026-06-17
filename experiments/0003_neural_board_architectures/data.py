@@ -24,12 +24,12 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from features import Sample, board_sample
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import _picker
 from settlrl_agents.policy import StatefulSpec
 from settlrl_agents.value import heuristic_value
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
+from settlrl_learn.graph import Sample, board_sample
 
 _CACHE = Path(__file__).resolve().parents[2] / "runs" / "_cache" / "0003"
 

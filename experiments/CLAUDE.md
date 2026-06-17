@@ -79,13 +79,14 @@ Lessons baked into the design:
 Supervised benchmark for *which net learns the board best*, the seam toward a
 learned value (settlrl-learn Stage 1). `data.py` rolls out greedy self-play and
 caches seat-0 positions (true board) under `runs/_cache`, labelled with both the
-hand-tuned `heuristic_value` and the eventual win. `features.py` emits the board
-as a fixed-topology graph (54 vertices / 72 edges; only features vary, so
-senders/receivers are module constants) plus the engineered vector, so every
-architecture sees the same position. `models.py` (equinox) holds four:
-`mlp_engineered` (baseline), `mlp_flat` (structure-blind), `deepset` (set), and
-`gnn` (jraph `GraphNetwork` + global readout). `train.py` is optax adamw + wandb
-(`mode` configurable; `disabled` in tests) + best-val equinox checkpointing,
+hand-tuned `heuristic_value` and the eventual win. The featurization
+(`settlrl_learn.graph`: board → a fixed-topology graph, 54 vertices / 72 edges
+with senders/receivers as module constants, plus the engineered vector) and the
+architectures (`settlrl_learn.architectures`: `mlp_engineered` baseline,
+`mlp_flat` structure-blind, `deepset` set, `gnn` jraph `GraphNetwork` + readout)
+live in settlrl-learn now (their symmetry contracts are tested there); this
+framework only composes them. `train.py` is optax adamw + wandb (`mode`
+configurable; `disabled` in tests) + best-val equinox checkpointing,
 standardizing inputs on the train split.
 
 Stack additions (dev group): `equinox`, `optax`, `jraph`, `wandb`. Run on GPU

@@ -1,19 +1,22 @@
-"""Board -> graph featurization for the architecture benchmark.
+"""Board -> graph featurization for the learned architectures.
 
 The board graph has fixed topology (54 vertices, 72 edges; the senders/receivers
 never change shape), so a sample carries only per-node, per-edge and global
-*features* — the static incidence lives here as module constants. Perspective is
+*features* -- the static incidence lives here as module constants. Perspective is
 one player: ownership and the global player summary are relative (own vs. the
 best opponent), so the same featurization serves any seat. Computed on the true
-board (this benchmark measures representation capacity, not belief handling).
+board (this measures representation capacity, not belief handling).
 
 Three readouts of the same position are produced per sample so architectures can
 be compared on a level field:
 
-- ``nodes`` / ``edges`` / ``glob`` — the graph (GNN, DeepSet, flat-MLP all read
+- ``nodes`` / ``edges`` / ``glob`` -- the graph (GNN, DeepSet, flat-MLP all read
   this);
-- ``engineered`` — the hand-tuned :mod:`settlrl_learn.features` vector, the
+- ``engineered`` -- the hand-tuned :mod:`settlrl_learn.features` vector, the
   baseline a learned representation must beat.
+
+A training-side module (equinox/jraph consumers build on it): not imported by
+the package root.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ from settlrl_engine.board.state import (
     IntScalar,
 )
 from settlrl_engine.mechanics.common import player_total_vp
+
 from settlrl_learn.features import FEATURE_DIM
 from settlrl_learn.features import features as engineered_features
 

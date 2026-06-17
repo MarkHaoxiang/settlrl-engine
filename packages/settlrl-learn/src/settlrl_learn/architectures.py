@@ -1,19 +1,23 @@
-"""Architectures over a :class:`features.Sample`, in equinox.
+"""Architectures over a :class:`~settlrl_learn.graph.Sample`, in equinox.
 
 All four read the *same* position and emit ``out_dim`` logits/regressands, so a
 benchmark isolates representation x architecture:
 
-- ``mlp_engineered`` — MLP over the hand-tuned feature vector (the baseline to
+- ``mlp_engineered`` -- MLP over the hand-tuned feature vector (the baseline to
   beat);
-- ``mlp_flat`` — MLP over the flattened graph (sees every node feature in fixed
+- ``mlp_flat`` -- MLP over the flattened graph (sees every node feature in fixed
   vertex order, no structure);
-- ``deepset`` — permutation-invariant pool over node features + globals (set, no
+- ``deepset`` -- permutation-invariant pool over node features + globals (set, no
   edges);
-- ``gnn`` — message passing over the board graph (jraph ``GraphNetwork``), then a
+- ``gnn`` -- message passing over the board graph (jraph ``GraphNetwork``), then a
   global readout (uses topology and edge ownership).
 
-The forward takes one un-batched ``Sample``; the training loop ``vmap``s it over
-the minibatch.
+The forward takes one un-batched ``Sample``; callers ``vmap`` it over a
+minibatch. ``deepset`` and ``gnn`` are invariant under board symmetries and the
+player relabeling (the readout pools over nodes / reads ownership relatively);
+``mlp_flat`` is not, by design -- see ``tests/test_architectures.py``.
+
+A training-side module (equinox/jraph): not imported by the package root.
 """
 
 from __future__ import annotations
@@ -24,7 +28,12 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jraph
-from features import (
+from jaxtyping import Array, Float
+from settlrl_engine.board.layout import N_VERTICES
+from settlrl_engine.board.state import KeyScalar
+
+from settlrl_learn.features import FEATURE_DIM
+from settlrl_learn.graph import (
     EDGE_DIM,
     GLOBAL_DIM,
     N_DIR_EDGES,
@@ -33,10 +42,6 @@ from features import (
     SENDERS,
     Sample,
 )
-from jaxtyping import Array, Float
-from settlrl_engine.board.layout import N_VERTICES
-from settlrl_engine.board.state import KeyScalar
-from settlrl_learn.features import FEATURE_DIM
 
 Model = Callable[[Sample], Float[Array, "out"]]
 

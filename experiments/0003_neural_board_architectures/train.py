@@ -18,9 +18,9 @@ import numpy as np
 import optax
 import wandb
 from data import Dataset
-from features import Sample
 from jaxtyping import Array, Float
 from settlrl_agents.experiment import Run
+from settlrl_learn.graph import Sample
 from sklearn.metrics import roc_auc_score
 
 

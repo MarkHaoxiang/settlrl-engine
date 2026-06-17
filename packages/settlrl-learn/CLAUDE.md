@@ -20,6 +20,18 @@ trained model can ship without training libraries.
 - `model.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts it
   onto the search's `value`/`prior` seams). Plain-JAX, so the package root
   imports it without pulling training deps.
+- `graph.py` / `architectures.py` — the board-as-graph featurization
+  (`board_sample` → a `Sample` of per-node/-edge/global features + the
+  engineered vector, fixed topology as module constants) and the equinox
+  architectures over it (`mlp_engineered` / `mlp_flat` / `deepset` / `gnn`,
+  via `make_model`). Training-side (equinox/jraph), *not* imported by the
+  package root; experiment 0003 composes them. `deepset`/`gnn` are invariant
+  under the board's symmetry group and the player relabeling (readout pools
+  over nodes / ownership is read relatively); `mlp_flat` is not, by design.
+  These invariances are enforced in `tests/test_architectures.py` against the
+  symmetry generators in `tests/_symmetry.py` — the board's automorphism group
+  is order 6 (D3), not the bare graph's D6, because the harbors are only 3-fold
+  symmetric (the port-preserving subgroup).
 - **AlphaZero loop** (training-side, *not* imported by the package root — keeps
   the shipped-model path lean; experiment 0004 composes them):
   - `selfplay.py::self_play` — batched n-player self-play, the net guiding the

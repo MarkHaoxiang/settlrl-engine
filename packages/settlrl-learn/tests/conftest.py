@@ -10,7 +10,9 @@ from jaxtyping import install_import_hook
 # model.py / train.py are excluded: MLPParams' per-layer shapes are
 # heterogeneous, and jaxtyping unifies dim names across a variadic tuple, so
 # the annotation is per-layer documentation that cannot hold globally.
-install_import_hook(["settlrl_learn.features"], "beartype.beartype")
+install_import_hook(
+    ["settlrl_learn.features", "settlrl_learn.graph"], "beartype.beartype"
+)
 
 if "JAX_PLATFORMS" not in os.environ and "PYTEST_XDIST_WORKER" in os.environ:
     jax.config.update("jax_platforms", "cpu")  # type: ignore[no-untyped-call]
