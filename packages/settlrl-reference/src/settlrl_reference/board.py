@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from random import Random
+from typing import Literal
 
 from settlrl_reference.types import PortType, Resource
 
@@ -199,24 +200,70 @@ _PORT_VERTICES: tuple[tuple[int, int], ...] = tuple(
 )
 
 
+# Rulebook Almanac variable set-up: number tokens A..R laid alphabetically along
+# a counterclockwise spiral from a corner toward the centre, skipping the
+# desert. The A..R letters map to this fixed number sequence:
+SPIRAL_NUMBERS = (5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11)
+
+
+def _spiral_tile_order() -> tuple[int, ...]:
+    """Tile indices spiralling in from a corner (outer ring counterclockwise,
+    then the middle ring, then the centre); consecutive tiles are cube-adjacent.
+    Which corner it starts from is distributionally irrelevant -- the terrain
+    shuffle is rotation/reflection-invariant -- so one fixed path suffices."""
+    dirs = ((-1, 1, 0), (0, 1, -1), (1, 0, -1), (1, -1, 0), (0, -1, 1), (-1, 0, 1))
+    order: list[int] = []
+    for radius in (2, 1):
+        cube = (0, -radius, radius)
+        for d in dirs:
+            for _ in range(radius):
+                order.append(cube_to_tile(cube))
+                cube = (cube[0] + d[0], cube[1] + d[1], cube[2] + d[2])
+    order.append(cube_to_tile((0, 0, 0)))
+    return tuple(order)
+
+
+_SPIRAL_TILE_ORDER = _spiral_tile_order()
+
+
 def desert_tile(layout: Layout) -> int:
     """The desert tile index (where the robber starts)."""
     return layout.tile_resource.index(None)
 
 
-def random_layout(rng: Random) -> Layout:
-    """A random standard board: terrain and number tokens shuffled over the
-    tiles (the desert takes no token), harbour types over the fixed positions."""
+def _place_numbers(
+    terrain: list[Resource | None], rng: Random, placement: Literal["random", "spiral"]
+) -> list[int]:
+    """Number tokens over the non-desert tiles: shuffled, or along the spiral."""
+    numbers = [0] * N_TILES
+    if placement == "spiral":
+        token = 0
+        for t in _SPIRAL_TILE_ORDER:
+            if terrain[t] is not None:
+                numbers[t] = SPIRAL_NUMBERS[min(token, len(SPIRAL_NUMBERS) - 1)]
+                token += 1
+    else:
+        tokens = list(_NUMBER_TOKENS)
+        rng.shuffle(tokens)
+        supply = iter(tokens)
+        for t in range(N_TILES):
+            if terrain[t] is not None:
+                numbers[t] = next(supply)
+    return numbers
+
+
+def random_layout(
+    rng: Random, number_placement: Literal["random", "spiral"] = "random"
+) -> Layout:
+    """A random standard board: terrain and harbour types shuffled over the fixed
+    geometry, number tokens laid by ``number_placement`` -- shuffled (``random``)
+    or along the rulebook spiral (``spiral``). Terrain and ports depend only on
+    ``rng``, so a seed's map is identical across modes; only the numbers differ.
+    """
     terrain = list(_TERRAIN)
     rng.shuffle(terrain)
-    tokens = list(_NUMBER_TOKENS)
-    rng.shuffle(tokens)
-    numbers = [0] * N_TILES
-    supply = iter(tokens)
-    for t in range(N_TILES):
-        if terrain[t] is not None:
-            numbers[t] = next(supply)
     types = list(_PORT_TYPES)
     rng.shuffle(types)
     ports = tuple(Port(t, vs) for t, vs in zip(types, _PORT_VERTICES, strict=True))
+    numbers = _place_numbers(terrain, rng, number_placement)
     return Layout(tuple(terrain), tuple(numbers), ports)

@@ -13,6 +13,7 @@ import json
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from random import Random
+from typing import Literal
 
 import settlrl_reference as ref
 
@@ -74,7 +75,10 @@ class GameRecord:
 
 def initial_game(record: GameRecord) -> ref.Game:
     """The opening position: the seed's board, before any move."""
-    layout = ref.random_layout(Random(record.seed))
+    placement: Literal["random", "spiral"] = (
+        "spiral" if record.number_placement == "spiral" else "random"
+    )
+    layout = ref.random_layout(Random(record.seed), placement)
     return ref.Game.new(layout, ref.desert_tile(layout), n_players=record.n_players)
 
 

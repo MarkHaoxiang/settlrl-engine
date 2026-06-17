@@ -17,9 +17,12 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   `cube_to_vertex`, `tile_cube`, `edge_vertices`, `edge_between`, …) are the
   bridge the engine-side conversion uses. `Layout` carries the variable board
   (per-tile resource + number token, and the harbours as `Port`s);
-  `random_layout(rng)` shuffles the standard allotment over the fixed geometry.
-  The nine harbour positions are baked in by cube coordinate (physical board
-  data, shared with the engine like the cube convention itself — not an import).
+  `random_layout(rng, number_placement)` shuffles the standard allotment over
+  the fixed geometry — `"random"` shuffles the number tokens, `"spiral"` lays
+  them along the rulebook spiral (`SPIRAL_NUMBERS`); terrain and ports depend
+  only on the rng, so a seed's map is identical across both modes. The nine
+  harbour positions are baked in by cube coordinate (physical board data, shared
+  with the engine like the cube convention itself — not an import).
 - `game.py` — the engine. `Player` and `Game` hold the state; one frozen
   dataclass per action; `Game.legal_actions()` / `is_legal()` / `apply()` drive
   play, with the rule logic (placement, `longest_road_length`, `production`,

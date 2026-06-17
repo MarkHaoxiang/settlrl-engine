@@ -11,7 +11,13 @@ from collections import Counter
 from random import Random
 
 import settlrl_reference as ref
-from settlrl_reference.board import _NUMBER_TOKENS, _PORT_VERTICES, _TERRAIN
+from settlrl_reference.board import (
+    _NUMBER_TOKENS,
+    _PORT_VERTICES,
+    _SPIRAL_TILE_ORDER,
+    _TERRAIN,
+    SPIRAL_NUMBERS,
+)
 from settlrl_reference.game import (
     Action,
     BuyDevelopmentCard,
@@ -49,6 +55,28 @@ def test_random_layout_is_a_standard_board() -> None:
     assert Counter(p.type for p in layout.ports) == Counter(
         {PortType.GENERIC: 4, **{PortType(r): 1 for r in RESOURCES}}
     )
+
+
+def test_spiral_places_the_canonical_sequence() -> None:
+    layout = ref.random_layout(Random(0), "spiral")
+    # The non-desert tiles, in spiral order, carry SPIRAL_NUMBERS in order.
+    placed = [
+        layout.tile_number[t]
+        for t in _SPIRAL_TILE_ORDER
+        if layout.tile_resource[t] is not None
+    ]
+    assert tuple(placed) == SPIRAL_NUMBERS
+    assert layout.tile_number[ref.desert_tile(layout)] == 0
+
+
+def test_placement_mode_keeps_terrain_and_ports() -> None:
+    # Toggling the number placement leaves the same map (terrain + harbours),
+    # changing only where the tokens sit.
+    rand = ref.random_layout(Random(3), "random")
+    spiral = ref.random_layout(Random(3), "spiral")
+    assert rand.tile_resource == spiral.tile_resource
+    assert rand.ports == spiral.ports
+    assert rand.tile_number != spiral.tile_number
 
 
 def test_random_layout_is_deterministic_per_seed() -> None:

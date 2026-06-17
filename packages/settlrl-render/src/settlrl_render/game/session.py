@@ -106,12 +106,20 @@ class GameSession:
         cls, setup: GameSetup, external_kinds: frozenset[str] = frozenset()
     ) -> GameSession:
         """A fresh game at its opening position (replay its moves to advance)."""
-        return cls(
+        session = cls(
             seed=setup.seed,
             n_players=setup.n_players,
             seats=setup.seats,
             external_kinds=external_kinds,
         )
+        if setup.number_placement != "random":  # the ctor defaulted to "random"
+            session.reset(
+                setup.seed,
+                number_placement=setup.number_placement,
+                seats=setup.seats,
+                external_kinds=external_kinds,
+            )
+        return session
 
     def reset(
         self,
@@ -130,8 +138,8 @@ class GameSession:
         ``external_kinds`` — the kinds a registered provider serves; their
         params are stored verbatim (the provider validates and plays them; the
         server runs no bots). ``external_kinds`` None keeps the current set.
-        (``number_placement`` is kept for the setup wire; the reference board
-        is always randomly placed.)
+        ``number_placement`` lays the number tokens: ``"random"`` shuffles them,
+        ``"spiral"`` follows the rulebook spiral (terrain / ports are unchanged).
         """
         if n_players is not None:
             self.n_players = n_players
@@ -168,7 +176,7 @@ class GameSession:
         # One seeded RNG drives the board and every later stochastic outcome, so
         # the game is reproducible from (seed, flat moves).
         self._rng = Random(seed)
-        layout = ref.random_layout(self._rng)
+        layout = ref.random_layout(self._rng, self.number_placement)
         self.game = ref.Game.new(
             layout, ref.desert_tile(layout), n_players=self.n_players
         )
