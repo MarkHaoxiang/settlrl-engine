@@ -3,10 +3,10 @@ import { LINK, panelStyle } from "../lib/ui";
 import SoundToggle from "./SoundToggle";
 import ThemeToggle from "./ThemeToggle";
 
-// The top bar shared by the game views: a help link on the left (tucked under
-// the top-left player panel), and a back-to-menu link with the current mode
-// label top-centre, followed by the theme toggle and any view-specific
-// controls (`children` — settings-like actions such as New game).
+// The top bar shared by the game views: a help link in the top-left corner,
+// and a back-to-menu link with the current mode label top-centre, followed by
+// the theme toggle and any view-specific controls (`children` — settings-like
+// actions such as New game).
 export default function TopBar({ mode, children }: { mode: string; children?: React.ReactNode }) {
   return (
     <>
@@ -16,7 +16,7 @@ export default function TopBar({ mode, children }: { mode: string; children?: Re
         style={{
           ...panelStyle,
           position: "absolute",
-          top: 110,
+          top: 16,
           left: 16,
           width: 32,
           height: 32,
