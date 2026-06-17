@@ -10,7 +10,10 @@ benchmark isolates representation x architecture:
 - ``deepset`` -- permutation-invariant pool over node features + globals (set, no
   edges);
 - ``gnn`` -- message passing over the board graph (jraph ``GraphNetwork``), then a
-  global readout (uses topology and edge ownership).
+  global readout (uses topology and edge ownership);
+- the configurable :class:`~settlrl_learn.graphnet.GraphNet` presets
+  (``gn_*`` in ``graphnet.PRESETS``) -- the strong, ablatable graph net (attention
+  vs message passing, normalisation, global node, count-preserving readout).
 
 The forward takes one un-batched ``Sample``; callers ``vmap`` it over a
 minibatch. ``deepset`` and ``gnn`` are invariant under board symmetries and the
@@ -42,6 +45,7 @@ from settlrl_learn.graph import (
     SENDERS,
     Sample,
 )
+from settlrl_learn.graphnet import PRESETS, GraphNet
 
 Model = Callable[[Sample], Float[Array, "out"]]
 
@@ -151,8 +155,11 @@ def make_model(
     depth: int,
     layers: int,
 ) -> eqx.Module:
-    """Build the named architecture (``mlp_engineered`` / ``mlp_flat`` /
-    ``deepset`` / ``gnn``)."""
+    """Build the named architecture: a fixed baseline (``mlp_engineered`` /
+    ``mlp_flat`` / ``deepset`` / ``gnn``) or a configurable ``GraphNet`` preset
+    (``settlrl_learn.graphnet.PRESETS``), whose ``width`` / ``layers`` /
+    ``head_depth`` are taken from ``width`` / ``layers`` / ``depth`` here so the
+    experiment's capacity knobs apply across presets."""
     if arch == "mlp_engineered":
         return MLPModel(key, out_dim=out_dim, width=width, depth=depth, engineered=True)
     if arch == "mlp_flat":
@@ -163,4 +170,7 @@ def make_model(
         return DeepSetModel(key, out_dim=out_dim, width=width, depth=depth)
     if arch == "gnn":
         return GNNModel(key, out_dim=out_dim, width=width, depth=depth, layers=layers)
+    if arch in PRESETS:
+        cfg = PRESETS[arch]._replace(width=width, layers=layers, head_depth=depth)
+        return GraphNet(key, out_dim=out_dim, cfg=cfg)
     raise SystemExit(f"unknown arch {arch!r}")

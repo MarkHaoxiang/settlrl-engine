@@ -15,11 +15,13 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from _symmetry import apply_symmetry, board_symmetries, relabel_players
 from settlrl_engine.board import Board
 from settlrl_engine.env import BatchedSettlrlEnv
 from settlrl_learn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.graph import board_sample
+from settlrl_learn.graphnet import PRESETS, GraphNet
 
 _OUT, _W = 4, 8
 
@@ -84,6 +86,24 @@ def test_board_symmetry_leaves_structured_models_invariant() -> None:
         for l2, s2 in rotated:
             out = np.asarray(model(board_sample(l2, s2, p)))
             assert np.allclose(base_out, out, atol=1e-4)
+
+
+@pytest.mark.parametrize("preset", ["gn_multi", "gn_graphnorm", "gn_gat", "gn_full"])
+def test_graphnet_presets_are_invariant(preset: str) -> None:
+    # The configurable GraphNet keeps both invariances across every lever
+    # (attention, GraphNorm spanning the node axis, the global node, JK) -- it
+    # uses only symmetric aggregations and relative features, no absolute PE.
+    layout, state = _mid_game(4)
+    cfg = PRESETS[preset]._replace(width=8, layers=2, head_depth=1)
+    model = GraphNet(jax.random.key(0), out_dim=_OUT, cfg=cfg)
+    base = np.asarray(model(board_sample(layout, state, jnp.int32(0))))
+    for sym in board_symmetries():
+        l2, s2 = apply_symmetry(layout, state, sym)
+        rot = np.asarray(model(board_sample(l2, s2, jnp.int32(0))))
+        assert np.allclose(base, rot, atol=1e-3)
+    perm = np.array([1, 2, 3, 0])
+    relabeled = board_sample(layout, relabel_players(state, perm), jnp.int32(perm[0]))
+    assert np.allclose(base, np.asarray(model(relabeled)), atol=1e-3)
 
 
 def test_flat_mlp_is_not_symmetry_invariant() -> None:
