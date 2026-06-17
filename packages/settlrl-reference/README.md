@@ -11,9 +11,11 @@ for the optimised, JAX-native `settlrl-engine`.
 ## Usage
 
 ```python
-from settlrl_reference import Game, Layout, Resource, Roll, BuildRoad
+from random import Random
+from settlrl_reference import Game, SetupSettlement, desert_tile, random_layout
 
-game = Game.new(layout, robber=desert_tile)   # a fresh game in setup
+layout = random_layout(Random(0))             # a random standard board
+game = Game.new(layout, desert_tile(layout))  # a fresh game in setup
 for action in game.legal_actions():           # every legal move right now
     ...
 game.apply(SetupSettlement(vertex=12))        # mutate the game in place
@@ -36,7 +38,16 @@ not roll dice or draw cards itself — those outcomes are passed in on the actio
   stolen from the victim.
 
 This lets a test feed `settlrl-engine`'s realised outcomes into the reference and
-compare the two engines step for step.
+compare the two engines step for step. To drive a live game instead, sample the
+outcomes from an RNG with `roll_dice`, `draw_dev_card`, and `steal`.
+
+## Card counting
+
+`Belief` tracks, per observer, lower/upper bounds on every player's per-resource
+hand using only public information, plus the public played-dev tally.
+`Belief.update(before, after, action)` advances it across one applied action.
+The only hidden flow is a robber steal's card type, so bounds open only on
+steals a third party did not witness and stay exact in a two-player game.
 
 ## Board coordinates
 

@@ -18,6 +18,7 @@ or ``-1`` (the 54 intersections). An edge joins a ``+1`` vertex to an adjacent
 from __future__ import annotations
 
 from dataclasses import dataclass
+from random import Random
 
 from settlrl_reference.types import PortType, Resource
 
@@ -151,3 +152,71 @@ class Layout:
             if vertex in port.vertices:
                 return port
         return None
+
+
+# --- random board generation -----------------------------------------------
+
+# The standard base-game allotment (rulebook): 19 tiles, 18 number tokens (the
+# desert takes none), 9 harbours. Terrain and tokens shuffle freely over the
+# tiles; harbour *types* shuffle over the fixed coastal positions below.
+_TERRAIN: tuple[Resource | None, ...] = (
+    None,  # desert
+    *(Resource.WOOD,) * 4,
+    *(Resource.SHEEP,) * 4,
+    *(Resource.WHEAT,) * 4,
+    *(Resource.BRICK,) * 3,
+    *(Resource.ORE,) * 3,
+)
+# A single 2 and 12, every other pip 3..11 twice -- but no 7 (that is the robber).
+_NUMBER_TOKENS: tuple[int, ...] = (
+    2,
+    12,
+    *(p for p in (3, 4, 5, 6, 8, 9, 10, 11) for _ in (0, 1)),
+)
+_PORT_TYPES: tuple[PortType, ...] = (
+    *(PortType.GENERIC,) * 4,
+    PortType.SHEEP,
+    PortType.WHEAT,
+    PortType.WOOD,
+    PortType.BRICK,
+    PortType.ORE,
+)
+# The nine harbour positions are part of the physical board (like the cube
+# convention itself), given as their two coastal vertices' cube coordinates.
+_PORT_VERTICES: tuple[tuple[int, int], ...] = tuple(
+    (cube_to_vertex(a), cube_to_vertex(b))
+    for a, b in (
+        ((3, 0, -2), (2, 0, -3)),
+        ((-3, 2, 0), (-2, 3, 0)),
+        ((0, -2, 3), (0, -3, 2)),
+        ((-1, -1, 3), (-2, -1, 2)),
+        ((-2, 1, 2), (-3, 1, 1)),
+        ((1, -3, 1), (2, -2, 1)),
+        ((2, -2, -1), (3, -1, -1)),
+        ((1, 2, -2), (1, 1, -3)),
+        ((-1, 2, -2), (-1, 3, -1)),
+    )
+)
+
+
+def desert_tile(layout: Layout) -> int:
+    """The desert tile index (where the robber starts)."""
+    return layout.tile_resource.index(None)
+
+
+def random_layout(rng: Random) -> Layout:
+    """A random standard board: terrain and number tokens shuffled over the
+    tiles (the desert takes no token), harbour types over the fixed positions."""
+    terrain = list(_TERRAIN)
+    rng.shuffle(terrain)
+    tokens = list(_NUMBER_TOKENS)
+    rng.shuffle(tokens)
+    numbers = [0] * N_TILES
+    supply = iter(tokens)
+    for t in range(N_TILES):
+        if terrain[t] is not None:
+            numbers[t] = next(supply)
+    types = list(_PORT_TYPES)
+    rng.shuffle(types)
+    ports = tuple(Port(t, vs) for t, vs in zip(types, _PORT_VERTICES, strict=True))
+    return Layout(tuple(terrain), tuple(numbers), ports)

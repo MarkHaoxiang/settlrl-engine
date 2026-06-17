@@ -16,7 +16,10 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   import with this module's own indexing; cube lookups (`vertex_cube`,
   `cube_to_vertex`, `tile_cube`, `edge_vertices`, `edge_between`, …) are the
   bridge the engine-side conversion uses. `Layout` carries the variable board
-  (per-tile resource + number token, and the harbours as `Port`s).
+  (per-tile resource + number token, and the harbours as `Port`s);
+  `random_layout(rng)` shuffles the standard allotment over the fixed geometry.
+  The nine harbour positions are baked in by cube coordinate (physical board
+  data, shared with the engine like the cube convention itself — not an import).
 - `game.py` — the engine. `Player` and `Game` hold the state; one frozen
   dataclass per action; `Game.legal_actions()` / `is_legal()` / `apply()` drive
   play, with the rule logic (placement, `longest_road_length`, `production`,
@@ -34,6 +37,9 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   stay exact with two players. This is the readable oracle for the engine's
   `belief.py` (`settlrl-engine`'s `test_reference_equivalence` checks the two
   agree bound-for-bound) — it knows nothing about the engine's representation.
+- `chance.py` — sample the stochastic outcomes the game's actions take
+  (`roll_dice`, `draw_dev_card`, `steal`) for a live driver; the differential
+  test injects the engine's realised outcomes instead.
 
 ## Deliberate rulebook choices worth noting
 

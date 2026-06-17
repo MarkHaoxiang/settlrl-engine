@@ -12,7 +12,10 @@ from settlrl_reference.board import (
     N_VERTICES,
     Layout,
     Port,
+    desert_tile,
+    random_layout,
 )
+from settlrl_reference.chance import draw_dev_card, roll_dice, steal
 from settlrl_reference.game import (
     AcceptTrade,
     Action,
@@ -79,4 +82,9 @@ __all__ = [
     "Roll",
     "SetupRoad",
     "SetupSettlement",
+    "desert_tile",
+    "draw_dev_card",
+    "random_layout",
+    "roll_dice",
+    "steal",
 ]
