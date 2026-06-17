@@ -5,6 +5,7 @@ clarity over speed. It exists to differentially test ``settlrl-engine``: drive
 both with the same action stream and compare the resulting states.
 """
 
+from settlrl_reference.belief import Belief
 from settlrl_reference.board import (
     N_EDGES,
     N_TILES,
@@ -51,6 +52,7 @@ __all__ = [
     "RESOURCES",
     "AcceptTrade",
     "Action",
+    "Belief",
     "BuildCity",
     "BuildRoad",
     "BuildSettlement",

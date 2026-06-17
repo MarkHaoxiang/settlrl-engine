@@ -25,11 +25,14 @@ Two fuzz layers close the directions a reference-driven stream cannot see:
 
 from __future__ import annotations
 
+import copy
 import random
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import settlrl_reference as ref
+from settlrl_engine.belief import BeliefState, make_belief, update_belief
 from settlrl_engine.board import Board, make_board, to_main
 from settlrl_engine.board.dev_cards import DevCard
 from settlrl_engine.board.state import BoardState
@@ -40,6 +43,40 @@ from tests import conversion as conv
 
 _INVALID = int(ActionResult.INVALID)
 _GAME_COMPLETE = int(ActionResult.GAME_COMPLETE)
+_NR = len(ref.RESOURCES)
+
+# The engine's per-observer card counting, single-game (the env vmaps it over a
+# batch); jitted so each step reuses one trace.
+_update_belief = jax.jit(update_belief)
+
+
+def _assert_belief_matches(engine: BeliefState, oracle: ref.Belief, seed: int) -> None:
+    """The engine's belief bounds equal the reference oracle's, entry for entry.
+
+    Indices align directly: observers and players share an order, engine
+    resource column ``r`` is ``Resource(r)``, dev-card slot ``c`` is
+    ``DevCard(c)``.
+    """
+    lo = np.asarray(engine.res_lo).astype(int)  # (observers, players, resources)
+    hi = np.asarray(engine.res_hi).astype(int)
+    played = np.asarray(engine.dev_played).astype(int)
+    n = oracle.n_players
+    for o in range(n):
+        for p in range(n):
+            for r in range(_NR):
+                assert lo[o][p][r] == oracle.res_lo[o][p][r], (
+                    f"seed={seed}: res_lo[{o}][{p}][{r}] engine={lo[o][p][r]} "
+                    f"reference={oracle.res_lo[o][p][r]}"
+                )
+                assert hi[o][p][r] == oracle.res_hi[o][p][r], (
+                    f"seed={seed}: res_hi[{o}][{p}][{r}] engine={hi[o][p][r]} "
+                    f"reference={oracle.res_hi[o][p][r]}"
+                )
+    for card, count in oracle.dev_played.items():
+        assert played[int(card)] == count, (
+            f"seed={seed}: dev_played[{card}] engine={played[int(card)]} "
+            f"reference={count}"
+        )
 
 
 def _inject_outcome(
@@ -128,11 +165,19 @@ def _fuzz_bundles(
 
 
 def _play_one_game(
-    seed: int, max_steps: int = 300, n_players: int = 4, bundles: bool = False
+    seed: int,
+    max_steps: int = 300,
+    n_players: int = 4,
+    bundles: bool = False,
+    track_belief: bool = False,
 ) -> None:
     board = make_board(1, seed=seed, n_players=n_players)
     game = conv.to_reference_single(board, 0)
     rng = random.Random(seed)
+    # Card counting, advanced in lockstep when requested: the engine's tracker
+    # (single-game slice) against the reference oracle.
+    engine_belief = jax.tree.map(lambda x: x[0], make_belief(1, n_players))
+    oracle_belief = ref.Belief.new(n_players)
 
     for _ in range(max_steps):
         # Only GAME_OVER has no legal actions, so this doubles as the terminal
@@ -166,7 +211,25 @@ def _play_one_game(
 
         current_player = int(np.asarray(board[1].current_player[0]))
         ref_action = _inject_outcome(applied, board, new_state, current_player)
-        game.apply(ref_action)
+
+        if track_belief:
+            atype, idx, target = conv.to_engine_action(ref_action)
+            params = ActionParams(
+                idx=jnp.asarray(idx, jnp.int32), target=jnp.asarray(target, jnp.int32)
+            )
+            before = copy.deepcopy(game)
+            engine_belief = _update_belief(
+                engine_belief,
+                jax.tree.map(lambda x: x[0], board[1]),
+                jax.tree.map(lambda x: x[0], new_state),
+                jnp.asarray(atype, jnp.int32),
+                params,
+            )
+            game.apply(ref_action)
+            oracle_belief.update(before, game, ref_action)
+            _assert_belief_matches(engine_belief, oracle_belief, seed)
+        else:
+            game.apply(ref_action)
         board = (board[0], new_state)
 
         if result == _GAME_COMPLETE:
@@ -222,6 +285,16 @@ def test_turn_start_win_claim_matches_reference() -> None:
     assert game.phase is ref.Phase.GAME_OVER
     assert game.current_player == 1
     conv.assert_states_match((board[0], new_state), game, 0, ignore_phase=True)
+
+
+def test_belief_bounds_match_reference_over_random_games() -> None:
+    # The engine's card counting (settlrl_engine.belief) is itself differentially
+    # checked: its per-observer bounds and public dev tally must equal the
+    # reference oracle's at every step. Seed 18 reaches a win via a Knight, so it
+    # exercises hidden third-party steals at 4p; a 2-player seed covers the
+    # exact-bounds case (every flow is mutually visible).
+    _play_one_game(18, n_players=4, track_belief=True)
+    _play_one_game(0, n_players=2, track_belief=True)
 
 
 def test_bundle_trades_match_reference_over_random_games() -> None:

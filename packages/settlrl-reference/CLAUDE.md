@@ -26,6 +26,14 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
   (`setup_order(n_players)`), turn rotation, discard, production, monopoly and
   award loops all run over it. Stochastic actions carry their realised outcome (`Roll.value`,
   `BuyDevelopmentCard.card`, the robber's `stolen` card) — see README.
+- `belief.py` — card counting: per-observer lower/upper bounds on every
+  player's per-resource hand, derivable from public information alone, plus the
+  public played-dev tally. `Belief.update(before, after, action)` advances one
+  transition. Hidden info is only a robber steal's card *type* (the rest is
+  public), so the bounds open only on steals a third party didn't witness and
+  stay exact with two players. This is the readable oracle for the engine's
+  `belief.py` (`settlrl-engine`'s `test_reference_equivalence` checks the two
+  agree bound-for-bound) — it knows nothing about the engine's representation.
 
 ## Deliberate rulebook choices worth noting
 
