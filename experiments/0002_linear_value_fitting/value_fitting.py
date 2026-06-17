@@ -55,19 +55,32 @@ def _spec(weights: dict[str, float]) -> BeliefSpec:
     )
 
 
+# Parallel games per `evaluate`. Tuned for GPU throughput (32 lanes ~ the cost
+# of 1 there); on CPU it is a near-linear multiplier on run time, so the smoke
+# drops it (`eval_batch`) -- the lanes beyond what `n_episodes` needs are waste.
+_EVAL_BATCH = 32
+
+
 def seat_swapped(
-    spec_a: Spec, spec_b: Spec, n_games: int, seed: int
+    spec_a: Spec, spec_b: Spec, n_games: int, seed: int, batch: int = _EVAL_BATCH
 ) -> tuple[int, int]:
     """(a's wins, episodes) over a seat-swapped 2p match."""
-    r1 = evaluate([spec_a, spec_b], n_episodes=n_games // 2, batch_size=32, seed=seed)
+    r1 = evaluate(
+        [spec_a, spec_b], n_episodes=n_games // 2, batch_size=batch, seed=seed
+    )
     r2 = evaluate(
-        [spec_b, spec_a], n_episodes=n_games // 2, batch_size=32, seed=seed + 1
+        [spec_b, spec_a], n_episodes=n_games // 2, batch_size=batch, seed=seed + 1
     )
     return int(r1.wins[0]) + int(r2.wins[1]), r1.episodes + r2.episodes
 
 
 def seat_rotated(
-    spec_a: Spec, spec_b: Spec, players: int, n_games: int, seed: int
+    spec_a: Spec,
+    spec_b: Spec,
+    players: int,
+    n_games: int,
+    seed: int,
+    batch: int = _EVAL_BATCH,
 ) -> tuple[int, int]:
     """(a's wins, episodes) with ``a`` rotated through every seat of an
     otherwise all-``b`` table (chance = 1/players)."""
@@ -76,20 +89,37 @@ def seat_rotated(
     for pos in range(players):
         agents: list[Spec] = [spec_b] * players
         agents[pos] = spec_a
-        r = evaluate(agents, n_episodes=per, batch_size=32, seed=seed + pos)
+        r = evaluate(agents, n_episodes=per, batch_size=batch, seed=seed + pos)
         wins += int(r.wins[pos])
         episodes += r.episodes
     return wins, episodes
 
 
+def _single_seat(
+    spec_a: Spec, spec_b: Spec, n_games: int, seed: int, batch: int = _EVAL_BATCH
+) -> tuple[int, int]:
+    """(a's wins, episodes) with ``a`` fixed in seat 0 -- no seat-swap. Cheaper
+    by one `evaluate` retrace; for the smoke, where seat-fairness is moot."""
+    r = evaluate([spec_a, spec_b], n_episodes=n_games, batch_size=batch, seed=seed)
+    return int(r.wins[0]), r.episodes
+
+
 def _match(cfg: dict) -> Match:
-    """The arena's match function: seat-swapped at 2p, seat-rotated above."""
+    """The arena's match function: seat-swapped at 2p, seat-rotated above
+    (single-seating when ``seat_swap`` is off, for the smoke); ``eval_batch``
+    sets the parallel-game count."""
     players = cfg.get("players", 2)
+    batch = cfg.get("eval_batch", _EVAL_BATCH)
     if players == 2:
-        return seat_swapped
+        two_p = seat_swapped if cfg.get("seat_swap", True) else _single_seat
+
+        def swapped(spec_a: Spec, spec_b: Spec, n: int, seed: int) -> tuple[int, int]:
+            return two_p(spec_a, spec_b, n, seed, batch)
+
+        return swapped
 
     def rotated(spec_a: Spec, spec_b: Spec, n: int, seed: int) -> tuple[int, int]:
-        return seat_rotated(spec_a, spec_b, players, n, seed)
+        return seat_rotated(spec_a, spec_b, players, n, seed, batch)
 
     return rotated
 
@@ -297,19 +327,20 @@ def run_experiment(run: Run, cfg: dict) -> None:
     # is the 2p head-to-head (the optimization arena).
     learned, hand = _spec(weights), POLICIES["lookahead"]
     opponent = POLICIES[cfg.get("bench_opponent", "greedy")]
+    batch = cfg.get("eval_batch", _EVAL_BATCH)
     summary: dict[str, float] = {}
     verdict = "fail"
     for players in cfg.get("eval_players", [2]):
         if players == 2:
             n, g = cfg["bench_games"], cfg["gate_games"]
-            w_vs_opp, n_vs_opp = seat_swapped(learned, opponent, n, 30)
-            w_base, n_base = seat_swapped(hand, opponent, n, 30)
-            w_gate, n_gate = seat_swapped(learned, hand, g, 20)
+            w_vs_opp, n_vs_opp = seat_swapped(learned, opponent, n, 30, batch)
+            w_base, n_base = seat_swapped(hand, opponent, n, 30, batch)
+            w_gate, n_gate = seat_swapped(learned, hand, g, 20, batch)
         else:
             n = g = cfg.get("games_multi", 240)
-            w_vs_opp, n_vs_opp = seat_rotated(learned, opponent, players, n, 30)
-            w_base, n_base = seat_rotated(hand, opponent, players, n, 30)
-            w_gate, n_gate = seat_rotated(learned, hand, players, g, 20)
+            w_vs_opp, n_vs_opp = seat_rotated(learned, opponent, players, n, 30, batch)
+            w_base, n_base = seat_rotated(hand, opponent, players, n, 30, batch)
+            w_gate, n_gate = seat_rotated(learned, hand, players, g, 20, batch)
         rate = w_gate / n_gate
         se = (rate * (1 - rate) / n_gate) ** 0.5
         summary[f"learned_vs_hand_{players}p"] = rate

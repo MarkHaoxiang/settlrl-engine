@@ -60,6 +60,12 @@ class ValueFittingConfig(Config):
     bench_opponent: str = "greedy"
     bench_games: int = 200
     gate_games: int = 300
+    # Seat-swap every 2p match for seat-fairness. Off only for the smoke, where a
+    # single seating halves the (compile-bound) `evaluate` retrace count.
+    seat_swap: bool = True
+    # Parallel games per `evaluate`. 32 saturates a GPU; on CPU it is ~linear
+    # extra work, so the smoke shrinks it to ~what `n_episodes` needs.
+    eval_batch: int = 32
     target: str = "predict"  # predict | maximise
     opponent: str = "greedy"  # a POLICIES name, or "self" for the ladder
     rounds: int = 1
@@ -106,6 +112,13 @@ VARIANTS: dict[str, dict[str, object]] = {
         "eval_players": [4],
         "games_multi": 200,
     },
+    # The smoke only needs to exercise the value-fitting path unique to this
+    # framework (CEM search -> a deployed `make_linear` lookahead -> verdict).
+    # Each `evaluate` retraces a fresh lookahead scan (~40s, cache or not), so
+    # cost is the *count* of matches, not their game budgets. `eval_players: []`
+    # skips the deployment gate/bench block (3 more matches) -- its seat-swapped
+    # `evaluate`/bench machinery is already smoked by 0001 -- so the verdict
+    # defaults to "fail" (the smoke asserts only that a verdict was recorded).
     "smoke": {
         "target": "maximise",
         "opponent": "greedy",
@@ -118,9 +131,9 @@ VARIANTS: dict[str, dict[str, object]] = {
             "sigma": 0.3,
         },
         "probe_games": 2,
-        "eval_players": [2],
-        "bench_games": 2,
-        "gate_games": 2,
+        "eval_players": [],
+        "seat_swap": False,
+        "eval_batch": 2,
     },
 }
 
