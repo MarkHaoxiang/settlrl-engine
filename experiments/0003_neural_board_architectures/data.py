@@ -1,12 +1,15 @@
-"""Supervised dataset from self-play: positions -> {win, heuristic} labels.
+"""Supervised dataset from self-play: positions -> {win, heuristic, road} labels.
 
 Roll out games with a scripted agent, snapshot positions from seat 0's
-perspective, and label each with two targets:
+perspective, and label each with three targets:
 
 - ``win`` — did seat 0 win that game (a value/win-probability target);
 - ``heur`` — :func:`settlrl_agents.value.heuristic_value` at the position (a
   cheap regression target: can a net reproduce the hand-tuned value from the
-  board, and which representation does it most easily?).
+  board, and which representation does it most easily?);
+- ``road`` — seat 0's true longest-road trail length (a *structural* target the
+  engineered vector cannot express: it carries only a road *count*, not the
+  connectivity/opponent-break DFS, so this is the clean GNN-vs-engineered test).
 
 Positions are featurized on the *true* board (honest: hidden fields are real),
 so no belief sampling is needed. Episode ids group correlated rows for a
@@ -29,6 +32,7 @@ from settlrl_agents.evaluate import _picker
 from settlrl_agents.policy import StatefulSpec
 from settlrl_agents.value import heuristic_value
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
+from settlrl_engine.mechanics.longest_road import longest_road_length
 from settlrl_learn.graph import Sample, board_sample
 
 _CACHE = Path(__file__).resolve().parents[2] / "runs" / "_cache" / "0003"
@@ -38,6 +42,7 @@ class Dataset(NamedTuple):
     samples: Sample  # batched over a leading sample axis
     win: np.ndarray  # (n,) 0/1
     heur: np.ndarray  # (n,) heuristic value at the position
+    road: np.ndarray  # (n,) seat-0 longest-road trail length
     episode: np.ndarray  # (n,) game id, for a grouped split
 
 
@@ -59,9 +64,14 @@ def _collect(cfg: dict) -> Dataset:
     pickers = [jax.jit(_picker(agent, players, i)) for i in range(players)]
     feat = jax.jit(jax.vmap(lambda lo, st: board_sample(lo, st, jnp.int32(0))))
     heur = jax.jit(jax.vmap(lambda lo, st: heuristic_value(lo, st, jnp.int32(0))))
+    road = jax.jit(
+        jax.vmap(
+            lambda st: longest_road_length(st.edge_road, st.vertex_owner, jnp.int32(0))
+        )
+    )
 
-    buffers: list[list[tuple[Sample, float]]] = [[] for _ in range(bs)]
-    rows: list[tuple[Sample, float]] = []
+    buffers: list[list[tuple[Sample, float, float]]] = [[] for _ in range(bs)]
+    rows: list[tuple[Sample, float, float]] = []
     wins: list[int] = []
     episodes: list[int] = []
     key = jax.random.key(cfg["seed"])
@@ -72,9 +82,14 @@ def _collect(cfg: dict) -> Dataset:
         if step % cfg["snapshot_every"] == 0:
             s = jax.device_get(feat(layout, state))
             h = np.asarray(heur(layout, state))
+            r = np.asarray(road(state))
             for lane in range(bs):
                 buffers[lane].append(
-                    (jax.tree.map(lambda x, lane=lane: x[lane], s), float(h[lane]))
+                    (
+                        jax.tree.map(lambda x, lane=lane: x[lane], s),
+                        float(h[lane]),
+                        float(r[lane]),
+                    )
                 )
         key, k = jax.random.split(key)
         seat_keys = jax.random.split(k, players)
@@ -90,8 +105,8 @@ def _collect(cfg: dict) -> Dataset:
         rewards = np.asarray(env.rewards)
         for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)).tolist():
             won = int(rewards[lane, 0] > 0)
-            for sample, hv in buffers[lane]:
-                rows.append((sample, hv))
+            for sample, hv, rv in buffers[lane]:
+                rows.append((sample, hv, rv))
                 wins.append(won)
                 episodes.append(n_ep)
             n_ep += 1
@@ -103,23 +118,25 @@ def _collect(cfg: dict) -> Dataset:
         samples=samples,
         win=np.asarray(wins, np.float32),
         heur=np.asarray([r[1] for r in rows], np.float32),
+        road=np.asarray([r[2] for r in rows], np.float32),
         episode=np.asarray(episodes, np.int64),
     )
 
 
 def generate(cfg: dict) -> Dataset:
     """Collect (or load from ``runs/_cache``) the supervised dataset for ``cfg``."""
-    path = _CACHE / f"{_key(cfg)}.npz"
+    path = _CACHE / f"{_key(cfg)}-v2.npz"  # -v2: added the `road` label
     if path.exists():
         with np.load(path) as d:
             samples = Sample(d["nodes"], d["edges"], d["glob"], d["engineered"])
-            return Dataset(samples, d["win"], d["heur"], d["episode"])
+            return Dataset(samples, d["win"], d["heur"], d["road"], d["episode"])
     ds = _collect(cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         path,
         nodes=ds.samples.nodes, edges=ds.samples.edges, glob=ds.samples.glob,
-        engineered=ds.samples.engineered, win=ds.win, heur=ds.heur, episode=ds.episode,
+        engineered=ds.samples.engineered, win=ds.win, heur=ds.heur, road=ds.road,
+        episode=ds.episode,
     )  # fmt: skip
     return ds
 
@@ -136,7 +153,7 @@ def split(ds: Dataset, val_frac: float, seed: int = 0) -> tuple[Dataset, Dataset
     def take(mask: np.ndarray) -> Dataset:
         return Dataset(
             jax.tree.map(lambda x: x[mask], ds.samples),
-            ds.win[mask], ds.heur[mask], ds.episode[mask],
+            ds.win[mask], ds.heur[mask], ds.road[mask], ds.episode[mask],
         )  # fmt: skip
 
     return take(~is_val), take(is_val)

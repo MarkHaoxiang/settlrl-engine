@@ -78,9 +78,10 @@ def train(
         {k: {m: a.tolist() for m, a in v.items()} for k, v in stats.items()},
     )
 
+    label = {"win": "win", "heuristic": "heur", "road": "road"}[task]
     x_tr, x_val = _to_jax(train_ds.samples), _to_jax(val_ds.samples)
-    y_tr = jnp.asarray(train_ds.win if task == "win" else train_ds.heur)
-    y_val = np.asarray(val_ds.win if task == "win" else val_ds.heur)
+    y_tr = jnp.asarray(getattr(train_ds, label))
+    y_val = np.asarray(getattr(val_ds, label))
     n = y_tr.shape[0]
 
     def loss_fn(m: Any, xs: Sample, y: Float[Array, "b"]) -> Float[Array, ""]:

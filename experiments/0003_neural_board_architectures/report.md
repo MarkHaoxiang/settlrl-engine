@@ -83,3 +83,63 @@ paying once the leaf improves, and this shows a learnable leaf is within reach.
 Open levers: deeper/wider GNN, more samples, lookahead-agent data (greedy
 positions may be off the strong-play manifold), and node-level targets (per-spot
 value) the global readout currently discards.
+
+## GraphNet lever ablation (2026-06-18)
+
+A configurable `GraphNet` (`settlrl_learn.graphnet`) turns the major design
+choices into config knobs; `ablate_{heuristic,win,road}` sweep one preset per
+lever (`gn_*`) against the engineered baseline. Added a third, *structural*
+target — `road`, seat 0's true longest-road trail length — which the engineered
+vector cannot express (it carries a road *count*, not the connectivity DFS).
+20k greedy 2p positions, width 64, 3 layers, 60 epochs.
+
+Held-out scores (R² for heuristic/road, AUC for win; **bold** = best per column):
+
+| arch (lever vs `gn_base`) | road R² | win AUC | heur R² |
+| --- | --- | --- | --- |
+| `mlp_engineered` (baseline) | 0.83 | **0.82** | **1.00** |
+| `gn_base` (plain MPNN, mean readout) | **0.99** | 0.74 | 0.98 |
+| `gn_multi` (+ mean‖max‖sum readout) | 0.98 | 0.75 | 0.98 |
+| `gn_norm` (+ LayerNorm) | 0.98 | 0.74 | 0.97 |
+| `gn_graphnorm` (GraphNorm) | 0.99 | 0.72 | 0.97 |
+| `gn_global` (+ virtual global node) | 0.98 | 0.76 | 0.97 |
+| `gn_gat` (GATv2 attention) | 0.86 | **0.77** | 0.97 |
+| `gn_jk` (+ jumping knowledge) | 0.98 | 0.75 | 0.98 |
+| `gn_full` (gat + jk) | 0.87 | 0.74 | 0.97 |
+
+Findings:
+
+1. **The graph representation earns its keep on structure.** On `road` the GNNs
+   hit R² 0.99 vs the engineered MLP's 0.83 — a ~0.15 gap that replicates at a
+   second seed (eng 0.835, `gn_base` 0.986, `gn_gat` 0.880). This is the
+   raison d'être for the board graph: it recovers a connectivity quantity the
+   hand-tuned vector fundamentally lacks.
+2. **Attention is the wrong inductive bias for counting/structural board
+   tasks.** `gn_gat` collapses to 0.86 on `road` (vs 0.99 for plain MPNN) while
+   *leading* on `win` (0.77) — softmax averaging dilutes the count/path signal
+   that sum-aggregation message passing preserves. Longest road is a sum along a
+   path, not a weighted average.
+3. **The target's locality picks the architecture.** `heuristic` is a *local*
+   sum of per-vertex production → plain MPNN reproduces it best (gat/global add
+   nothing). `win` is *global* → the virtual global node and attention help
+   (the two biggest gains over `gn_base`). `road` is *structural* → sum-MPNN
+   dominates and attention hurts.
+4. **GraphNorm and jumping-knowledge don't pay** on this small fixed graph (54
+   nodes, ~5 diameter): GraphNorm is neutral-to-worse, JK neutral-to-worse, both
+   adding parameters and optimisation difficulty for no gain — over-engineering
+   for a graph this size.
+5. **No absolute positional encoding.** Every preset is invariant under the
+   board symmetry group and the player relabeling (enforced in
+   `settlrl-learn/tests/test_architectures.py`) — a rotated board is the same
+   game, so the signal must come from features, not vertex indices. The
+   invariance survives every lever (attention, GraphNorm, global node, JK).
+
+**Architecture recommendation (toward the AlphaZero value+policy net):**
+`gn_global` — sum-aggregation MPNN + a virtual global node + a
+count-preserving multi-aggregator readout + LayerNorm, **no attention, no
+GraphNorm, no JK**. It is the robust all-rounder: best-or-tied on the global
+(`win`) target where the value head lives, and still ≫ engineered on structural
+`road` (0.98). Attention is rejected despite its `win` edge because a value+policy
+net must also read structure, where attention is catastrophic. Single seed on
+`win`/`heuristic` (the ~0.01–0.02 spreads there are within noise); the `road`
+and attention effects are large and replicated.

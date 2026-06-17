@@ -31,3 +31,15 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   and DeepSet sits between. Structure is what makes raw board features usable;
   a learnable leaf is within reach (settlrl-learn Stage 1 seam). Not yet
   promoted: close the win gap, then gate lookahead(gnn) through bench.
+- 0003_neural_board_architectures — GraphNet lever ablation (2026-06-18, 20k
+  positions, +`road` structural target = seat-0 longest-road trail length). On
+  `road` the GNNs hit R² 0.99 vs the engineered MLP's 0.83 (replicated seed 1:
+  eng 0.835, plain-MPNN 0.986) — the graph recovers a connectivity quantity the
+  hand-tuned vector lacks. **Attention is the wrong bias for counting/structural
+  tasks**: `gn_gat` collapses to 0.86 on `road` (sum-MPNN 0.99) while leading on
+  the global `win` target (0.77) — the target's locality picks the architecture.
+  GraphNorm and jumping-knowledge don't pay on a 54-node graph. Every preset is
+  board-symmetry + player-relabel invariant (no absolute PE). Recommended net:
+  `gn_global` (sum-MPNN + virtual global node + multi-aggregator readout +
+  LayerNorm; no attention/GraphNorm/JK) — the robust all-rounder for the AZ
+  value+policy net.

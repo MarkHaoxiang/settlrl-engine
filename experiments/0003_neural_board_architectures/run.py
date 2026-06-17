@@ -7,8 +7,11 @@ raw inputs (flat MLP / DeepSet). If so, the graph representation is the seam to
 push for a learned value (settlrl-learn Stage 1).
 
 Tasks (labels from greedy self-play, cached): ``heuristic`` regresses the
-hand-tuned value from the board; ``win`` predicts seat 0's game outcome. Each
-``arch`` is trained and held-out-scored; ``arch=all`` sweeps the four and ranks.
+hand-tuned value (a *local* target); ``win`` predicts seat 0's game outcome (a
+*global* target); ``road`` regresses seat 0's longest-road trail length (a
+*structural* target the engineered vector cannot express). Each ``arch`` is
+trained and held-out-scored; ``arch=all`` sweeps the four baselines and ranks,
+``arch=a,b,c`` sweeps a named list (the GraphNet lever ablation).
 
     uv run python experiments/0003_neural_board_architectures/run.py [variant] [k=v ...]
 """
@@ -22,7 +25,12 @@ from settlrl_learn.architectures import make_model
 from train import train
 
 ARCHS = ("mlp_engineered", "mlp_flat", "deepset", "gnn")
-_LEARNED = ("mlp_flat", "deepset", "gnn")  # the raw-board representations
+# The GraphNet ablation: the engineered baseline + legacy gnn + one preset per
+# lever (settlrl_learn.graphnet.PRESETS), so each row isolates one design choice.
+ABLATION = (
+    "mlp_engineered", "gnn", "gn_base", "gn_multi", "gn_norm",
+    "gn_graphnorm", "gn_global", "gn_gat", "gn_jk", "gn_full",
+)  # fmt: skip
 
 
 class NeuralBoardArchitecturesConfig(Config):
@@ -56,6 +64,10 @@ VARIANTS: dict[str, dict[str, object]] = {
     "win": {"task": "win", "arch": "all"},
     "gnn_heuristic": {"task": "heuristic", "arch": "gnn"},
     "gnn_win": {"task": "win", "arch": "gnn"},
+    # GraphNet lever ablation (one row per design choice) on each target.
+    "ablate_heuristic": {"task": "heuristic", "arch": ",".join(ABLATION)},
+    "ablate_win": {"task": "win", "arch": ",".join(ABLATION)},
+    "ablate_road": {"task": "road", "arch": ",".join(ABLATION)},
     "smoke": {
         "task": "heuristic",
         "arch": "all",
@@ -87,7 +99,7 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     run.log(n_samples=int(ds.win.shape[0]), n_train=int(train_ds.win.shape[0]),
             win_rate=float(ds.win.mean()))  # fmt: skip
 
-    archs = ARCHS if cfg.arch == "all" else (cfg.arch,)
+    archs = ARCHS if cfg.arch == "all" else tuple(cfg.arch.split(","))
     select = "auc" if cfg.task == "win" else "r2"
     results: dict[str, dict[str, float]] = {}
     for arch in archs:
@@ -103,13 +115,14 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     run.save_json("results.json", results)
 
     # Verdict: a raw-board representation is competitive with the hand-tuned
-    # baseline (within 0.02 of it on the selection metric), or — single-arch —
-    # the model clears a sanity floor.
+    # baseline (within 0.02 of it on the selection metric), or — no baseline in
+    # the run — the best model clears a sanity floor.
     floor = 0.55 if cfg.task == "win" else 0.5
     key = f"best_{select}"
-    if cfg.arch == "all" and "mlp_engineered" in results:
+    learned = [a for a in archs if a != "mlp_engineered"]
+    if "mlp_engineered" in results and learned:
         baseline = results["mlp_engineered"].get(key, float("-inf"))
-        best_learned = max(results[a].get(key, float("-inf")) for a in _LEARNED)
+        best_learned = max(results[a].get(key, float("-inf")) for a in learned)
         verdict = "pass" if best_learned >= baseline - 0.02 else "fail"
         run.finish(verdict, select=select, baseline=baseline, best_learned=best_learned,
                    **{a: results[a].get(key) for a in archs})  # fmt: skip
