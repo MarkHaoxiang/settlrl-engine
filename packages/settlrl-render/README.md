@@ -142,7 +142,9 @@ games.example.com {
 
 Accounts are optional: anonymous play — claim a seat, get a per-seat token —
 works without one. Registering gives a player a persistent identity and lets an
-operator mark some users as **admins**, who manage the bot services below.
+operator mark some users as **admins**, who manage the bot services below. In
+the UI the menu's **Sign in** link opens the account page (`/login`,
+`/register`).
 
 Accounts are handled by [fastapi-users](https://fastapi-users.github.io/fastapi-users/).
 Login uses the OAuth2 password flow (`POST /api/auth/login` returns a bearer

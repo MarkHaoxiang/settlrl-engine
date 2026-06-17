@@ -3,6 +3,7 @@ import Menu from "./pages/Menu";
 import PlayView from "./pages/PlayView";
 import ReplayView from "./pages/ReplayView";
 import HelpView from "./pages/HelpView";
+import AuthView from "./pages/AuthView";
 
 export default function App() {
   return (
@@ -12,6 +13,8 @@ export default function App() {
       <Route path="/play/:id" element={<PlayView />} />
       <Route path="/help" element={<HelpView />} />
       <Route path="/replay" element={<ReplayView />} />
+      <Route path="/login" element={<AuthView initialMode="login" />} />
+      <Route path="/register" element={<AuthView initialMode="register" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
