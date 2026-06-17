@@ -23,6 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
+from .auth import Auth, UserStore
 from .bots import bot_catalog
 from .driver import start_game_driver
 from .games import (
@@ -65,6 +66,16 @@ def _build_registry(
     if state_dir:
         return restore_registry(GameStore(state_dir), max_active=max_active)
     return GameRegistry(max_active=max_active)
+
+
+def _user_store(user_db: str | None, state_dir: str | None) -> UserStore:
+    """The accounts db: an explicit path, ``users.db`` under the state dir when
+    persistence is on, or an ephemeral in-memory db (tests / stateless runs)."""
+    if user_db is not None:
+        return UserStore(user_db)
+    if state_dir:
+        return UserStore(str(Path(state_dir) / "users.db"))
+    return UserStore(None)
 
 
 def _needs_driver(handle: GameHandle, turn_timeout: float) -> bool:
@@ -172,6 +183,8 @@ def create_app(
     turn_timeout: float = 0.0,
     max_active: int = 16,
     warm: bool = True,
+    user_db: str | None = None,
+    admin_emails: frozenset[str] = frozenset(),
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -188,9 +201,12 @@ def create_app(
     ``max_active`` caps how many games run at once; beyond it, new creators are
     queued (``POST /api/games`` returns their place in line). ``warm``
     pre-compiles the engine at startup (off in tests, which compile lazily and
-    don't want the background contention).
+    don't want the background contention). ``user_db`` is the accounts SQLite
+    path (defaults to ``users.db`` under ``state_dir``, else in-memory);
+    ``admin_emails`` are granted admin on register / login.
     """
     registry = _build_registry(games, state_dir, max_active)
+    auth = Auth(_user_store(user_db, state_dir), admin_emails=admin_emails)
     replays = _ReplaySlot()
     # Each live event stream holds one permit for its whole connection; past
     # the cap, new subscribers get 503 rather than exhausting the threadpool.
@@ -432,6 +448,8 @@ def create_app(
         player counts it supports and its configurable build parameters."""
         return bot_catalog()
 
+    app.include_router(auth.router)
+
     if _dist.exists():
         app.mount("/", _SPAStaticFiles(directory=_dist, html=True), name="static")
     return app
@@ -458,12 +476,20 @@ class _SPAStaticFiles(StaticFiles):
 # Serve built frontend when it exists (src/settlrl_render/server.py -> package root)
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
+
 # The uvicorn entry point (settlrl_render.server:app). ROOT_PATH is the proxy
 # prefix when served under a path (e.g. /settlrl behind Caddy's handle_path).
+def _admin_emails() -> frozenset[str]:
+    raw = os.environ.get("SETTLRL_RENDER_ADMIN_EMAILS", "")
+    return frozenset(e.strip() for e in raw.split(",") if e.strip())
+
+
 app = create_app(
     root_path=os.environ.get("ROOT_PATH", ""),
     max_streams=int(os.environ.get("SETTLRL_RENDER_MAX_STREAMS", "64")),
     state_dir=os.environ.get("SETTLRL_RENDER_STATE_DIR") or None,
     turn_timeout=float(os.environ.get("SETTLRL_RENDER_TURN_TIMEOUT_S", "0")),
     max_active=int(os.environ.get("SETTLRL_RENDER_MAX_ACTIVE", "16")),
+    user_db=os.environ.get("SETTLRL_RENDER_USER_DB") or None,
+    admin_emails=_admin_emails(),
 )
