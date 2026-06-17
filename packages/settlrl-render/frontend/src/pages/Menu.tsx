@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
+import MyGames from "../components/MyGames";
 import ThemeToggle from "../components/ThemeToggle";
+import { currentUser, type AuthUser } from "../lib/auth";
 import { panelStyle } from "../lib/ui";
 
 const cardStyle: React.CSSProperties = {
@@ -26,6 +29,10 @@ function MenuCard({ to, title, subtitle }: { to: string; title: string; subtitle
 }
 
 export default function Menu() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  useEffect(() => {
+    void currentUser().then(setUser);
+  }, []);
   return (
     <div
       style={{
@@ -51,13 +58,14 @@ export default function Menu() {
           gap: 10,
         }}
       >
-        <AccountMenu />
+        <AccountMenu user={user} onUser={setUser} />
         <ThemeToggle />
       </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
         <MenuCard to="/play" title="Play" subtitle="Start a new game and take turns on the board." />
         <MenuCard to="/replay" title="Replay" subtitle="Step through a recorded game from start to finish." />
       </div>
+      <MyGames user={user} />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import { createGame, joinGame, type GameAction, type GameSnapshot, type NewGameConfig } from "../lib/game";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
+import { authToken } from "../lib/auth";
 import {
   parseTokens,
   rememberGame,
@@ -88,13 +89,20 @@ export default function PlayView() {
     joining.current = false;
     if (gameId) rememberGame(gameId);
   }, [gameId]);
+  const { snapshot, error, busy, act, chat } = useGame(gameId ?? null, tokens);
   // Deep-linked with no claim: take the first free human seat, else spectate.
+  // When signed in, wait for the snapshot and skip if the account already owns a
+  // seat here (your_seats covers us; a join would grab a second seat).
   useEffect(() => {
     if (!gameId || joinFailed || joining.current || Object.keys(tokens).length > 0) return;
     // The tokens state is stale in the render right after navigating from
     // start(); read storage directly so a creator's own fresh claims never
     // trigger a join (which would grab an invitee's seat).
     if (Object.keys(tokensFor(gameId)).length > 0) return;
+    if (authToken()) {
+      if (!snapshot) return;
+      if (snapshot.your_seats.length > 0) return;
+    }
     joining.current = true;
     joinGame(gameId).then(
       (j) => {
@@ -107,12 +115,16 @@ export default function PlayView() {
         setJoinFailed(true);
       }
     );
-  }, [gameId, tokens, joinFailed]);
+  }, [gameId, tokens, joinFailed, snapshot]);
 
-  const { snapshot, error, busy, act, chat } = useGame(gameId ?? null, tokens);
+  // The seats this client controls: the server's your_seats (token- or
+  // account-owned) once a snapshot is in, else the local tokens.
   const mySeats = useMemo(
-    () => Object.keys(tokens).map(Number).sort((a, b) => a - b),
-    [tokens]
+    () =>
+      snapshot
+        ? [...snapshot.your_seats].sort((a, b) => a - b)
+        : Object.keys(tokens).map(Number).sort((a, b) => a - b),
+    [snapshot, tokens]
   );
   // The chooser anchored to a clicked board target.
   const [popup, setPopup] = useState<{ actions: GameAction[]; x: number; y: number } | null>(null);

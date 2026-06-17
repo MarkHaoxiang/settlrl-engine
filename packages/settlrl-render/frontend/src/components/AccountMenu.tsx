@@ -1,34 +1,29 @@
-import { useEffect, useState } from "react";
-import {
-  currentUser,
-  login,
-  logout,
-  register,
-  type AuthUser,
-} from "../lib/auth";
+import { useState } from "react";
+import { login, logout, register, type AuthUser } from "../lib/auth";
 import { buttonStyle, panelStyle, smallButtonStyle } from "../lib/ui";
 
 // A compact sign-in / account control for the menu. Accounts are optional —
 // signed out, everything still works — so this stays out of the way until
-// opened. Admins get a note that they can manage bot services via the API.
-export default function AccountMenu() {
-  const [user, setUser] = useState<AuthUser | null>(null);
+// opened. Controlled: the menu owns the user so it can also list their games.
+export default function AccountMenu({
+  user,
+  onUser,
+}: {
+  user: AuthUser | null;
+  onUser: (user: AuthUser | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    void currentUser().then(setUser);
-  }, []);
-
   const submit = async (mode: "login" | "register") => {
     setBusy(true);
     setError(null);
     try {
       if (mode === "register") await register(email, password);
-      setUser(await login(email, password));
+      onUser(await login(email, password));
       setOpen(false);
       setPassword("");
     } catch (e) {
@@ -47,7 +42,7 @@ export default function AccountMenu() {
         </span>
         <button
           style={smallButtonStyle}
-          onClick={() => void logout().then(() => setUser(null))}
+          onClick={() => void logout().then(() => onUser(null))}
         >
           Log out
         </button>

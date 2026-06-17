@@ -7,14 +7,22 @@
 
 import { api, sse } from "./api";
 import type { components } from "./api-schema";
+import { authHeader } from "./auth";
 import { adaptBoard, type Board } from "./boardData";
 import type { SeatTokens } from "./seats";
 
 type Schemas = components["schemas"];
 
+// Every game request carries the seat tokens this device holds *and* the
+// account bearer token (if signed in), so the server recognises seats owned by
+// token or by account. authHeader() is empty when logged out, so the anonymous
+// path is unchanged.
 const seatHeaders = (tokens: SeatTokens): Record<string, string> => {
   const values = Object.values(tokens);
-  return values.length ? { "X-Seat-Tokens": values.join(",") } : {};
+  return {
+    ...(values.length ? { "X-Seat-Tokens": values.join(",") } : {}),
+    ...authHeader(),
+  };
 };
 
 // One legal move: the flat engine index plus whatever geometry / resource
@@ -152,6 +160,8 @@ export async function createGame(
       claim: config.claim,
       ticket,
     }),
+    // Sign-in (if any) ties the creator's claimed seats to their account.
+    headers: authHeader(),
   });
 }
 
@@ -163,6 +173,8 @@ export async function joinGame(
   return api(`/api/games/${gameId}/join`, {
     method: "POST",
     body: JSON.stringify(seat == null ? {} : { seat }),
+    // Sign-in (if any) ties the claimed seat to the account.
+    headers: authHeader(),
   });
 }
 

@@ -61,6 +61,20 @@ export async function logout(): Promise<void> {
   setToken(null);
 }
 
+export interface MyGame {
+  id: string;
+  seats: number[];
+}
+
+// The signed-in user's live games (where their account owns a seat); empty when
+// logged out or on any error.
+export async function myGames(): Promise<MyGame[]> {
+  const resp = await fetch(API_BASE + "/api/me/games", {
+    headers: authHeader(),
+  }).catch(() => null);
+  return resp && resp.ok ? ((await resp.json()) as MyGame[]) : [];
+}
+
 // The signed-in user for the stored token, or null (clearing a dead token).
 export async function currentUser(): Promise<AuthUser | null> {
   const token = authToken();
