@@ -642,12 +642,14 @@ class BatchedSettlrlEnv:
             raise ValueError(f"agent index {agent} out of range [0, {self.n_players})")
         return agent
 
-    def _obs_for(self, sel: jax.Array) -> Observation:
+    def _obs_for(self, sel: AgentSelectionArray) -> Observation:
         """Observation with per-lane ``self`` index ``sel`` (``(B,)`` int array)."""
         return observe_for(self._layout, self._state, sel)
 
 
-def observe_for(layout: BoardLayout, state: BoardState, sel: jax.Array) -> Observation:
+def observe_for(
+    layout: BoardLayout, state: BoardState, sel: AgentSelectionArray
+) -> Observation:
     """:class:`Observation` of a batched board with per-lane observer ``sel``.
 
     The pure builder behind :meth:`BatchedSettlrlEnv.observe`, usable inside a
@@ -810,6 +812,19 @@ def _env_step_core(
         layout, state, (params.idx, params.target)
     )
     legal = jnp.where(action_type == ActionType.PROPOSE_TRADE, propose_ok, legal)
+    # A lane whose current player comes into the step already at the win
+    # threshold is terminal (the win can only have happened on that player's own
+    # turn). Gating its action to INVALID freezes it -- the state, belief diff,
+    # and reward all no-op -- which is how ``auto_reset=False`` lanes stay put
+    # past termination. Under ``auto_reset`` finished lanes were replaced with
+    # fresh 0-VP boards last step, so ``was_done`` is always False there and this
+    # gate never fires.
+    was_done = jnp.any(
+        (state.current_player[:, None] == jnp.arange(n_players))
+        & (vps_before >= VICTORY_POINTS_TO_WIN),
+        axis=1,
+    )  # (B,)
+    legal = legal & ~was_done
     applied, result = _apply_action_v(layout, state, action_type, params, legal)
 
     vps_after = _total_vp_v(applied)
@@ -823,8 +838,8 @@ def _env_step_core(
 
     if belief is not None:
         # Diff the pre-reset transition (sound for every lane); auto-reset
-        # lanes then restart from the empty-board belief. Without auto-reset a
-        # done lane freezes (every further action INVALID, a belief no-op).
+        # lanes then restart from the empty-board belief. A frozen lane's gated
+        # action is INVALID (state unchanged), so its diff is a belief no-op.
         belief = _update_belief_v(belief, state, applied, action_type, params)
         if auto_reset:
             belief = _tree_where_lane(
@@ -833,8 +848,10 @@ def _env_step_core(
 
     if reward_mode == "vp_delta":
         reward = (vps_after - vps_before).astype(jnp.float32)
-    else:  # "sparse": +1 to the winner (the done lane's current player).
-        reward = (is_current & done_lane[:, None]).astype(jnp.float32)
+    else:  # "sparse": +1 to the winner, only on the step that reaches the win.
+        # ``done_lane & ~was_done`` is the *transition* into terminal, so a
+        # frozen lane (already won) is not re-credited each step it sits there.
+        reward = (is_current & (done_lane & ~was_done)[:, None]).astype(jnp.float32)
     terminations = jnp.broadcast_to(done_lane[:, None], (batch_size, n_players))
 
     if auto_reset:
@@ -846,6 +863,10 @@ def _env_step_core(
         # ``applied``, whose VPs were just computed.
         new_vps = jnp.where(done_lane[:, None], 0, vps_after)
     else:
+        # Finished lanes are frozen, not reset: their action was gated to INVALID
+        # above (``was_done``), so ``applied`` already equals the terminal state
+        # and stays there for every further step. Callers manage episode
+        # boundaries themselves (e.g. aec.py).
         new_layout, new_state = layout, applied
         new_vps = vps_after
 

@@ -21,13 +21,19 @@ from settlrl_engine.board.resources import (
     CITY_COST,
     ROAD_COST,
     SETTLEMENT_COST,
+    PlayerResourcesVec,
 )
 from settlrl_engine.board.state import (
     CITY,
     MAX_ROADS,
     SETTLEMENT,
     BoardState,
+    BoolScalar,
+    EdgeRoadVec,
     GamePhase,
+    IntScalar,
+    VertexOwnerVec,
+    VertexTypeVec,
     to_u8,
 )
 
@@ -53,9 +59,9 @@ TwoIndexParams = tuple[IndexParam, IndexParam]  # e.g. (tile, victim), (give, re
 # Single-game legality-core signatures, keyed by their native param shape. Used
 # by the flattening / enumeration helpers in ``action`` that close over a board
 # and map a core over a static parameter domain.
-IndexAvail = Callable[[BoardLayout, BoardState, jax.Array], jax.Array]
-PairAvail = Callable[[BoardLayout, BoardState, tuple[jax.Array, jax.Array]], jax.Array]
-NoneAvail = Callable[[BoardLayout, BoardState, None], jax.Array]
+IndexAvail = Callable[[BoardLayout, BoardState, IntScalar], BoolScalar]
+PairAvail = Callable[[BoardLayout, BoardState, tuple[IntScalar, IntScalar]], BoolScalar]
+NoneAvail = Callable[[BoardLayout, BoardState, None], BoolScalar]
 
 
 class ActionResult(IntEnum):
@@ -74,12 +80,12 @@ INVALID = jnp.int32(ActionResult.INVALID.value)
 GAME_COMPLETE = jnp.int32(ActionResult.GAME_COMPLETE.value)
 
 
-def main_after_roll(state: BoardState) -> jax.Array:
+def main_after_roll(state: BoardState) -> BoolScalar:
     """MAIN phase with the dice already rolled: the build / bank-trade window."""
     return (state.phase == GamePhase.MAIN) & (state.has_rolled != 0)
 
 
-def dev_play_window(state: BoardState) -> jax.Array:
+def dev_play_window(state: BoardState) -> BoolScalar:
     """ROLL (before rolling) or MAIN, with no development card played yet:
     the rulebook's "any time during your turn" window for the one dev card."""
     in_turn = (state.phase == GamePhase.ROLL) | (state.phase == GamePhase.MAIN)
@@ -102,41 +108,41 @@ CITY_COST_ARR = jnp.array(CITY_COST, dtype=jnp.int32)
 DEV_CARD_COST_ARR = jnp.array(DEV_CARD_COST, dtype=jnp.int32)
 
 
-def roads_left(edge_road: jax.Array, player: jax.Array) -> jax.Array:
+def roads_left(edge_road: EdgeRoadVec, player: IntScalar) -> IntScalar:
     built = jnp.sum(edge_road == player + 1).astype(jnp.int32)
     return MAX_ROADS - built
 
 
 def count_settlements(
-    vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
-) -> jax.Array:
+    vertex_owner: VertexOwnerVec, vertex_type: VertexTypeVec, player: IntScalar
+) -> IntScalar:
     return jnp.sum((vertex_owner == player + 1) & (vertex_type == SETTLEMENT)).astype(
         jnp.int32
     )
 
 
 def count_cities(
-    vertex_owner: jax.Array, vertex_type: jax.Array, player: jax.Array
-) -> jax.Array:
+    vertex_owner: VertexOwnerVec, vertex_type: VertexTypeVec, player: IntScalar
+) -> IntScalar:
     return jnp.sum((vertex_owner == player + 1) & (vertex_type == CITY)).astype(
         jnp.int32
     )
 
 
-def can_afford(resources_row: jax.Array, cost_arr: jax.Array) -> jax.Array:
+def can_afford(resources_row: jax.Array, cost_arr: jax.Array) -> BoolScalar:
     """True if a single player's resource row covers ``cost_arr``."""
     return jnp.all(resources_row.astype(jnp.int32) >= cost_arr)
 
 
 def pay(
-    player_resources: jax.Array, player: jax.Array, cost_arr: jax.Array
-) -> jax.Array:
+    player_resources: PlayerResourcesVec, player: IntScalar, cost_arr: jax.Array
+) -> PlayerResourcesVec:
     """Subtract ``cost_arr`` from ``player``'s row (clipped at 0), returning uint8."""
     updated = player_resources.astype(jnp.int32).at[player].add(-cost_arr)
     return to_u8(updated)
 
 
-def player_total_vp(state: BoardState, player: jax.Array) -> jax.Array:
+def player_total_vp(state: BoardState, player: IntScalar) -> IntScalar:
     """Building VP + awards + hidden Victory Point cards for ``player``."""
     total = state.victory_points[player].astype(jnp.int32)
     total += jnp.where(state.longest_road_owner == player, 2, 0)
@@ -145,7 +151,7 @@ def player_total_vp(state: BoardState, player: jax.Array) -> jax.Array:
     return total
 
 
-def agent_selection_single(state: BoardState) -> jax.Array:
+def agent_selection_single(state: BoardState) -> IntScalar:
     """Acting player for one game: the discarder during DISCARD, the proposed-to
     partner during TRADE_RESPONSE, else current."""
     owes = state.pending_discard > 0

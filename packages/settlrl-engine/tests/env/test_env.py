@@ -187,6 +187,39 @@ class TestBatchedSettlrlEnv:
         assert int(e._state.vertex_owner[1, 5]) == 0
         assert int(e._state.victory_points[1, 0]) == 0
 
+    def test_no_auto_reset_freezes_terminated_lane(self) -> None:
+        # auto_reset=False: a finished lane freezes at its terminal board. The
+        # win is credited exactly once (on the step that reaches it); further
+        # steps neither mutate the lane nor re-credit the sparse reward.
+        from settlrl_engine.env.batched import _total_vp_b
+
+        e = BatchedSettlrlEnv(batch_size=1, seed=8, n_players=2, auto_reset=False)
+        # Player 1 sits at 10 VP off-turn; player 0 (current, MAIN) ends the
+        # turn, so player 1 claims the win at their turn start (rulebook p.5).
+        e._state = e._state._replace(
+            phase=e._state.phase.at[0].set(int(GamePhase.MAIN)),
+            has_rolled=e._state.has_rolled.at[0].set(1),
+            current_player=e._state.current_player.at[0].set(0),
+            victory_points=e._state.victory_points.at[0, 1].set(10),
+        )
+        # Refresh the caches the step gate reads after the direct state surgery.
+        e._avail = flat_available_b(e._layout, e._state)
+        e._vps = _total_vp_b(e._state)
+        end = jnp.asarray([int(ActionType.END_TURN)], jnp.int32)
+
+        e.step(end, _batch_params([0]))
+        assert bool(e.terminations[0, 0])
+        assert float(e.rewards[0, 1]) == 1.0  # winner credited once
+        assert float(e.rewards[0, 0]) == 0.0
+        frozen = np.asarray(e._state.current_player)
+
+        for _ in range(2):  # frozen: no mutation, no re-credit, still terminal
+            e.step(end, _batch_params([0]))
+            assert bool(e.terminations[0, 0])
+            assert float(e.rewards[0, 1]) == 0.0
+            assert float(e.rewards[0, 0]) == 0.0
+            assert np.array_equal(np.asarray(e._state.current_player), frozen)
+
     def test_vp_delta_reward(self) -> None:
         from settlrl_engine.env.batched import _total_vp_b
 
@@ -441,3 +474,161 @@ class TestBundleTradeThroughTheEnv:
         )
         assert int(e._result[0]) == ActionResult.INVALID.value
         assert int(e._state.phase[0]) == GamePhase.MAIN
+
+
+def _install(e: BatchedSettlrlEnv, board: tuple[Any, Any]) -> None:
+    """Point ``e`` at a hand-built board and refresh the caches step() reads:
+    the cached flat legality (the action gate) and the VP baseline the reward
+    diffs against (``was_done`` / ``vp_delta``)."""
+    from settlrl_engine.env.batched import _agent_selection_b, _total_vp_b
+
+    e._layout, e._state = board
+    e._avail = flat_available_b(*board)
+    e._vps = _total_vp_b(board[1])
+    e._agent_sel = _agent_selection_b(board[1])
+
+
+def _legal_knight(e: BatchedSettlrlEnv) -> tuple[int, int]:
+    """A legal ``(tile, victim)`` PlayKnight for lane 0, decoded off the table
+    (the steal target depends on the board, so read it from the legality sweep
+    rather than hard-coding an encoding)."""
+    from settlrl_engine.env import N_FLAT, flat_to_action
+
+    types, params = flat_to_action(jnp.arange(N_FLAT, dtype=jnp.int32))
+    legal = np.asarray(e.flat_mask()[0])
+    rows = np.flatnonzero((np.asarray(types) == int(ActionType.PLAY_KNIGHT)) & legal)
+    assert rows.size, "no legal PlayKnight on the hand-built board"
+    row = int(rows[0])
+    return int(params.idx[row]), int(params.target[row])
+
+
+class TestExpectedReward:
+    """Hand-designed boards with a known reward for the next move, driven end to
+    end through ``step()``: sparse (+1 to the winner on the terminal step) and
+    vp_delta (each player's total-VP change this step), plus the freeze that
+    keeps a terminal lane from being re-credited."""
+
+    def test_sparse_win_by_city_build(self) -> None:
+        from settlrl_engine.board import give, place_city, place_settlement, to_main
+
+        # 2 cities (4 VP) + 5 settlements (5 VP) = 9; upgrading a settlement to a
+        # city reaches 10 on player 0's own turn -> player 0 wins.
+        b = make_board(seed=0, n_players=2)
+        for v in (0, 2):
+            b = place_city(b, 0, v)
+        for v in (4, 6, 8, 10, 12):
+            b = place_settlement(b, 0, v)
+        b = to_main(give(b, 0, [0, 5, 0, 0, 5]))  # ample city resources
+        # auto_reset=False keeps the terminal board for inspection.
+        e = BatchedSettlrlEnv(
+            batch_size=1, seed=0, n_players=2, reward="sparse", auto_reset=False
+        )
+        _install(e, b)
+
+        e.step(jnp.array([int(ActionType.BUILD_CITY)], jnp.int32), _batch_params([4]))
+        assert int(e.infos["result"][0]) == ActionResult.GAME_COMPLETE.value
+        assert int(e._vps[0, 0]) == 10  # 3 cities + 4 settlements, on own turn
+        assert bool(e.terminations[0, 0])
+        assert [float(x) for x in e.rewards[0]] == [1.0, 0.0]
+
+    def test_sparse_win_by_largest_army(self) -> None:
+        from settlrl_engine.board import give_dev_card, place_city, to_main
+        from settlrl_engine.board.dev_cards import DevCard
+
+        # 4 cities (8 VP); playing a 3rd knight takes Largest Army (+2) -> 10 VP.
+        b = make_board(seed=1, n_players=2)
+        for v in (0, 2, 4, 6):
+            b = place_city(b, 0, v)
+        b = give_dev_card(b, 0, DevCard.KNIGHT, 1)
+        layout, st = to_main(b)
+        st = st._replace(knights_played=st.knights_played.at[0, 0].set(2))
+        e = BatchedSettlrlEnv(
+            batch_size=1, seed=1, n_players=2, reward="sparse", auto_reset=False
+        )
+        _install(e, (layout, st))
+
+        tile, victim = _legal_knight(e)
+        e.step(
+            jnp.array([int(ActionType.PLAY_KNIGHT)], jnp.int32),
+            _batch_params([tile], [victim]),
+        )
+        assert int(e._state.largest_army_owner[0]) == 0  # award taken
+        assert int(e._vps[0, 0]) == 10  # 8 building + 2 for the army
+        assert bool(e.terminations[0, 0])
+        assert [float(x) for x in e.rewards[0]] == [1.0, 0.0]
+
+    def test_sparse_non_winning_build_pays_nothing(self) -> None:
+        from settlrl_engine.board import give, place_settlement, to_main
+
+        # Upgrading a lone settlement reaches only 2 VP: nobody wins, no reward.
+        b = place_settlement(make_board(seed=2, n_players=2), 0, 0)
+        b = to_main(give(b, 0, [0, 5, 0, 0, 5]))
+        e = BatchedSettlrlEnv(batch_size=1, seed=2, n_players=2, reward="sparse")
+        _install(e, b)
+
+        e.step(jnp.array([int(ActionType.BUILD_CITY)], jnp.int32), _batch_params([0]))
+        assert int(e.infos["result"][0]) == ActionResult.SUCCESS.value
+        assert not bool(e.terminations[0, 0])
+        assert [float(x) for x in e.rewards[0]] == [0.0, 0.0]
+
+    def test_vp_delta_credits_award_gain(self) -> None:
+        from settlrl_engine.board import give_dev_card, to_main
+        from settlrl_engine.board.dev_cards import DevCard
+
+        # No buildings; a 3rd knight grants Largest Army -> +2 VP this step.
+        b = give_dev_card(make_board(seed=3, n_players=2), 0, DevCard.KNIGHT, 1)
+        layout, st = to_main(b)
+        st = st._replace(knights_played=st.knights_played.at[0, 0].set(2))
+        e = BatchedSettlrlEnv(batch_size=1, seed=3, n_players=2, reward="vp_delta")
+        _install(e, (layout, st))
+
+        tile, victim = _legal_knight(e)
+        e.step(
+            jnp.array([int(ActionType.PLAY_KNIGHT)], jnp.int32),
+            _batch_params([tile], [victim]),
+        )
+        assert int(e._state.largest_army_owner[0]) == 0
+        assert not bool(e.terminations[0, 0])
+        assert [float(x) for x in e.rewards[0]] == [2.0, 0.0]
+
+    def test_vp_delta_zero_when_no_vp_change(self) -> None:
+        from settlrl_engine.board import give, to_main
+
+        # A maritime trade moves cards but no VP: zero reward for everyone.
+        b = to_main(give(make_board(seed=4, n_players=2), 0, [4, 0, 0, 0, 0]))
+        e = BatchedSettlrlEnv(batch_size=1, seed=4, n_players=2, reward="vp_delta")
+        _install(e, b)
+
+        # 4 sheep -> 1 wheat at the bank's 4:1 rate (no port owned).
+        e.step(
+            jnp.array([int(ActionType.MARITIME_TRADE)], jnp.int32),
+            _batch_params([0], [1]),
+        )
+        assert int(e.infos["result"][0]) == ActionResult.SUCCESS.value
+        assert [float(x) for x in e.rewards[0]] == [0.0, 0.0]
+
+    def test_terminal_lane_credits_win_once_then_freezes(self) -> None:
+        from settlrl_engine.board import to_main
+
+        # Player 1 sits at 10 VP off-turn; player 0 (current, MAIN) ends the
+        # turn, so player 1 claims the win at their turn start (rulebook p.5).
+        # auto_reset=False: the win is credited once, then the lane freezes and
+        # is never re-credited (the regression this guards against).
+        layout, st = to_main(make_board(seed=8, n_players=2))
+        st = st._replace(victory_points=st.victory_points.at[0, 1].set(10))
+        e = BatchedSettlrlEnv(
+            batch_size=1, seed=8, n_players=2, reward="sparse", auto_reset=False
+        )
+        _install(e, (layout, st))
+        end = jnp.array([int(ActionType.END_TURN)], jnp.int32)
+
+        e.step(end, _batch_params([0]))
+        assert bool(e.terminations[0, 0])
+        assert [float(x) for x in e.rewards[0]] == [0.0, 1.0]  # credited once
+        frozen = np.asarray(e._state.current_player)
+
+        for _ in range(2):  # frozen: no mutation, no re-credit, still terminal
+            e.step(end, _batch_params([0]))
+            assert bool(e.terminations[0, 0])
+            assert [float(x) for x in e.rewards[0]] == [0.0, 0.0]
+            assert np.array_equal(np.asarray(e._state.current_player), frozen)
