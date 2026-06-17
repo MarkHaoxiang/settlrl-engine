@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from settlrl_reference.game import Action, Game, MoveRobber, PlayKnight, PlayMonopoly
-from settlrl_reference.types import DEV_CARDS, RESOURCES, DevCard
+from settlrl_game.reference.game import Action, Game, MoveRobber, PlayKnight, PlayMonopoly
+from settlrl_game.reference.types import DEV_CARDS, RESOURCES, DevCard
 
 _NR = len(RESOURCES)
 

@@ -1,12 +1,12 @@
 """Geometry smoke check for the renderer's coordinate tables.
 
 ``convert.py`` builds its tile / vertex / edge coordinate tables from
-``settlrl_reference.board``'s cube lookups, so they can no longer drift. This
+``settlrl_game.reference.board``'s cube lookups, so they can no longer drift. This
 sanity-checks counts and internal consistency (no stray placeholders).
 """
 
-from settlrl_reference import board as rb
-from settlrl_render.api.convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS
+from settlrl_game.reference import board as rb
+from settlrl_game.convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS
 
 
 def test_counts_match_reference() -> None:

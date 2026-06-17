@@ -1,10 +1,19 @@
-# settlrl-reference library
+# settlrl-game library
+
+The Settlrl game model shared by `settlrl-app` and the bot service. It is
+engine-free (depends only on the reference rules below + pydantic), so both the
+web app and the agents' bot service can build on it without pulling in the JAX
+engine, and `settlrl-engine`'s tests can use the reference as their oracle
+without a dependency cycle.
+
+## `settlrl_game.reference` — the reference rules
 
 A plain-Python gold-standard implementation of the Settlrl base game, written from
 the official rulebook. It is the independent oracle for `settlrl-engine`: the two
 are driven with the same action stream and their states compared (see
 `packages/settlrl-engine/tests/conversion.py` and `test_reference_equivalence.py`).
-Optimise for correctness and clarity, never speed; no jax/numpy.
+Optimise for correctness and clarity, never speed; no jax/numpy. The source files
+below live under `src/settlrl_game/reference/`.
 
 ## Source files
 
@@ -88,5 +97,5 @@ Optimise for correctness and clarity, never speed; no jax/numpy.
 ## Checks
 
 ```bash
-uv run --package settlrl-reference mypy packages/settlrl-reference/src
+uv run --package settlrl-game mypy packages/settlrl-game/src
 ```

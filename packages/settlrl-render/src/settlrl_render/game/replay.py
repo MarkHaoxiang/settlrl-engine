@@ -9,10 +9,10 @@ of the game is a lookup, not a re-simulation. Replaying validates the record
 
 from __future__ import annotations
 
-from settlrl_render.api.actions import decode_actions
-from settlrl_render.api.convert import board_to_model
-from settlrl_render.api.models import BoardModel, LogEntryModel, ReplayStateModel
-from settlrl_render.game.record import GameRecord, initial_game, replay
+from settlrl_game.actions import decode_actions
+from settlrl_game.convert import board_to_model
+from settlrl_game.models import BoardModel, LogEntryModel, ReplayStateModel
+from settlrl_game.record import GameRecord, initial_game, replay
 
 # Refuse pathologically long records (snapshots are kept in memory).
 _MAX_MOVES = 20_000

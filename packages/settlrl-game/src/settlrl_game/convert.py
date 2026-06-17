@@ -1,8 +1,8 @@
-"""Convert a ``settlrl_reference`` game into the renderer's wire model.
+"""Convert a ``settlrl_game.reference`` game into the renderer's wire model.
 
 Bridges a reference ``Game`` (its ``Layout`` plus the live occupancy/hands) to
 the JSON-friendly :class:`BoardModel`. All geometry comes from
-``settlrl_reference.board``'s cube lookups; the reference's enum order
+``settlrl_game.reference.board``'s cube lookups; the reference's enum order
 (``Resource`` / ``DevCard``) is the order the wire models declare their fields,
 so positional reads line up.
 """
@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-import settlrl_reference as ref
-from settlrl_reference import board as rb
+import settlrl_game.reference as ref
+from settlrl_game.reference import board as rb
 
-from settlrl_render.api.models import (
+from settlrl_game.models import (
     BankModel,
     BoardModel,
     BuildingModel,
@@ -39,7 +39,7 @@ Cube = tuple[int, int, int]
 _RESOURCE_NAMES: tuple[PortResource, ...] = tuple(r.name.lower() for r in ref.RESOURCES)  # type: ignore[misc]
 _DEV_CARD_NAMES: tuple[str, ...] = tuple(d.name.lower() for d in ref.DevCard)
 
-# -- Geometry (from settlrl_reference.board's cube lookups) ------------------
+# -- Geometry (from settlrl_game.reference.board's cube lookups) ------------------
 
 VERTEX_COORDS: tuple[Cube, ...] = tuple(rb.vertex_cube(v) for v in range(rb.N_VERTICES))
 EDGE_VERTICES: tuple[tuple[int, int], ...] = tuple(

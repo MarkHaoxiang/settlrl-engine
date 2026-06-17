@@ -12,8 +12,8 @@ from fastapi import APIRouter, HTTPException
 from starlette.responses import Response
 
 from settlrl_render.api.deps import Deps, ReplaySlot
-from settlrl_render.api.models import ReplayStateModel
-from settlrl_render.game.record import GameRecord, ReplayError
+from settlrl_game.models import ReplayStateModel
+from settlrl_game.record import GameRecord, ReplayError
 from settlrl_render.game.replay import ReplaySession
 
 # Replaying a submitted record steps the reference once per move; cap the count so

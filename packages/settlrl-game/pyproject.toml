@@ -1,13 +1,17 @@
 [project]
-name = "settlrl-reference"
+name = "settlrl-game"
 version = "0.1.0"
-description = "A plain-Python gold-standard reference implementation of the Settlrl rules, used to differentially test settlrl-engine."
+description = "The Settlrl game model: the plain-Python reference rules (settlrl_game.reference) plus the serialization/replay layer the app and bot service share."
 readme = "README.md"
 authors = [
     { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # The serialization/replay layer (models, convert, actions, session) is
+    # built on pydantic; the reference rules themselves stay dependency-free.
+    "pydantic>=2.11",
+]
 
 [build-system]
 requires = ["hatchling"]

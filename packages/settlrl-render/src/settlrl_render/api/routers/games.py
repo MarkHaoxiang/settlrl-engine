@@ -13,19 +13,19 @@ from random import Random
 from typing import Annotated, Literal
 
 import anyio.to_thread
-import settlrl_reference as ref
+import settlrl_game.reference as ref
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.responses import Response
 
-from settlrl_render.api.convert import board_to_model
+from settlrl_game.convert import board_to_model
 from settlrl_render.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
-from settlrl_render.api.models import BoardModel, GameModel, ReplayStateModel
+from settlrl_game.models import BoardModel, GameModel, ReplayStateModel
 from settlrl_render.api.routers.replay import load_replay
 from settlrl_render.api.views import game_model
 from settlrl_render.game.games import QueuePosition, RegistryFullError
-from settlrl_render.game.session import HUMAN, GameSession, IllegalActionError
+from settlrl_game.session import HUMAN, GameSession, IllegalActionError
 from settlrl_render.storage.db import User
 
 

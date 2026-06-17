@@ -30,7 +30,7 @@ from fastapi import FastAPI, HTTPException
 from settlrl_render.bots.bots import bot_act, bot_catalog
 from settlrl_render.bots.bridge import engine_env, renderer_flat
 from settlrl_render.bots.providers import ActRequest, ActResponse
-from settlrl_render.game.session import (
+from settlrl_game.session import (
     HUMAN,
     GameSession,
     GameSetup,

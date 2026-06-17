@@ -5,9 +5,9 @@ routes never touch a session's state except through :func:`game_model`. The
 event stream pushes the same per-seat snapshot.
 """
 
-from settlrl_render.api.actions import decode_actions
-from settlrl_render.api.convert import board_to_model
-from settlrl_render.api.models import GameModel
+from settlrl_game.actions import decode_actions
+from settlrl_game.convert import board_to_model
+from settlrl_game.models import GameModel
 from settlrl_render.game.games import GameHandle
 
 

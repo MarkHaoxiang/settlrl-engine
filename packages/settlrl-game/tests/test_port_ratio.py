@@ -9,8 +9,8 @@ check the chosen ratio per resource.
 from __future__ import annotations
 
 from conftest import make_game, make_layout, place
-from settlrl_reference.board import Layout, Port
-from settlrl_reference.types import Building, PortType, Resource
+from settlrl_game.reference.board import Layout, Port
+from settlrl_game.reference.types import Building, PortType, Resource
 
 # Distinct, well-separated vertices to carry the ports (geometry is irrelevant to
 # port_ratio, which only looks up the port at each owned vertex).

@@ -1,6 +1,6 @@
 """Bridge a reference game into a single-game engine env for the bot service.
 
-The game server speaks ``settlrl_reference``; the agents (``settlrl_agents``) reason
+The game server speaks ``settlrl_game.reference``; the agents (``settlrl_agents``) reason
 on a ``settlrl_engine`` board. This module rebuilds the engine's ``(BoardLayout,
 BoardState)`` and ``BeliefState`` from a reference ``Game`` + ``Belief`` (the
 inverse of the engine test's ``conversion`` bridge), wraps them in a
@@ -8,14 +8,14 @@ inverse of the engine test's ``conversion`` bridge), wraps them in a
 chosen engine action back to the renderer's flat index.
 
 Index translation is by cube coordinate, the only thing the two libraries share
-(see ``settlrl_reference.board`` and ``settlrl_engine.board.layout``).
+(see ``settlrl_game.reference.board`` and ``settlrl_engine.board.layout``).
 """
 
 from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-import settlrl_reference as ref
+import settlrl_game.reference as ref
 from settlrl_engine.belief import BeliefState
 from settlrl_engine.board import layout as eng_layout
 from settlrl_engine.board import make_board
@@ -38,9 +38,9 @@ from settlrl_engine.env.batched import (
 from settlrl_engine.mechanics.action import ActionType
 from settlrl_engine.mechanics.flat import flat_available_b
 from settlrl_engine.mechanics.trade import _COUNT_BITS, _COUNT_MASK, _PARTNER_BITS
-from settlrl_reference import board as rb
+from settlrl_game.reference import board as rb
 
-from settlrl_render.api.actions import flat_for_action
+from settlrl_game.actions import flat_for_action
 
 _N_DEV = len(DEV_CARD_COUNTS)
 _DESERT = N_RESOURCES  # engine Tile value for the desert

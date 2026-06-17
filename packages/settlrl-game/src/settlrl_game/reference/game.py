@@ -17,9 +17,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from settlrl_reference import board
-from settlrl_reference.board import Layout
-from settlrl_reference.types import (
+from settlrl_game.reference import board
+from settlrl_game.reference.board import Layout
+from settlrl_game.reference.types import (
     BANK_INITIAL,
     CITY_COST,
     DEV_CARD_COST,

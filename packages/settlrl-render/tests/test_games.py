@@ -10,7 +10,7 @@ from settlrl_render.game.games import (
     QueuePosition,
     RegistryFullError,
 )
-from settlrl_render.game.session import GameSession
+from settlrl_game.session import GameSession
 
 # A touch time well past every eviction TTL. Relative to ``monotonic()`` rather
 # than 0.0, which is only "ancient" when the clock's origin is far in the past

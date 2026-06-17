@@ -3,9 +3,9 @@ their field order must match the reference ``Resource`` / ``DevCard`` enums, and
 every terrain must have a wire ``Terrain`` member. Pin them here.
 """
 
-import settlrl_reference as ref
-from settlrl_render.api.convert import _RESOURCE_NAMES
-from settlrl_render.api.models import DevCardCounts, ResourceCounts, Terrain
+import settlrl_game.reference as ref
+from settlrl_game.convert import _RESOURCE_NAMES
+from settlrl_game.models import DevCardCounts, ResourceCounts, Terrain
 
 # The five resources, in reference (Resource) order.
 _RESOURCES = tuple(r.name.lower() for r in ref.RESOURCES)

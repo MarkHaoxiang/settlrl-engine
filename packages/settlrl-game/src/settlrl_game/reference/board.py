@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from random import Random
 from typing import Literal
 
-from settlrl_reference.types import PortType, Resource
+from settlrl_game.reference.types import PortType, Resource
 
 Cube = tuple[int, int, int]
 

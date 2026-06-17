@@ -16,11 +16,11 @@ from enum import Enum
 
 import anyio.to_thread
 
-from settlrl_render.api.actions import decode_actions
-from settlrl_render.api.models import BotMoveModel
+from settlrl_game.actions import decode_actions
+from settlrl_game.models import BotMoveModel
 from settlrl_render.bots.providers import ProviderRegistry, RemoteBotError
 from settlrl_render.game.games import GameHandle
-from settlrl_render.game.session import HUMAN, IllegalActionError
+from settlrl_game.session import HUMAN, IllegalActionError
 
 
 class _Due(Enum):

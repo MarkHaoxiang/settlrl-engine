@@ -1,4 +1,4 @@
-"""A single live Settlrl game, backed by the plain-Python ``settlrl_reference``.
+"""A single live Settlrl game, backed by the plain-Python ``settlrl_game.reference``.
 
 ``GameSession`` wraps a reference ``Game``: each seat is a human (hotseat) or a
 bot played by a remote bot service (:mod:`settlrl_render.bots.providers`) — the
@@ -19,11 +19,11 @@ from dataclasses import dataclass
 from random import Random
 from typing import Literal, cast
 
-import settlrl_reference as ref
+import settlrl_game.reference as ref
 
-from settlrl_render.api.actions import N_FLAT, decode_actions, legal_flats, to_action
-from settlrl_render.api.convert import _RESOURCE_NAMES
-from settlrl_render.api.models import (
+from settlrl_game.actions import N_FLAT, decode_actions, legal_flats, to_action
+from settlrl_game.convert import _RESOURCE_NAMES
+from settlrl_game.models import (
     BeliefModel,
     GameStatusModel,
     LogEntryModel,
@@ -31,7 +31,7 @@ from settlrl_render.api.models import (
     ResourceCounts,
     TradeOfferModel,
 )
-from settlrl_render.game.record import GameRecord, Move
+from settlrl_game.record import GameRecord, Move
 
 # A seat assignment: "human", a bot kind, or a configured bot
 # {"kind": name, "params": {knob: value}}.

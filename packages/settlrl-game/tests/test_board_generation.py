@@ -10,15 +10,15 @@ import copy
 from collections import Counter
 from random import Random
 
-import settlrl_reference as ref
-from settlrl_reference.board import (
+import settlrl_game.reference as ref
+from settlrl_game.reference.board import (
     _NUMBER_TOKENS,
     _PORT_VERTICES,
     _SPIRAL_TILE_ORDER,
     _TERRAIN,
     SPIRAL_NUMBERS,
 )
-from settlrl_reference.game import (
+from settlrl_game.reference.game import (
     Action,
     BuyDevelopmentCard,
     Game,
@@ -26,7 +26,7 @@ from settlrl_reference.game import (
     PlayKnight,
     Roll,
 )
-from settlrl_reference.types import RESOURCES, PortType
+from settlrl_game.reference.types import RESOURCES, PortType
 
 
 def _fill(game: Game, action: Action, rng: Random) -> Action:

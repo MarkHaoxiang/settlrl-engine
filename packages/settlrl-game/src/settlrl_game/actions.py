@@ -2,7 +2,7 @@
 
 The frontend identifies a move by an opaque integer (``flat``). This module
 fixes an enumeration of every concrete action (``_ROWS``), maps a flat index to
-the ``settlrl_reference`` ``Action`` it names (and back), lists the flats legal
+the ``settlrl_game.reference`` ``Action`` it names (and back), lists the flats legal
 in a game, and decodes a flat into the JSON :class:`ActionModel` the frontend
 acts on — geometry expressed in the cube/axial coordinates the SVG board uses.
 The ordering is the renderer's own; the frontend never assumes specific values.
@@ -10,17 +10,17 @@ The ordering is the renderer's own; the frontend never assumes specific values.
 
 from __future__ import annotations
 
-import settlrl_reference as ref
-from settlrl_reference import board as rb
+import settlrl_game.reference as ref
+from settlrl_game.reference import board as rb
 
-from settlrl_render.api.convert import (
+from settlrl_game.convert import (
     _RESOURCE_NAMES,
     EDGE_VERTICES,
     TILE_COORDS,
     VERTEX_COORDS,
     _cube,
 )
-from settlrl_render.api.models import ActionModel, EdgeModel, HexModel
+from settlrl_game.models import ActionModel, EdgeModel, HexModel
 
 __all__ = ["N_FLAT", "decode_actions", "flat_for_action", "legal_flats", "to_action"]
 

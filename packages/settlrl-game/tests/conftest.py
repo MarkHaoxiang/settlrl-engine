@@ -9,10 +9,10 @@ vary, so the helpers below build just enough of those by hand.
 
 from __future__ import annotations
 
-from settlrl_reference import board
-from settlrl_reference.board import Layout, Port
-from settlrl_reference.game import Game, Player
-from settlrl_reference.types import (
+from settlrl_game.reference import board
+from settlrl_game.reference.board import Layout, Port
+from settlrl_game.reference.game import Game, Player
+from settlrl_game.reference.types import (
     N_PLAYERS,
     Building,
     Phase,

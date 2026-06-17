@@ -15,9 +15,9 @@ from dataclasses import asdict, dataclass, field
 from random import Random
 from typing import Literal
 
-import settlrl_reference as ref
+import settlrl_game.reference as ref
 
-from settlrl_render.api.actions import to_action
+from settlrl_game.actions import to_action
 
 
 class ReplayError(ValueError):

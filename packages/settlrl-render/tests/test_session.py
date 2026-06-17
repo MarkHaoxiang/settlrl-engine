@@ -7,8 +7,8 @@ record export.
 """
 
 import pytest
-from settlrl_render.game.record import GameRecord, replay
-from settlrl_render.game.session import HUMAN, GameSession
+from settlrl_game.record import GameRecord, replay
+from settlrl_game.session import HUMAN, GameSession
 
 _BOTS = frozenset({"random"})  # an accepted "remote" kind for these tests
 

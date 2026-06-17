@@ -1,9 +1,13 @@
-# settlrl-reference
+# settlrl-game
 
-A plain-Python, gold-standard reference implementation of the
-Settlrl base-game rules.
+The Settlrl game model shared by the app and the bot service: the plain-Python
+reference rules (`settlrl_game.reference`) plus the serialization/replay layer
+built on them.
 
-It models a single game with ordinary Python objects and straightforward control
+## Reference rules (`settlrl_game.reference`)
+
+A gold-standard reference implementation of the Settlrl base-game rules. It
+models a single game with ordinary Python objects and straightforward control
 flow — no vectorisation, no performance tricks. The goal is to be an obviously
 correct, readable statement of the rules that can serve as an independent oracle
 for the optimised, JAX-native `settlrl-engine`.
@@ -12,7 +16,7 @@ for the optimised, JAX-native `settlrl-engine`.
 
 ```python
 from random import Random
-from settlrl_reference import Game, SetupSettlement, desert_tile, random_layout
+from settlrl_game.reference import Game, SetupSettlement, desert_tile, random_layout
 
 layout = random_layout(Random(0))             # a random standard board
 game = Game.new(layout, desert_tile(layout))  # a fresh game in setup

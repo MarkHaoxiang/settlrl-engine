@@ -11,7 +11,7 @@ import numpy as np
 from _helpers import BOT_KINDS
 from settlrl_render.api.views import game_model
 from settlrl_render.game.games import GameHandle
-from settlrl_render.game.session import GameSession
+from settlrl_game.session import GameSession
 
 
 def _handle(session: GameSession) -> GameHandle:

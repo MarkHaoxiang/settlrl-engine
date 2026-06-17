@@ -18,7 +18,7 @@ from fastapi import Header, HTTPException
 from settlrl_render.bots.providers import ProviderRegistry
 from settlrl_render.game.games import GameHandle, GameRegistry
 from settlrl_render.game.replay import ReplaySession
-from settlrl_render.game.session import HUMAN
+from settlrl_game.session import HUMAN
 from settlrl_render.storage.auth import Auth
 from settlrl_render.storage.db import User
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from random import Random
 
-from settlrl_reference.game import Game
-from settlrl_reference.types import DevCard, Resource
+from settlrl_game.reference.game import Game
+from settlrl_game.reference.types import DevCard, Resource
 
 
 def roll_dice(rng: Random) -> int:

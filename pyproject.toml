@@ -8,7 +8,7 @@ dev = [
     # imports the whole stack without --package indirection.
     "settlrl-agents",
     "settlrl-learn",
-    "settlrl-reference",
+    "settlrl-game",
     "expecttest>=0.2.1",
     "gymnasium>=0.29",
     "hypothesis>=6.131.0",
@@ -46,14 +46,14 @@ default-groups = ["dev", "cuda"]
 [tool.uv.sources]
 settlrl-agents = { workspace = true }
 settlrl-learn = { workspace = true }
-settlrl-reference = { workspace = true }
+settlrl-game = { workspace = true }
 
 [tool.mypy]
 mypy_path = [
     "packages/settlrl-agents/src",
     "packages/settlrl-engine/src",
     "packages/settlrl-render/src",
-    "packages/settlrl-reference/src",
+    "packages/settlrl-game/src",
     "packages/settlrl-learn/src",
 ]
 strict = true

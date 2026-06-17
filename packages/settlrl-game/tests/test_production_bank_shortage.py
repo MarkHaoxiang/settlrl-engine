@@ -9,7 +9,7 @@ a share of the depleted resource, **nobody** receives any of it.
 from __future__ import annotations
 
 from conftest import make_game, make_layout, place, set_resource
-from settlrl_reference.types import BANK_INITIAL, Building, Resource
+from settlrl_game.reference.types import BANK_INITIAL, Building, Resource
 
 
 def test_single_claimant_capped_at_remaining_stock() -> None:

@@ -31,7 +31,7 @@ import random
 import jax
 import jax.numpy as jnp
 import numpy as np
-import settlrl_reference as ref
+import settlrl_game.reference as ref
 from settlrl_engine.belief import BeliefState, make_belief, update_belief
 from settlrl_engine.board import Board, make_board, to_main
 from settlrl_engine.board.dev_cards import DevCard

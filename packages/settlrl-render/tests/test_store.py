@@ -11,7 +11,7 @@ from pathlib import Path
 from _helpers import bot_registry
 from fastapi.testclient import TestClient
 from settlrl_render.game.games import GameRegistry
-from settlrl_render.game.session import GameSession, GameSetup
+from settlrl_game.session import GameSession, GameSetup
 from settlrl_render.server import create_app
 from settlrl_render.storage.db import Database
 from settlrl_render.storage.store import GameStore

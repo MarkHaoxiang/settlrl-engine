@@ -13,8 +13,8 @@ two longest roads are exactly tied.
 from __future__ import annotations
 
 from conftest import make_game, make_layout, place_road_path
-from settlrl_reference.game import Game
-from settlrl_reference.types import LONGEST_ROAD_MIN
+from settlrl_game.reference.game import Game
+from settlrl_game.reference.types import LONGEST_ROAD_MIN
 
 # Two vertex-disjoint paths of 5 edges each (see board.VERTEX_NEIGHBORS).
 PATH_P0 = [0, 5, 3, 13, 11, 23]

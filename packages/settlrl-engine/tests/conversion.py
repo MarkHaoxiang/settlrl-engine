@@ -1,12 +1,12 @@
 """Translate the engine's batched ``Board`` into ``settlrl-reference`` games.
 
-The reference (``settlrl_reference``) is an independent, plain-Python statement of
+The reference (``settlrl_game.reference``) is an independent, plain-Python statement of
 the Settlrl rules used as the differential oracle. The engine stores a *batch* of
 games as JAX arrays with its own vertex/edge/tile indexing; the reference is one
 game at a time with its own indexing. The two share only the cube-coordinate
 *convention* for the physical board, so positions are translated by cube
 coordinate (the engine's ``board/layout.py`` host-side lookups give the cube of
-any engine index; ``settlrl_reference.board`` maps a cube back to its own index).
+any engine index; ``settlrl_game.reference.board`` maps a cube back to its own index).
 
 This module exposes:
 
@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
-import settlrl_reference as ref
+import settlrl_game.reference as ref
 from settlrl_engine.board import Board
 from settlrl_engine.board import layout as eng_layout
 from settlrl_engine.board.dev_cards import N_DEV_CARD_TYPES
@@ -57,7 +57,7 @@ from settlrl_engine.mechanics.trade import (
     _PARTNER_BITS,
     pack_trade,
 )
-from settlrl_reference import board as ref_board
+from settlrl_game.reference import board as ref_board
 
 # --- index bridges (engine index -> reference index, via cube coords) -------
 

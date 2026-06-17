@@ -27,8 +27,8 @@ from typing import cast
 
 import anyio.to_thread
 
-from settlrl_render.api.models import BotMoveModel
-from settlrl_render.game.session import HUMAN, GameSession, GameSetup
+from settlrl_game.models import BotMoveModel
+from settlrl_game.session import HUMAN, GameSession, GameSetup
 from settlrl_render.storage.store import GameJournal, GameStore
 
 # Games are addressed by unguessable ids; tokens prove seat ownership. The id

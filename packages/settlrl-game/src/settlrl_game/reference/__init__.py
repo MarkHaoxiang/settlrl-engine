@@ -5,8 +5,8 @@ clarity over speed. It exists to differentially test ``settlrl-engine``: drive
 both with the same action stream and compare the resulting states.
 """
 
-from settlrl_reference.belief import Belief
-from settlrl_reference.board import (
+from settlrl_game.reference.belief import Belief
+from settlrl_game.reference.board import (
     N_EDGES,
     N_TILES,
     N_VERTICES,
@@ -15,8 +15,8 @@ from settlrl_reference.board import (
     desert_tile,
     random_layout,
 )
-from settlrl_reference.chance import draw_dev_card, roll_dice, steal
-from settlrl_reference.game import (
+from settlrl_game.reference.chance import draw_dev_card, roll_dice, steal
+from settlrl_game.reference.game import (
     AcceptTrade,
     Action,
     BuildCity,
@@ -39,7 +39,7 @@ from settlrl_reference.game import (
     SetupRoad,
     SetupSettlement,
 )
-from settlrl_reference.types import (
+from settlrl_game.reference.types import (
     RESOURCES,
     Building,
     DevCard,

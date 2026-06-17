@@ -9,8 +9,8 @@ the turn's start.
 from __future__ import annotations
 
 from conftest import make_game, make_layout, place
-from settlrl_reference.game import EndTurn, Game, Roll
-from settlrl_reference.types import Building, Phase
+from settlrl_game.reference.game import EndTurn, Game, Roll
+from settlrl_game.reference.types import Building, Phase
 
 
 def _give_ten_vp(game: Game, player: int) -> None:

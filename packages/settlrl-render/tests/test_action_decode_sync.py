@@ -9,16 +9,16 @@ genuinely reachable actions are exercised for legality.
 
 from random import Random
 
-import settlrl_reference as ref
-from settlrl_reference import board as rb
-from settlrl_render.api.actions import (
+import settlrl_game.reference as ref
+from settlrl_game.reference import board as rb
+from settlrl_game.actions import (
     N_FLAT,
     decode_actions,
     flat_for_action,
     to_action,
 )
-from settlrl_render.api.convert import _RESOURCE_NAMES
-from settlrl_render.game.session import GameSession
+from settlrl_game.convert import _RESOURCE_NAMES
+from settlrl_game.session import GameSession
 
 ALL_FLAT = list(range(N_FLAT))
 _VERTEX_TYPES = {"setup_settlement", "build_settlement", "build_city"}
