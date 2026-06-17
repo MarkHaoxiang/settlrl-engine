@@ -10,17 +10,7 @@ import {
 } from "../lib/boardData";
 import Anchored from "./Anchored";
 import CountBadge from "./CountBadge";
-import TerrainIcon from "./TerrainIcon";
-
-// A resource icon, used both as the give chips and the receive header glyph.
-function ResIcon({ r, size }: { r: ResourceKind; size: number }) {
-  const v = size / 2;
-  return (
-    <svg width={size} height={size} viewBox={`-${v} -${v} ${size} ${size}`}>
-      <TerrainIcon terrain={r} cx={0} cy={0} scale={size / 22} opacity={0.9} />
-    </svg>
-  );
-}
+import ResourceGlyph from "./ResourceGlyph";
 
 // Anchored at the bank pile of the resource you clicked: pick what to give for
 // one of it. Each give option is an icon chip badged with its rate — how many
@@ -57,7 +47,7 @@ export default function MaritimePopover({
     <Anchored x={x} y={y} onClose={onClose}>
       <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700 }}>
         Trade for 1
-        <ResIcon r={receive} size={20} />
+        <ResourceGlyph kind={receive} px={20} scale={0.95} />
         {RESOURCE_LABELS[receive]}
       </span>
       <div style={{ display: "flex", gap: 6 }}>
@@ -84,7 +74,7 @@ export default function MaritimePopover({
                 justifyContent: "center",
               }}
             >
-              <ResIcon r={give} size={26} />
+              <ResourceGlyph kind={give} px={26} scale={1.15} />
               <CountBadge value={`×${rate}`} />
             </button>
           );

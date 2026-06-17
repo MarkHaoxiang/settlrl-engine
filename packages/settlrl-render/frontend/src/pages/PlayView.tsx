@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import BoardView, {
   type BoardInteraction,
@@ -181,14 +181,20 @@ export default function PlayView() {
 
   const actions = snapshot?.actions ?? [];
 
-  // Reset transient UI when a new snapshot arrives.
-  useEffect(() => {
+  // Dismiss every transient chooser / armed state at once (a new snapshot, Esc,
+  // or an outside click) — one place so a new overlay can't be missed.
+  const clearOverlays = useCallback(() => {
     setPopup(null);
     setChoice(null);
     setKnightArming(false);
     setTradeWith(null);
     setMaritimeFor(null);
-  }, [snapshot]);
+  }, []);
+
+  // Reset transient UI when a new snapshot arrives.
+  useEffect(() => {
+    clearOverlays();
+  }, [snapshot, clearOverlays]);
 
   // Card-transfer animations: read the headline motions from each single-step
   // advance. A version gap (reconnect, or coalesced renders) can't be pinned to
@@ -215,17 +221,11 @@ export default function PlayView() {
   // Esc closes the choosers / cancels knight targeting.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setPopup(null);
-        setChoice(null);
-        setKnightArming(false);
-        setTradeWith(null);
-        setMaritimeFor(null);
-      }
+      if (e.key === "Escape") clearOverlays();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [clearOverlays]);
 
   const byType = (type: string) => actions.filter((a) => a.type === type);
   const availableTypes = useMemo(() => new Set(actions.map((a) => a.type)), [actions]);

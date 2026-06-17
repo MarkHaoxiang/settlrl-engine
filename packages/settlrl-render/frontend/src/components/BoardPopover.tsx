@@ -3,7 +3,7 @@ import type { GameAction } from "../lib/game";
 import { TERRAIN_FILL, TERRAIN_STROKE, type ResourceKind } from "../lib/boardData";
 import { buttonStyle } from "../lib/ui";
 import Anchored from "./Anchored";
-import TerrainIcon from "./TerrainIcon";
+import ResourceGlyph from "./ResourceGlyph";
 
 // A build price as a row of mini resource chips.
 function CostRow({ cost }: { cost: ResourceKind[] }) {
@@ -24,9 +24,7 @@ function CostRow({ cost }: { cost: ResourceKind[] }) {
             justifyContent: "center",
           }}
         >
-          <svg width={12} height={12} viewBox="-11 -11 22 22">
-            <TerrainIcon terrain={r} cx={0} cy={0} scale={0.9} />
-          </svg>
+          <ResourceGlyph kind={r} px={12} scale={0.9} opacity={0.5} />
         </span>
       ))}
     </span>

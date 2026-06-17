@@ -12,7 +12,7 @@ import {
 import { ACCENT, buttonStyle } from "../lib/ui";
 import Anchored from "./Anchored";
 import CountBadge from "./CountBadge";
-import TerrainIcon from "./TerrainIcon";
+import ResourceGlyph from "./ResourceGlyph";
 
 const boundText = (lo: number, hi: number): string => (lo === hi ? `${lo}` : `${lo}–${hi}`);
 
@@ -51,9 +51,7 @@ function TradeChip({
       onClick={onClick}
     >
       <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <svg width={24} height={24} viewBox="-11 -11 22 22">
-          <TerrainIcon terrain={r} cx={0} cy={0} scale={1.05} opacity={0.85} />
-        </svg>
+        <ResourceGlyph kind={r} px={24} opacity={0.85} />
       </span>
       <CountBadge value={annotation} />
     </button>

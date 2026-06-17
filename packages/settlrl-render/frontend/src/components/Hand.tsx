@@ -13,7 +13,7 @@ import {
 } from "../lib/boardData";
 import { ACCENT, ACCENT_GLOW, DIVIDER } from "../lib/ui";
 import CountBadge from "./CountBadge";
-import TerrainIcon from "./TerrainIcon";
+import ResourceGlyph from "./ResourceGlyph";
 
 const DEV_CARDS: { key: DevCardKind; label: string; icon: string }[] = [
   { key: "knight", label: "Knight", icon: "⚔️" },
@@ -118,11 +118,7 @@ export default function Hand({
             count={player.resources?.[r] ?? 0}
             label={canDiscard ? `${RESOURCE_LABELS[r]} — click to discard one` : RESOURCE_LABELS[r]}
             // The board tiles' motif, so chips match the terrain they come from.
-            icon={
-              <svg width={28} height={28} viewBox="-11 -11 22 22">
-                <TerrainIcon terrain={r} cx={0} cy={0} scale={1.1} opacity={0.9} />
-              </svg>
-            }
+            icon={<ResourceGlyph kind={r} px={28} scale={1.1} />}
             fill={TERRAIN_FILL[r]}
             stroke={TERRAIN_STROKE[r]}
             onClick={canDiscard ? () => onDiscard?.(r) : undefined}
