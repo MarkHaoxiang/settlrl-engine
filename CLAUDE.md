@@ -48,3 +48,12 @@ uv run --package settlrl-agents mypy packages/settlrl-agents/src packages/settlr
 ```
 
 When CUDA is available (check `jax.devices("cuda")` or `nvidia-smi`), always run benchmarks directly on the GPU (`-k cuda`) — skip the CPU benchmark runs. Without CUDA, run CPU-only (`JAX_PLATFORMS=cpu`, or `-k cpu` for the benchmarks).
+
+## Parallel sessions
+
+Multiple agents may work this repo at once. **Never run `git reset --hard`** (or
+`git checkout -- .`, `git clean -fd`) to tidy *your own* working tree — it
+silently destroys another session's uncommitted, unstaged edits, which are
+unrecoverable. To set aside your own changes, use `git stash` (recoverable), and
+only ever stash/reset paths you yourself touched. Commit green checkpoints
+promptly so in-flight work survives someone else's mistake.
