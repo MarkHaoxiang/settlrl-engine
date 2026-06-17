@@ -1,0 +1,19 @@
+Sound effects by Kenney (https://kenney.nl) — licensed CC0 (public domain).
+No attribution is required; this note is courtesy / provenance only.
+
+Each clip is one file from a Kenney pack, renamed to its in-game role:
+
+  roll.ogg    Casino Audio      dice-throw-1.ogg     (dice roll)
+  build.ogg   Interface Sounds  confirmation_001.ogg (settlement/city/road)
+  card.ogg    Casino Audio      card-slide-1.ogg     (buy / play dev card)
+  robber.ogg  Interface Sounds  switch_006.ogg       (move robber / knight)
+  trade.ogg   Casino Audio      chips-handle-1.ogg   (trades)
+  win.ogg     Music Jingles     8-Bit/jingles_NES13.ogg (game won)
+  chat.ogg    Interface Sounds  bong_001.ogg         (chat message)
+  error.ogg   Interface Sounds  error_002.ogg        (rejected action)
+
+Packs: https://kenney.nl/assets/casino-audio
+       https://kenney.nl/assets/interface-sounds
+       https://kenney.nl/assets/music-jingles
+
+To swap a sound, drop a replacement .ogg in with the same filename.

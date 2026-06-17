@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
 import { postAction, postChat, streamGame, type GameSnapshot } from "./game";
 import type { SeatTokens } from "./seats";
+import { play, soundForLog } from "./sound";
 
 const RECONNECT_MS = 1000;
 
@@ -28,15 +29,30 @@ export function useGame(gameId: string | null, tokens: SeatTokens): UseGame {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const version = useRef(-1);
+  // Sound is played off newly-applied log entries; primed on the first snapshot
+  // so a backlog (reconnect / mid-game join) isn't replayed all at once.
+  const primed = useRef(false);
+  const lastSoundId = useRef(-1);
 
   const show = useCallback((snap: GameSnapshot) => {
     if (snap.version <= version.current) return;
     version.current = snap.version;
+    if (primed.current) {
+      for (const entry of snap.log) {
+        if (entry.id <= lastSoundId.current) continue;
+        const sound = soundForLog(entry);
+        if (sound) void play(sound);
+      }
+    }
+    primed.current = true;
+    if (snap.log.length) lastSoundId.current = snap.log[snap.log.length - 1].id;
     setSnapshot(snap);
   }, []);
 
   useEffect(() => {
     version.current = -1;
+    primed.current = false;
+    lastSoundId.current = -1;
     setSnapshot(null);
     setError(null);
     if (!gameId) return;
@@ -69,8 +85,11 @@ export function useGame(gameId: string | null, tokens: SeatTokens): UseGame {
         show(await op());
         setError(null);
       } catch (e) {
-        if (!(e instanceof ApiError && e.status === 409))
-          setError(`Game request failed: ${String(e)}`);
+        // A 409 means the move stopped being legal (a race) — give the audible
+        // nudge but no error banner; the stream already delivered the snapshot
+        // that outdated it.
+        if (e instanceof ApiError && e.status === 409) void play("error");
+        else setError(`Game request failed: ${String(e)}`);
       } finally {
         setBusy(false);
       }

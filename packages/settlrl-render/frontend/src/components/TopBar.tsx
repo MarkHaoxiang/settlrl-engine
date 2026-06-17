@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { LINK, panelStyle } from "../lib/ui";
+import SoundToggle from "./SoundToggle";
 import ThemeToggle from "./ThemeToggle";
 
 // The top bar shared by the game views: a help link on the left (tucked under
@@ -53,6 +54,7 @@ export default function TopBar({ mode, children }: { mode: string; children?: Re
           {mode}
         </span>
         {children}
+        <SoundToggle />
         <ThemeToggle />
       </div>
     </>
