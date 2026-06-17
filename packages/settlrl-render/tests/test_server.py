@@ -403,7 +403,7 @@ def test_replay_with_too_many_moves_is_rejected(
     with _finished_bot_game() as (client, game):
         doc = client.get(f"/api/games/{game}/record").json()
         monkeypatch.setattr(
-            "settlrl_render.server._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
+            "settlrl_render.routers.replay._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
         )
         resp = client.post("/api/replay", json=doc)
         assert resp.status_code == 422 and "too many moves" in resp.json()["detail"]
