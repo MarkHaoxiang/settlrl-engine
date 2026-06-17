@@ -26,7 +26,7 @@ const page = async () => {
 const A = await page();
 await A.goto(`${BASE}/play`);
 await A.waitForTimeout(600);
-await A.getByPlaceholder("random").fill("7");
+await A.getByPlaceholder("seed").fill("7");
 await A.getByRole("button", { name: "Start", exact: true }).click();
 await A.waitForTimeout(1500);
 check("create navigates to /play/{id}", A.url().includes("/play/"));
