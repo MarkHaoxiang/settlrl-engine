@@ -22,3 +22,30 @@ value only if `lookahead(net)` beats `lookahead(heuristic)` at ≥2σ, n≥400
 (`settlrl-agents bench`); Stage 2 reruns the sims ladder — depth pays nowhere
 with the stationary heuristic leaf, and that falsification is the reason this
 package exists; Stage 3 (policy head, self-play iteration) only after.
+
+## Reference: Canopy (`cullback/canopy`)
+
+A Rust AlphaZero framework whose flagship example is a 1v1 Catan agent
+(`nexus-v3`, claimed "strongest public 1v1 Catan agent" — unbenchmarked against
+ours). It is the point past our leaf-is-the-ceiling gate: learned policy + WDL
+value head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
+root (800 sims), explicit chance nodes for dice and dev draws, and Single-Observer
+ISMCTS that filters per-simulation legality in a custom tree — the part our
+mctx-based search can't express. It is 1v1 only, so it never meets the 3-4p
+paranoid-frame / opponent-model problem, and it *disables determinization during
+self-play* (the net learns the Bayesian-average-over-hands policy; determinize
+only at play time).
+
+Techniques worth lifting into our Stage 1 training, both aimed at Catan's dice
+variance (the variance-starved-depth problem):
+
+- **Value-target blending** `target = (1−α)·z + α·q` (game outcome `z` blended
+  with MCTS root Q), α ramped linearly 0 → max over early iters. Pure `z` is too
+  noisy for a dice game; Q averages over sims once the value head is decent.
+- **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]` for ~90-move
+  games), trained on `ema = α·Q[t] + (1−α)·ema`, sharing the trunk.
+- **Playout-cap randomization** (KataGo): most moves a small search, a fraction
+  the full budget; only full-search positions contribute policy targets, all
+  contribute value targets.
+
+Repo + METHODS.md + examples/catan/OPTIMIZATIONS.md; see [[canopy-reference]].

@@ -14,6 +14,7 @@ only configuration that offers trades.
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable
 from typing import NamedTuple, cast
 
 import jax
@@ -49,14 +50,23 @@ from settlrl_agents.sample import sample_world
 from settlrl_agents.value import Value, ValueFunction, heuristic_value
 
 __all__ = [
+    "PolicyWeights",
     "lookahead_policy",
     "make_search",
+    "make_search_weights",
     "search_policy",
 ]
 
 _ILLEGAL = -1e9  # prior logit for illegal moves
 
 _Weights = Float[Array, f"flat={N_FLAT}"]  # one tree's improved-policy weights
+
+PolicyWeights = Callable[
+    [KeyScalar, BoardLayout, BeliefView, IntScalar, FlatMask], _Weights
+]
+"""The search's improved-policy weights over the flat actions — a distribution
+for ``num_simulations`` > 0, the lookahead logits at 0. The AlphaZero policy
+target (see :func:`make_search_weights`)."""
 
 # Interior-node prior: greedy's static tier table, tempered so tier gaps
 # (>= 100) land ~2 nats apart — strong enough to order first expansions, weak
@@ -166,7 +176,7 @@ class _Path(NamedTuple):
     depth: Int[Array, "batch"]
 
 
-def make_search(
+def make_search_weights(
     value: ValueFunction,
     *,
     prior: PolicyPrior | None = None,
@@ -178,8 +188,9 @@ def make_search(
     prior_scale: float = 1.0,
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
-) -> BeliefPolicy:
-    """Re-determinizing Gumbel-MuZero search with the engine as the dynamics.
+) -> PolicyWeights:
+    """Re-determinizing Gumbel-MuZero search, returning the improved-policy
+    weights (the AlphaZero policy target; :func:`make_search` argmaxes these).
 
     Each of ``num_trees`` independent trees (averaged for variance reduction)
     re-determinizes once per simulation: a simulation replays the root path
@@ -190,9 +201,9 @@ def make_search(
     over ``prior_scale``; interior nodes a static tier table). A ``prior``
     replaces both with learned logits (legality-masked here).
 
-    ``num_simulations=0`` is the *lookahead* special case: no tree, just the
-    masked argmax of the root one-step value sweep over ``num_trees`` sampled
-    worlds. ``propose_rate`` > 0 (the search never offers trades by default)
+    ``num_simulations=0`` is the *lookahead* special case: no tree, the root
+    one-step value sweep over ``num_trees`` sampled worlds. ``propose_rate`` > 0
+    (the search never offers trades by default)
     lets the root score trade proposals by their accepted outcome under a
     partner model — gated geometrically per move, ``trade_penalty`` the quality
     bar below which an offer loses to not trading; offers are root-only.
@@ -352,6 +363,51 @@ def make_search(
             mask, root_logits(k_gate, layout, world, player, mask), _ILLEGAL
         )
 
+    def weights(
+        key: KeyScalar,
+        layout: BoardLayout,
+        view: BeliefView,
+        player: IntScalar,
+        mask: FlatMask,
+    ) -> _Weights:
+        tree = lookahead if num_simulations == 0 else search_tree
+        w = jax.vmap(tree, in_axes=(0, None, None, None, None))(
+            jax.random.split(key, num_trees), layout, view, player, mask
+        )
+        return w.mean(axis=0)
+
+    return weights
+
+
+def make_search(
+    value: ValueFunction,
+    *,
+    prior: PolicyPrior | None = None,
+    num_trees: int = 1,
+    num_simulations: int = 32,
+    max_depth: int = 12,
+    max_num_considered_actions: int = 16,
+    value_scale: float = 20.0,
+    prior_scale: float = 1.0,
+    propose_rate: float = 0.0,
+    trade_penalty: float = 0.25,
+) -> BeliefPolicy:
+    """Re-determinizing search as a :class:`BeliefPolicy`: the masked argmax of
+    the improved policy. Parameters are :func:`make_search_weights`'; tiny noise
+    breaks the lookahead sweep's exact-value ties."""
+    weights = make_search_weights(
+        value,
+        prior=prior,
+        num_trees=num_trees,
+        num_simulations=num_simulations,
+        max_depth=max_depth,
+        max_num_considered_actions=max_num_considered_actions,
+        value_scale=value_scale,
+        prior_scale=prior_scale,
+        propose_rate=propose_rate,
+        trade_penalty=trade_penalty,
+    )
+
     def policy(
         key: KeyScalar,
         layout: BoardLayout,
@@ -359,13 +415,9 @@ def make_search(
         player: IntScalar,
         mask: FlatMask,
     ) -> FlatAction:
-        tree = lookahead if num_simulations == 0 else search_tree
-        weights = jax.vmap(tree, in_axes=(0, None, None, None, None))(
-            jax.random.split(key, num_trees), layout, view, player, mask
-        )
-        # Tiny noise breaks exact-value ties (the lookahead sweep has many).
         noise = jax.random.uniform(key, (N_FLAT,)) * 1e-4
-        return jnp.argmax(jnp.where(mask, weights.mean(axis=0) + noise, -jnp.inf))
+        w = weights(key, layout, view, player, mask)
+        return jnp.argmax(jnp.where(mask, w + noise, -jnp.inf))
 
     return policy
 
