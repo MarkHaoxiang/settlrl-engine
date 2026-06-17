@@ -1,10 +1,16 @@
-"""Persistence: journals on disk replay back into live games on restart."""
+"""Persistence: journals on the shared async DB replay back into live games on
+restart. The write-behind store is exercised through the HTTP surface (a clean
+``with`` shutdown drains queued writes); the eviction unit test drives the store
+and registry directly under ``asyncio.run``.
+"""
 
+import asyncio
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from settlrl_render.games import GameRegistry, restore_registry
+from settlrl_render.db import Database
+from settlrl_render.games import GameRegistry
 from settlrl_render.server import create_app
 from settlrl_render.session import GameSession, GameSetup
 from settlrl_render.store import GameStore
@@ -27,10 +33,16 @@ def test_session_setup_captures_its_seats() -> None:
 
 
 def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
-    # First boot: create a game, play a move, leave a chat line.
+    # First boot: create a game (with a bot seat), play a move, leave a chat line.
     with TestClient(create_app(state_dir=str(tmp_path), warm=False)) as c1:
         doc = c1.post(
-            "/api/games", json={"seed": 0, "seats": ["human"] * 4, "claim": "first"}
+            "/api/games",
+            json={
+                "seed": 0,
+                "n_players": 2,
+                "seats": ["human", "random"],
+                "claim": "first",
+            },
         ).json()
         game = doc["id"]
         hdr = {"X-Seat-Tokens": ",".join(dict(doc["tokens"]).values())}
@@ -47,53 +59,63 @@ def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
         after = c2.get(f"/api/games/{game}", headers=hdr).json()
         assert after["id"] == game
         assert after["board"] == before["board"]  # replayed to the same state
-        assert after["seats_claimed"] == [0]  # the claim survived
+        assert after["seats_claimed"] == [0]  # the claim (and its kinds) survived
+        assert after["status"]["seats"] == ["human", "random"]
         assert any(e["kind"] == "chat" and e["text"] == "gg" for e in after["log"])
-        # The restored token still proves the seat.
-        assert after["status"]["seats"][0] == "human"
-
-
-def test_restore_preserves_seat_kinds(tmp_path: Path) -> None:
-    store = GameStore(tmp_path)
-    reg = GameRegistry(store=store)
-    handle = reg.create(GameSession(seed=0, n_players=2, seats=["human", "random"]))
-    _, token = handle.claim(0)
-
-    restored = restore_registry(store).get(handle.id)
-    assert restored is not None
-    assert restored.session.seats == ["human", "random"]
-    assert restored.owned_seats([token]) == {0}
 
 
 def test_eviction_drops_the_game_from_the_store(tmp_path: Path) -> None:
-    store = GameStore(tmp_path)
-    reg = GameRegistry(max_games=1, store=store)
-    a = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
-    # Idle well past the TTL (relative to monotonic(), which need not be large).
-    a.touched = time.monotonic() - 100_000
-    b = reg.create(GameSession(seed=1, n_players=2, seats=["human", "human"]))
-    # A fresh store on the same db (as a restart would open) no longer has a.
-    stored = {header["id"] for header, _ in GameStore(tmp_path).load()}
-    assert a.id not in stored and b.id in stored
+    async def scenario() -> tuple[str, str, set[str]]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(max_games=1, store=store)
+        a = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
+        # Idle well past the TTL (relative to monotonic(), which need not be large).
+        a.touched = time.monotonic() - 100_000
+        b = reg.create(GameSession(seed=1, n_players=2, seats=["human", "human"]))
+        await store.aclose()  # flush the header writes and the eviction removal
+        stored = {str(header["id"]) for header, _ in await store.load()}
+        await db.dispose()
+        return a.id, b.id, stored
+
+    a_id, b_id, stored = asyncio.run(scenario())
+    assert a_id not in stored and b_id in stored
 
 
 def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
-    store = GameStore(tmp_path)
-    reg = GameRegistry(store=store)
-    handle = reg.create(GameSession(seed=0, n_players=2, seats=["random", "random"]))
-    for _ in range(5):  # a few bot moves, journalled (no driver runs here)
-        if handle.session.bot_step() is not None:
-            handle.bump()
+    # First boot: an all-bot game plays a few moves, journalled, then we shut
+    # down cleanly (draining the queued writes).
+    with TestClient(
+        create_app(state_dir=str(tmp_path), bot_delay=0.0, warm=False)
+    ) as c1:
+        game = c1.post(
+            "/api/games",
+            json={
+                "seed": 0,
+                "n_players": 2,
+                "seats": ["random", "random"],
+                "claim": "none",
+            },
+        ).json()["id"]
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            snap = c1.get(f"/api/games/{game}").json()
+            moves = sum(1 for e in snap["log"] if e["kind"] == "move")
+            if snap["status"]["terminal"] or moves >= 5:
+                break
+            time.sleep(0.05)
 
     # A fresh app restores the position and its startup restarts the driver,
     # which plays the game out to the end.
     with TestClient(
         create_app(state_dir=str(tmp_path), bot_delay=0.0, warm=False)
-    ) as c:
+    ) as c2:
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
-            if c.get(f"/api/games/{handle.id}").json()["status"]["terminal"]:
+            if c2.get(f"/api/games/{game}").json()["status"]["terminal"]:
                 break
             time.sleep(0.1)
-        body = c.get(f"/api/games/{handle.id}").json()
+        body = c2.get(f"/api/games/{game}").json()
         assert body["status"]["terminal"] and body["status"]["winner"] is not None

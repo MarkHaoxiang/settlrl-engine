@@ -15,6 +15,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+# Import fastapi_users.db before its sqlalchemy adapter: the two import each
+# other circularly, and entering via the adapter first (which can happen when
+# this module is imported before any fastapi_users.* module) leaves
+# fastapi_users.db half-initialised — it silently drops SQLAlchemyUserDatabase.
+import fastapi_users.db  # noqa: F401
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
 from sqlalchemy import JSON, ForeignKey, Integer, String

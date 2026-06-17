@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass
 from typing import cast
 
+import anyio.to_thread
+
 from .models import BotMoveModel
 from .session import HUMAN, GameSession, GameSetup
 from .store import GameJournal, GameStore
@@ -175,7 +177,7 @@ class GameRegistry:
     past it, :meth:`admit` puts new creators in a FIFO queue instead (keep it
     below ``max_games`` so finished games can always be evicted to seat the next
     in line). A ``store`` persists games so they survive a restart (see
-    :func:`restore_registry`).
+    :func:`restore_games`).
     """
 
     def __init__(
@@ -279,18 +281,14 @@ class GameRegistry:
                 self._store.remove(victim.id)
 
 
-def restore_registry(
-    store: GameStore, max_games: int = 32, max_active: int = 16
-) -> GameRegistry:
-    """Rebuild a registry from a store: replay each game's journal back into a
-    live handle, so a restart resumes games in progress (callers restart bot
-    drivers for the returned handles). Drivers are not started here."""
-    registry = GameRegistry(max_games=max_games, max_active=max_active, store=store)
-    for header, events in store.load():
-        handle = _rebuild_handle(store, header, events)
+async def restore_games(registry: GameRegistry, store: GameStore) -> None:
+    """Replay each stored game's journal back into a live handle on ``registry``,
+    so a restart resumes games in progress (the caller restarts bot drivers).
+    The engine replay is offloaded to a worker thread."""
+    for header, events in await store.load():
+        handle = await anyio.to_thread.run_sync(_rebuild_handle, store, header, events)
         if handle is not None:
             registry._insert(handle)
-    return registry
 
 
 def _rebuild_handle(

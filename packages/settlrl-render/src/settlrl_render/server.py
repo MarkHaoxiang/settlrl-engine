@@ -32,7 +32,7 @@ from .games import (
     GameRegistry,
     QueuePosition,
     RegistryFullError,
-    restore_registry,
+    restore_games,
 )
 from .models import GameModel, ReplayStateModel
 from .providers import ProviderRegistry, RemoteBotError
@@ -59,15 +59,20 @@ def _warm_jit_cache() -> None:
 
 
 def _build_registry(
-    games: GameRegistry | None, state_dir: str | None, max_active: int
-) -> GameRegistry:
-    """The app's registry: the one passed in (tests), one restored from the
-    store, or a fresh in-memory one."""
+    games: GameRegistry | None,
+    database: Database,
+    state_dir: str | None,
+    max_active: int,
+) -> tuple[GameRegistry, GameStore | None]:
+    """The app's registry and (when persistence is on) its journal store: the
+    registry passed in by tests, a fresh persistent one backed by ``database``,
+    or a fresh in-memory one. The store's games are replayed in at startup."""
     if games is not None:
-        return games
+        return games, None
     if state_dir:
-        return restore_registry(GameStore(state_dir), max_active=max_active)
-    return GameRegistry(max_active=max_active)
+        store = GameStore(database)
+        return GameRegistry(max_active=max_active, store=store), store
+    return GameRegistry(max_active=max_active), None
 
 
 def _database(user_db: str | None, state_dir: str | None) -> Database:
@@ -245,8 +250,8 @@ def create_app(
     (defaults to ``settlrl.db`` under ``state_dir``, else in-memory);
     ``admin_emails`` are granted admin on register / login.
     """
-    registry = _build_registry(games, state_dir, max_active)
     database = _database(user_db, state_dir)
+    registry, store = _build_registry(games, database, state_dir, max_active)
     auth = Auth(database, admin_emails=admin_emails)
     bots = (
         providers if providers is not None else ProviderRegistry(local_bots=local_bots)
@@ -264,6 +269,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await database.init()
+        if store is not None:
+            store.start()
+            await restore_games(registry, store)
         if warm:
             threading.Thread(target=_warm_jit_cache, daemon=True).start()
         # Resume pacing/timeouts for any games replayed in from the store.
@@ -273,6 +281,8 @@ def create_app(
         yield
         for task in drivers:
             task.cancel()
+        if store is not None:
+            await store.aclose()  # flush queued writes before the engine closes
         await database.dispose()
 
     app = FastAPI(title="Settlrl Render", lifespan=lifespan, root_path=root_path)
