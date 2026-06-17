@@ -38,7 +38,17 @@ with no tab open, and every move animates.
 
 ## Development
 
-Run the API server and the frontend dev server in separate terminals from the repo root.
+The quickest start is the dev launcher, which boots the API, a bot service, and
+the frontend together, pre-registers an admin account (`dev@example.com` /
+`devpassword`), and registers the bot service so bots are seatable on first
+load. Ctrl-C stops everything.
+
+```bash
+./packages/settlrl-render/dev.sh
+```
+
+To run the pieces by hand instead, start the API server and the frontend dev
+server in separate terminals from the repo root.
 
 **Terminal 1 — API (port 8000)**
 ```bash
