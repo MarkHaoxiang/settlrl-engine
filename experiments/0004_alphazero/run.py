@@ -15,8 +15,9 @@ from typing import Literal
 import jax
 import wandb
 from settlrl_agents.experiment import Config, Run, start_run
-from settlrl_learn import AZParams, init_az_params, save_az_params
+from settlrl_learn import init_az_params, save_az_params
 from settlrl_learn.alphazero import arena, learn
+from settlrl_learn.train_state import TrainState
 
 
 class AlphaZeroConfig(Config):
@@ -46,7 +47,8 @@ class AlphaZeroConfig(Config):
     # logging / checkpointing
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str = "settlrl-0004-alphazero"
-    checkpoint_every: int = 5  # iterations between rolling latest.npz saves
+    checkpoint_every: int = 5  # iterations between full-state checkpoints
+    resume: bool = False  # continue bit-exactly from the run dir's checkpoint
 
 
 VARIANTS: dict[str, dict[str, object]] = {
@@ -65,6 +67,7 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_games": 4,
         "arena_every": 1,
         "wandb_mode": "disabled",
+        "checkpoint_every": 1,
     },
 }
 
@@ -78,21 +81,21 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         reinit=True,
         dir=str(run.dir),
     )
-    best = -1.0  # best arena win rate so far -> best.npz
+    best = -1.0  # best arena win rate seen -> best.npz (the shippable net)
 
-    def on_iter(i: int, metrics: dict[str, float], p: AZParams) -> None:
+    def on_iter(i: int, metrics: dict[str, float], state: TrainState) -> None:
         nonlocal best
         run.log(iteration=i, **metrics)
         wb.log({"iteration": i, **metrics})
-        if (i + 1) % cfg.checkpoint_every == 0:
-            save_az_params(run.dir / "latest.npz", p)  # rolling, for resume
         winrate = metrics.get("arena_winrate")
         if winrate is not None and winrate > best:
             best = winrate
-            save_az_params(run.dir / "best.npz", p)  # strongest net so far
+            save_az_params(run.dir / "best.npz", state.params)  # strongest net so far
 
     try:
-        params = learn(
+        # learn writes the full-state checkpoint (run.dir/trainstate) for
+        # bit-exact resume; resume=True continues from it.
+        final = learn(
             params,
             n_iterations=cfg.n_iterations,
             selfplay_samples=cfg.selfplay_samples,
@@ -110,14 +113,17 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             arena_games=cfg.arena_games,
             arena_every=cfg.arena_every,
             seed=cfg.seed,
+            checkpoint_dir=run.dir,
+            checkpoint_every=cfg.checkpoint_every,
+            resume=cfg.resume,
             on_iter=on_iter,
         )
     finally:
         wb.finish()
 
-    save_az_params(run.dir / "params.npz", params)  # final
+    save_az_params(run.dir / "params.npz", final.params)  # final net
     winrate = arena(
-        params,
+        final.params,
         n_games=cfg.arena_games,
         num_simulations=cfg.num_simulations,
         max_num_considered_actions=cfg.max_num_considered_actions,

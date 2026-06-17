@@ -31,6 +31,13 @@ trained model can ship without training libraries.
     vs `lookahead(heuristic)`, the Stage-1 gate), and the `learn` loop. Value
     target is pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a
     search that exposes root Q (see the Canopy reference below).
+  - `train_state.py::TrainState` — the whole mutable run state (params,
+    optimiser moments, replay buffer, iteration, best), orbax-serialised for
+    **bit-exact resume**: `learn` rebuilds the static optimiser/buffer from
+    hyperparameters, restores the state into them, and continues — the
+    per-iteration RNG is a pure function of `seed` and the iteration index, so a
+    resumed run is bit-identical to one that never stopped (tested:
+    params/opt/buffer all exact).
 
 The gates (June 11 plan, evidence in settlrl-agents/CLAUDE.md): Stage 1 ships a
 value only if `lookahead(net)` beats `lookahead(heuristic)` at ≥2σ, n≥400

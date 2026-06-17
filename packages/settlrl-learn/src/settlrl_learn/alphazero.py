@@ -12,6 +12,7 @@ A training-side module (optax/flashbax): not imported by the package root.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 import flashbax as fbx
@@ -26,6 +27,7 @@ from settlrl_engine.env import N_FLAT
 from settlrl_learn.features import FEATURE_DIM
 from settlrl_learn.model import AZParams, az_forward, make_az
 from settlrl_learn.selfplay import SelfPlaySamples, self_play
+from settlrl_learn.train_state import TrainState, load_train_state, save_train_state
 
 
 class Batch(NamedTuple):
@@ -187,21 +189,41 @@ def learn(
     arena_games: int = 0,
     arena_every: int = 1,
     seed: int = 0,
-    on_iter: Callable[[int, dict[str, float], AZParams], None] | None = None,
-) -> AZParams:
+    checkpoint_dir: str | Path | None = None,
+    checkpoint_every: int = 1,
+    resume: bool = False,
+    on_iter: Callable[[int, dict[str, float], TrainState], None] | None = None,
+) -> TrainState:
     """One full AlphaZero loop: each iteration self-plays, buffers, and trains;
     every ``arena_every`` iterations (when ``arena_games`` > 0) it scores the net
-    vs. ``lookahead(heuristic)``. ``on_iter(i, metrics, params)`` runs after each
-    iteration (the experiment logs / checkpoints). Returns the final params."""
+    vs. ``lookahead(heuristic)``. Per-iteration RNG derives from ``seed`` and the
+    iteration index, so with ``resume`` the run continues bit-exactly from the
+    full-state checkpoint under ``checkpoint_dir`` (written every
+    ``checkpoint_every`` iterations). ``on_iter(i, metrics, state)`` runs after
+    each iteration. Returns the final :class:`TrainState`."""
     optimizer = optax.adamw(lr, weight_decay=weight_decay)
-    opt_state = optimizer.init(params)
-    step = make_train_step(optimizer, value_weight)
     buffer = replay_buffer(
         max_size=buffer_max, min_size=buffer_min, batch_size=batch_size
     )
-    state = init_replay(buffer, FEATURE_DIM)
+    step = make_train_step(optimizer, value_weight)
 
-    for i in range(n_iterations):
+    fresh = TrainState(
+        params=params,
+        opt_state=optimizer.init(params),
+        buffer_state=init_replay(buffer, FEATURE_DIM),
+        iteration=jnp.int32(0),
+        best=jnp.float32(-1.0),
+    )
+    ckpt = Path(checkpoint_dir) / "trainstate" if checkpoint_dir is not None else None
+    state = (
+        load_train_state(ckpt, fresh)
+        if resume and ckpt is not None and ckpt.exists()
+        else fresh
+    )
+    params, opt_state, buf_state = state.params, state.opt_state, state.buffer_state
+    best = float(state.best)
+
+    for i in range(int(state.iteration), n_iterations):
         samples = self_play(
             params,
             n_samples=selfplay_samples,
@@ -211,27 +233,34 @@ def learn(
             temperature=temperature,
             seed=seed + 1 + i,
         )
-        state = add_samples(buffer, state, samples)
+        buf_state = add_samples(buffer, buf_state, samples)
         metrics: dict[str, float] = {"samples": float(samples.value.shape[0])}
-        if bool(buffer.can_sample(state)):
+        if bool(buffer.can_sample(buf_state)):
             params, opt_state, m = train(
                 params,
                 opt_state,
                 buffer,
-                state,
+                buf_state,
                 step=step,
                 n_steps=train_steps,
                 key=jax.random.key(seed + 10_000 + i),
             )
             metrics.update({k: float(v) for k, v in m.items()})
         if arena_games and (i + 1) % arena_every == 0:
-            metrics["arena_winrate"] = arena(
+            winrate = arena(
                 params,
                 n_games=arena_games,
                 num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
                 seed=seed + 20_000 + i,
             )
+            metrics["arena_winrate"] = winrate
+            best = max(best, winrate)
+        state = TrainState(
+            params, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best)
+        )
+        if ckpt is not None and (i + 1) % checkpoint_every == 0:
+            save_train_state(ckpt, state)
         if on_iter is not None:
-            on_iter(i, metrics, params)
-    return params
+            on_iter(i, metrics, state)
+    return state

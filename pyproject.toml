@@ -65,7 +65,7 @@ module = ["jax.*", "jaxlib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pettingzoo.*", "gymnasium.*", "sklearn.*", "jraph.*", "optax.*", "wandb.*", "flashbax.*"]
+module = ["pettingzoo.*", "gymnasium.*", "sklearn.*", "jraph.*", "optax.*", "wandb.*", "flashbax.*", "orbax.*"]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
