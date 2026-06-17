@@ -19,10 +19,13 @@ import jax
 import jax.numpy as jnp
 import optax
 from jaxtyping import Array, Float
+from settlrl_agents import POLICIES, BeliefSpec, evaluate
+from settlrl_agents.search import make_search
 from settlrl_engine.env import N_FLAT
 
-from settlrl_learn.model import AZParams, az_forward
-from settlrl_learn.selfplay import SelfPlaySamples
+from settlrl_learn.features import FEATURE_DIM
+from settlrl_learn.model import AZParams, az_forward, make_az
+from settlrl_learn.selfplay import SelfPlaySamples, self_play
 
 
 class Batch(NamedTuple):
@@ -130,3 +133,105 @@ def train(
             params, opt_state, sample_batch(buffer, state, k)
         )
     return params, opt_state, metrics
+
+
+# --- arena + the iteration loop (the experiment composes these) ---
+
+
+def arena(
+    params: AZParams,
+    *,
+    n_games: int = 40,
+    num_simulations: int = 64,
+    max_num_considered_actions: int = 16,
+    batch_size: int = 16,
+    seed: int = 0,
+) -> float:
+    """The net's win rate vs. ``lookahead(heuristic)``, seat-swapped at 2p — the
+    Stage-1 gate (a learned value worth shipping beats the hand-tuned one)."""
+    value_fn, prior_fn = make_az(params)
+    net = make_search(
+        value_fn,
+        prior=prior_fn,
+        value_scale=2.0,
+        num_simulations=num_simulations,
+        max_num_considered_actions=max_num_considered_actions,
+    )
+    net_spec = BeliefSpec(lambda: net, frozenset((2,)))
+    base = POLICIES["lookahead"]
+    half = max(1, n_games // 2)
+    r1 = evaluate([net_spec, base], n_episodes=half, batch_size=batch_size, seed=seed)
+    r2 = evaluate(
+        [base, net_spec], n_episodes=half, batch_size=batch_size, seed=seed + 1
+    )
+    episodes = int(r1.episodes + r2.episodes)
+    return float(r1.wins[0] + r2.wins[1]) / max(episodes, 1)
+
+
+def learn(
+    params: AZParams,
+    *,
+    n_iterations: int,
+    selfplay_samples: int,
+    selfplay_batch: int = 16,
+    num_simulations: int = 64,
+    max_num_considered_actions: int = 16,
+    temperature: float = 1.0,
+    buffer_max: int = 50_000,
+    buffer_min: int = 256,
+    batch_size: int = 256,
+    train_steps: int = 200,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    value_weight: float = 1.0,
+    arena_games: int = 0,
+    arena_every: int = 1,
+    seed: int = 0,
+    on_iter: Callable[[int, dict[str, float]], None] | None = None,
+) -> AZParams:
+    """One full AlphaZero loop: each iteration self-plays, buffers, and trains;
+    every ``arena_every`` iterations (when ``arena_games`` > 0) it scores the net
+    vs. ``lookahead(heuristic)``. ``on_iter(i, metrics)`` receives per-iteration
+    metrics for the experiment to log. Returns the final params."""
+    optimizer = optax.adamw(lr, weight_decay=weight_decay)
+    opt_state = optimizer.init(params)
+    step = make_train_step(optimizer, value_weight)
+    buffer = replay_buffer(
+        max_size=buffer_max, min_size=buffer_min, batch_size=batch_size
+    )
+    state = init_replay(buffer, FEATURE_DIM)
+
+    for i in range(n_iterations):
+        samples = self_play(
+            params,
+            n_samples=selfplay_samples,
+            num_simulations=num_simulations,
+            max_num_considered_actions=max_num_considered_actions,
+            batch_size=selfplay_batch,
+            temperature=temperature,
+            seed=seed + 1 + i,
+        )
+        state = add_samples(buffer, state, samples)
+        metrics: dict[str, float] = {"samples": float(samples.value.shape[0])}
+        if bool(buffer.can_sample(state)):
+            params, opt_state, m = train(
+                params,
+                opt_state,
+                buffer,
+                state,
+                step=step,
+                n_steps=train_steps,
+                key=jax.random.key(seed + 10_000 + i),
+            )
+            metrics.update({k: float(v) for k, v in m.items()})
+        if arena_games and (i + 1) % arena_every == 0:
+            metrics["arena_winrate"] = arena(
+                params,
+                n_games=arena_games,
+                num_simulations=num_simulations,
+                max_num_considered_actions=max_num_considered_actions,
+                seed=seed + 20_000 + i,
+            )
+        if on_iter is not None:
+            on_iter(i, metrics)
+    return params

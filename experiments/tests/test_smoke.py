@@ -45,3 +45,11 @@ def test_0003_neural_board_architectures_smoke(tmp_path: Path) -> None:
     cfg = run.NeuralBoardArchitecturesConfig.resolve(run.VARIANTS["smoke"])
     run.run_experiment(Run(tmp_path), cfg)
     _verdict(tmp_path)
+
+
+@pytest.mark.slow
+def test_0004_alphazero_smoke(tmp_path: Path) -> None:
+    run = load_run("0004_alphazero")
+    cfg = run.AlphaZeroConfig.resolve(run.VARIANTS["smoke"])
+    run.run_experiment(Run(tmp_path), cfg)
+    _verdict(tmp_path)

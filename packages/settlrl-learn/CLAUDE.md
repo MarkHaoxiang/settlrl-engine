@@ -11,11 +11,26 @@ trained model can ship without training libraries.
   shipping. `FEATURE_DIM` is computed at import via `jax.eval_shape` on a
   2-player template (the own/max/mean aggregation makes the width
   player-count invariant, so 2p suffices).
-- `train.py` — full-batch SGD only; a real optimiser and the self-play data
-  pipeline (over `BatchedSettlrlEnv.rollout(actor=...)`) arrive with Stage 1.
-  The value head is a win-probability logit: the searches read leaves as
-  `tanh(v / value_scale) = 2P(win) − 1`, so logistic targets line up with
-  the June 11 calibration finding (P(win) = σ(0.053·v_heuristic)).
+- `train.py` — full-batch SGD only (the toy fitter); the real loop is the
+  AlphaZero modules below. The value head is a win-probability logit: the
+  searches read leaves as `tanh(v / value_scale) = 2P(win) − 1`, so logistic
+  targets line up with the June 11 calibration finding (P(win) =
+  σ(0.053·v_heuristic)). The AZ net's logit maps in with `value_scale=2`
+  (`tanh(logit/2) = 2P−1`).
+- `model.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts it
+  onto the search's `value`/`prior` seams). Plain-JAX, so the package root
+  imports it without pulling training deps.
+- **AlphaZero loop** (training-side, *not* imported by the package root — keeps
+  the shipped-model path lean; experiment 0004 composes them):
+  - `selfplay.py::self_play` — batched n-player self-play, the net guiding the
+    re-determinizing search (`make_search_weights` for the improved policy as
+    target); features are on the *true* board (net learns the belief-averaged
+    value), values are the eventual win/loss of the acting seat.
+  - `alphazero.py` — the flashbax item-buffer wrapper, the policy-CE +
+    value-logistic loss + optax adamw `make_train_step`, `arena` (seat-swapped
+    vs `lookahead(heuristic)`, the Stage-1 gate), and the `learn` loop. Value
+    target is pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a
+    search that exposes root Q (see the Canopy reference below).
 
 The gates (June 11 plan, evidence in settlrl-agents/CLAUDE.md): Stage 1 ships a
 value only if `lookahead(net)` beats `lookahead(heuristic)` at ≥2σ, n≥400
