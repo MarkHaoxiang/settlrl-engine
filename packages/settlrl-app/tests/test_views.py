@@ -9,8 +9,8 @@ everyone (see ``test_terminal_reveals_every_hand``).
 
 import numpy as np
 from _helpers import BOT_KINDS
-from settlrl_render.api.views import game_model
-from settlrl_render.game.games import GameHandle
+from settlrl_app.api.views import game_model
+from settlrl_app.game.games import GameHandle
 from settlrl_game.session import GameSession
 
 

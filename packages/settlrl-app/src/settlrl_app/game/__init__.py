@@ -1,1 +1,1 @@
-"""The game layer of the renderer (see the package README)."""
+"""The game layer of the app (see the package README)."""

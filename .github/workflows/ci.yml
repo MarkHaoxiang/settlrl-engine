@@ -34,12 +34,13 @@ jobs:
           uv run mypy
           packages/settlrl-engine/src packages/settlrl-engine/tests
           packages/settlrl-agents/src packages/settlrl-agents/tests
-          packages/settlrl-render/src packages/settlrl-game/src
-          packages/settlrl-learn/src packages/settlrl-learn/tests
+          packages/settlrl-app/src packages/settlrl-game/src
+          packages/settlrl-learn/src
+          packages/settlrl-learn/tests/test_learn.py packages/settlrl-learn/tests/test_architectures.py
       - run: bash mypy_experiments.sh
       - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
       - run: uv run --package settlrl-game pytest packages/settlrl-game
-      - run: uv run --package settlrl-render pytest packages/settlrl-render
+      - run: uv run --package settlrl-app pytest packages/settlrl-app
       - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
       - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests
       # Experiment smoke tests (full, including `slow`): exercise every

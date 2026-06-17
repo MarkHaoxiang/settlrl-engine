@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full test suite (settlrl-engine + settlrl-agents + settlrl-learn + settlrl-render).
+# Run the full test suite (settlrl-engine + settlrl-agents + settlrl-learn + settlrl-app).
 # Pass extra args to pytest: ./run_tests.sh -v, ./run_tests.sh -k test_print_board
 # To accept / update expecttest snapshots: EXPECTTEST_ACCEPT=1 ./run_tests.sh
 #
@@ -15,4 +15,4 @@ run() { "$@" || [ $? -eq 5 ]; }
 run uv run --package settlrl-engine pytest packages/settlrl-engine/tests/ "$@"
 run uv run --package settlrl-agents pytest packages/settlrl-agents/tests/ "$@"
 run uv run --package settlrl-learn pytest packages/settlrl-learn/tests/ "$@"
-run uv run --package settlrl-render pytest packages/settlrl-render/tests/ "$@"
+run uv run --package settlrl-app pytest packages/settlrl-app/tests/ "$@"

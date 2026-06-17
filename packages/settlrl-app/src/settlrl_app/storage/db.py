@@ -2,7 +2,7 @@
 
 One SQLAlchemy 2.0 engine (async, on aiosqlite) backs everything that
 persists: user accounts and login tokens (fastapi-users), and the game journals
-(:mod:`settlrl_render.storage.store`). ``create_app`` builds one :class:`Database` and
+(:mod:`settlrl_app.storage.store`). ``create_app`` builds one :class:`Database` and
 wires it everywhere; :meth:`Database.init` creates the tables at startup.
 
 A file under the state dir persists across restarts; with no state dir the db is

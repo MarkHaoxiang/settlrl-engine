@@ -21,8 +21,8 @@ import uvicorn
 from _helpers import bot_registry
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from settlrl_render.game.games import GameRegistry
-from settlrl_render.server import create_app
+from settlrl_app.game.games import GameRegistry
+from settlrl_app.server import create_app
 
 
 @pytest.fixture()
@@ -193,7 +193,9 @@ def test_preview_returns_a_board_without_creating_a_game(client: TestClient) -> 
     ).json()
     terrain = [t["terrain"] for t in spiral["tiles"]]
     assert terrain == [t["terrain"] for t in rand["tiles"]]
-    assert [t["number"] for t in spiral["tiles"]] != [t["number"] for t in rand["tiles"]]
+    assert [t["number"] for t in spiral["tiles"]] != [
+        t["number"] for t in rand["tiles"]
+    ]
     assert client.get("/api/preview", params={"n_players": 5}).status_code == 422
 
 
@@ -427,7 +429,7 @@ def test_replay_with_too_many_moves_is_rejected(
     with _finished_bot_game() as (client, game):
         doc = client.get(f"/api/games/{game}/record").json()
         monkeypatch.setattr(
-            "settlrl_render.api.routers.replay._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
+            "settlrl_app.api.routers.replay._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
         )
         resp = client.post("/api/replay", json=doc)
         assert resp.status_code == 422 and "too many moves" in resp.json()["detail"]

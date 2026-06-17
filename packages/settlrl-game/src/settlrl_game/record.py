@@ -16,7 +16,6 @@ from random import Random
 from typing import Literal
 
 import settlrl_game.reference as ref
-
 from settlrl_game.actions import to_action
 
 

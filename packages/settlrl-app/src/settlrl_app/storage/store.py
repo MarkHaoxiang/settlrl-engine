@@ -3,8 +3,8 @@
 A game is recorded as a header row -- the immutable ``(seed, n_players,
 number_placement, seats)`` it is fully determined by -- plus an ordered event
 log (a move, seat claim, or chat line per row), the
-:class:`~settlrl_render.storage.db.GameRow` / ``GameEvent`` tables of the one
-:class:`~settlrl_render.storage.db.Database`.
+:class:`~settlrl_app.storage.db.GameRow` / ``GameEvent`` tables of the one
+:class:`~settlrl_app.storage.db.Database`.
 
 Writes are **write-behind**: callers (the registry, a mutator's ``bump``) enqueue
 synchronously and never await, and a single background task drains the queue
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, select
 
-from settlrl_render.storage.db import Database, GameEvent, GameRow
+from settlrl_app.storage.db import Database, GameEvent, GameRow
 
 if TYPE_CHECKING:
     from settlrl_game.record import Move

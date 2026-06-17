@@ -52,7 +52,7 @@ settlrl-game = { workspace = true }
 mypy_path = [
     "packages/settlrl-agents/src",
     "packages/settlrl-engine/src",
-    "packages/settlrl-render/src",
+    "packages/settlrl-app/src",
     "packages/settlrl-game/src",
     "packages/settlrl-learn/src",
 ]

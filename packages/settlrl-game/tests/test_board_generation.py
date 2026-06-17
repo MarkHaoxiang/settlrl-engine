@@ -1,5 +1,5 @@
 """The randomness layer: a seed yields a standard board, and the reference can
-drive a whole game on its own (the renderer's path) by sampling the stochastic
+drive a whole game on its own (the app's path) by sampling the stochastic
 outcomes its actions take. Belief tracking rides along to show it holds up on a
 purely reference-driven game -- no engine anywhere.
 """

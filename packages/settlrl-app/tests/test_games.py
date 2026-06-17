@@ -4,7 +4,7 @@ import time
 from typing import cast
 
 import pytest
-from settlrl_render.game.games import (
+from settlrl_app.game.games import (
     GameHandle,
     GameRegistry,
     QueuePosition,

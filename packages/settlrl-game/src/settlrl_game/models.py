@@ -129,7 +129,7 @@ class EdgeModel(BaseModel):
 class ActionModel(BaseModel):
     """One legal move for the acting player.
 
-    ``flat`` is the renderer's flat action index (post it back to apply the
+    ``flat`` is the game's flat action index (post it back to apply the
     move). ``type`` is the lowercased action type. Depending on the type, at
     most one geometry/resource group below is populated; the rest stay ``None``.
     """

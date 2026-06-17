@@ -1,8 +1,8 @@
 """The FastAPI app: the composition root. ``create_app`` wires the one async
-:class:`~settlrl_render.storage.db.Database`, the game registry and its journal store,
+:class:`~settlrl_app.storage.db.Database`, the game registry and its journal store,
 the auth system, the bot providers, and the bot/timeout driver tasks into a
-shared :class:`~settlrl_render.api.deps.Deps`, then mounts the routers
-(:mod:`settlrl_render.api.routers`) and the SPA. Tests build isolated apps with
+shared :class:`~settlrl_app.api.deps.Deps`, then mounts the routers
+(:mod:`settlrl_app.api.routers`) and the SPA. Tests build isolated apps with
 their own registries instead of sharing module state.
 """
 
@@ -19,14 +19,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
-from settlrl_render.api import routers
-from settlrl_render.api.deps import Deps, ReplaySlot, needs_driver
-from settlrl_render.bots.providers import ProviderRegistry
-from settlrl_render.game.driver import start_game_driver
-from settlrl_render.game.games import GameHandle, GameRegistry, restore_games
-from settlrl_render.storage.auth import Auth
-from settlrl_render.storage.db import Database
-from settlrl_render.storage.store import GameStore
+from settlrl_app.api import routers
+from settlrl_app.api.deps import Deps, ReplaySlot, needs_driver
+from settlrl_app.bots.providers import ProviderRegistry
+from settlrl_app.game.driver import start_game_driver
+from settlrl_app.game.games import GameHandle, GameRegistry, restore_games
+from settlrl_app.storage.auth import Auth
+from settlrl_app.storage.db import Database
+from settlrl_app.storage.store import GameStore
 
 
 def _build_registry(
@@ -166,22 +166,22 @@ class _SPAStaticFiles(StaticFiles):
             raise
 
 
-# Serve built frontend when it exists (src/settlrl_render/server.py -> package root)
+# Serve built frontend when it exists (src/settlrl_app/server.py -> package root)
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 
-# The uvicorn entry point (settlrl_render.server:app). ROOT_PATH is the proxy
+# The uvicorn entry point (settlrl_app.server:app). ROOT_PATH is the proxy
 # prefix when served under a path (e.g. /settlrl behind Caddy's handle_path).
 def _admin_emails() -> frozenset[str]:
-    raw = os.environ.get("SETTLRL_RENDER_ADMIN_EMAILS", "")
+    raw = os.environ.get("SETTLRL_APP_ADMIN_EMAILS", "")
     return frozenset(e.strip() for e in raw.split(",") if e.strip())
 
 
 app = create_app(
     root_path=os.environ.get("ROOT_PATH", ""),
-    state_dir=os.environ.get("SETTLRL_RENDER_STATE_DIR") or None,
-    turn_timeout=float(os.environ.get("SETTLRL_RENDER_TURN_TIMEOUT_S", "0")),
-    max_active=int(os.environ.get("SETTLRL_RENDER_MAX_ACTIVE", "16")),
-    user_db=os.environ.get("SETTLRL_RENDER_USER_DB") or None,
+    state_dir=os.environ.get("SETTLRL_APP_STATE_DIR") or None,
+    turn_timeout=float(os.environ.get("SETTLRL_APP_TURN_TIMEOUT_S", "0")),
+    max_active=int(os.environ.get("SETTLRL_APP_MAX_ACTIVE", "16")),
+    user_db=os.environ.get("SETTLRL_APP_USER_DB") or None,
     admin_emails=_admin_emails(),
 )

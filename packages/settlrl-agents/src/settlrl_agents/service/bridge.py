@@ -5,7 +5,7 @@ on a ``settlrl_engine`` board. This module rebuilds the engine's ``(BoardLayout,
 BoardState)`` and ``BeliefState`` from a reference ``Game`` + ``Belief`` (the
 inverse of the engine test's ``conversion`` bridge), wraps them in a
 ``BatchedSettlrlEnv`` so a policy can observe and choose, and maps the policy's
-chosen engine action back to the renderer's flat index.
+chosen engine action back to the game's flat index.
 
 Index translation is by cube coordinate, the only thing the two libraries share
 (see ``settlrl_game.reference.board`` and ``settlrl_engine.board.layout``).
@@ -38,9 +38,8 @@ from settlrl_engine.env.batched import (
 from settlrl_engine.mechanics.action import ActionType
 from settlrl_engine.mechanics.flat import flat_available_b
 from settlrl_engine.mechanics.trade import _COUNT_BITS, _COUNT_MASK, _PARTNER_BITS
-from settlrl_game.reference import board as rb
-
 from settlrl_game.actions import flat_for_action
+from settlrl_game.reference import board as rb
 
 _N_DEV = len(DEV_CARD_COUNTS)
 _DESERT = N_RESOURCES  # engine Tile value for the desert
@@ -251,8 +250,8 @@ def _engine_action_to_ref(atype: int, idx: int, target: int) -> ref.Action:
             return ref.EndTurn()
 
 
-def renderer_flat(engine_flat: int) -> int:
-    """Translate a policy's chosen engine flat index to a renderer flat index."""
+def game_flat(engine_flat: int) -> int:
+    """Translate a policy's chosen engine flat index to a game flat index."""
     atype, params = flat_to_action(jnp.asarray([engine_flat]))
     action = _engine_action_to_ref(
         int(atype[0]), int(params.idx[0]), int(params.target[0])
@@ -260,4 +259,4 @@ def renderer_flat(engine_flat: int) -> int:
     return flat_for_action(action)
 
 
-__all__ = ["N_FLAT", "engine_env", "renderer_flat"]
+__all__ = ["N_FLAT", "engine_env", "game_flat"]

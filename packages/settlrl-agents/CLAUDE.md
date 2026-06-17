@@ -32,6 +32,17 @@ stays free of `pydantic`/`omegaconf`; those are agents deps only because this
 subpackage uses them. (If keeping the play-time lib leaner matters, this is the
 piece to relocate — e.g. to `settlrl-learn`.)
 
+`service/` is the bot service — a FastAPI app (`app.py`) that serves moves over
+the shared wire protocol (`settlrl_game.botproto`): it replays a game from its
+record, bridges the reference position to an engine board (`bridge.py`), and
+runs the seat's policy (`bots.py`). It's the `settlrl-app` game server's only
+source of bot moves (delegated over HTTP), kept here because it *is* the agents
+running. Behind the `[service]` optional extra (`fastapi` + `settlrl-game`) and,
+like `experiment/`, never imported by `__init__`, so `import settlrl_agents`
+stays free of `fastapi`. The `bridge.py` dtype contract is exact: engine
+`BoardLayout`/`BoardState` arrays are `uint8` (jaxtyping-enforced under the test
+hook — render's conftest never checked engine types, so an int32 slipped by).
+
 ## API layer and agents
 
 - `rows.py` — the flat action table decoded once (device `ROW_TYPE` /
@@ -347,7 +358,7 @@ SE and the per-seating split. Tournaments etc. slot in as new subparsers.
 ## Registry and tests
 
 `__init__.py` exports the `POLICIES` registry — the single list of shipped
-agents, consumed by both the protocol tests and settlrl-render's bot seam
+agents, consumed by both the protocol tests and settlrl-app's bot seam
 (which dispatches on the spec's class and filters seat counts).
 
 Tests are protocol-level only (`tests/test_policies.py`), parametrized over
@@ -355,7 +366,7 @@ every agent in `POLICIES` at its `for_testing` parameters: legality through
 self-play, seed reproducibility, and episode-budgeted rollouts that must
 complete games (`_self_play` drives stateful specs lane by lane, mirroring
 `_evaluate_stepwise`). No per-agent internal-logic
-tests — a new agent just registers in `POLICIES`. settlrl-render's bot seam
+tests — a new agent just registers in `POLICIES`. settlrl-app's bot seam
 skips `StatefulSpec` families (its `bot_act` is per-move and stateless; a
 stateful seat there needs a per-session agent cache that doesn't exist yet). `sample_world` is
 infrastructure, not a policy, so it gets unit tests (`tests/test_sample.py`).

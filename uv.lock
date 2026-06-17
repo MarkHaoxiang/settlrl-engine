@@ -11,10 +11,10 @@ resolution-markers = [
 [manifest]
 members = [
     "settlrl-agents",
+    "settlrl-app",
     "settlrl-engine",
     "settlrl-game",
     "settlrl-learn",
-    "settlrl-render",
 ]
 
 [manifest.dependency-groups]
@@ -2645,6 +2645,30 @@ provides-extras = ["service"]
 cuda = []
 
 [[package]]
+name = "settlrl-app"
+version = "0.1.0"
+source = { editable = "packages/settlrl-app" }
+dependencies = [
+    { name = "aiosqlite" },
+    { name = "fastapi", extra = ["standard"] },
+    { name = "fastapi-users", extra = ["sqlalchemy"] },
+    { name = "settlrl-game" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.20.0" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
+    { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=13.0.0" },
+    { name = "settlrl-game", editable = "packages/settlrl-game" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
+]
+
+[package.metadata.requires-dev]
+cuda = []
+
+[[package]]
 name = "settlrl-engine"
 version = "0.1.0"
 source = { editable = "packages/settlrl-engine" }
@@ -2708,30 +2732,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "settlrl-agents", editable = "packages/settlrl-agents" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
-]
-
-[package.metadata.requires-dev]
-cuda = []
-
-[[package]]
-name = "settlrl-render"
-version = "0.1.0"
-source = { editable = "packages/settlrl-render" }
-dependencies = [
-    { name = "aiosqlite" },
-    { name = "fastapi", extra = ["standard"] },
-    { name = "fastapi-users", extra = ["sqlalchemy"] },
-    { name = "settlrl-game" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite", specifier = ">=0.20.0" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
-    { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=13.0.0" },
-    { name = "settlrl-game", editable = "packages/settlrl-game" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
 ]
 
 [package.metadata.requires-dev]

@@ -1,6 +1,6 @@
 """Replay tooling routes (``/api/replay*``) and the shared replay loader.
 
-One replay is loaded server-wide at a time (the :class:`~settlrl_render.api.deps.
+One replay is loaded server-wide at a time (the :class:`~settlrl_app.api.deps.
 ReplaySlot`); :func:`load_replay` builds it — offloading the replay to a worker
 thread — and is reused by the game router's replay-from-a-finished-game route.
 """
@@ -9,12 +9,12 @@ import json
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
-from starlette.responses import Response
-
-from settlrl_render.api.deps import Deps, ReplaySlot
 from settlrl_game.models import ReplayStateModel
 from settlrl_game.record import GameRecord, ReplayError
-from settlrl_render.game.replay import ReplaySession
+from starlette.responses import Response
+
+from settlrl_app.api.deps import Deps, ReplaySlot
+from settlrl_app.game.replay import ReplaySession
 
 # Replaying a submitted record steps the reference once per move; cap the count so
 # an untrusted POST /api/replay can't hand us an arbitrarily long game to grind

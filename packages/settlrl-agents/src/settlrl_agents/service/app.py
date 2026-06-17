@@ -26,7 +26,6 @@ from typing import Any
 import anyio.to_thread
 import jax
 from fastapi import FastAPI, HTTPException
-
 from settlrl_game.botproto import ActRequest, ActResponse
 from settlrl_game.session import (
     HUMAN,
@@ -36,7 +35,7 @@ from settlrl_game.session import (
 )
 
 from settlrl_agents.service.bots import bot_act, bot_catalog
-from settlrl_agents.service.bridge import engine_env, renderer_flat
+from settlrl_agents.service.bridge import engine_env, game_flat
 
 # The agent kinds this service plays; the replayed game's bot seats are accepted
 # as these (the game server stores them verbatim and never plays them itself).
@@ -83,7 +82,7 @@ def _choose(session: GameSession, seat: int) -> int | None:
     is due: the game is over, the seat is human, or it has no legal move).
 
     The agent reasons on an engine env bridged from the reference game, then its
-    chosen engine action is translated back to the renderer's flat index.
+    chosen engine action is translated back to the game's flat index.
     """
     if session.terminal() or session.seats[seat] == HUMAN:
         return None
@@ -95,7 +94,7 @@ def _choose(session: GameSession, seat: int) -> int | None:
     engine_flat = bot_act(
         session.seats[seat], session.seat_params[seat], key, env, seat
     )
-    return renderer_flat(engine_flat)
+    return game_flat(engine_flat)
 
 
 def create_bot_app() -> FastAPI:

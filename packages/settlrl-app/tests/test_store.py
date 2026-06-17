@@ -10,11 +10,11 @@ from pathlib import Path
 
 from _helpers import bot_registry
 from fastapi.testclient import TestClient
-from settlrl_render.game.games import GameRegistry
+from settlrl_app.game.games import GameRegistry
+from settlrl_app.server import create_app
+from settlrl_app.storage.db import Database
+from settlrl_app.storage.store import GameStore
 from settlrl_game.session import GameSession, GameSetup
-from settlrl_render.server import create_app
-from settlrl_render.storage.db import Database
-from settlrl_render.storage.store import GameStore
 
 
 def test_game_setup_round_trips_through_a_dict() -> None:

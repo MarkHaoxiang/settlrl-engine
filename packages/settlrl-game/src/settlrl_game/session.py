@@ -1,7 +1,7 @@
 """A single live Settlrl game, backed by the plain-Python ``settlrl_game.reference``.
 
 ``GameSession`` wraps a reference ``Game``: each seat is a human (hotseat) or a
-bot played by a remote bot service (:mod:`settlrl_render.bots.providers`) — the
+bot played by a remote bot service (:mod:`settlrl_app.bots.providers`) — the
 game server runs no bot policies in-process. It owns a seeded RNG that samples
 the stochastic outcomes the game's actions take (dice, dev draws, steals), so a
 game is reproducible from its seed and its flat move trace. It exposes the
@@ -20,7 +20,6 @@ from random import Random
 from typing import Literal, cast
 
 import settlrl_game.reference as ref
-
 from settlrl_game.actions import N_FLAT, decode_actions, legal_flats, to_action
 from settlrl_game.convert import _RESOURCE_NAMES
 from settlrl_game.models import (

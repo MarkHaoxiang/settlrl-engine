@@ -1,4 +1,4 @@
-"""Bot seats: the settlrl-agents registry adapted to the renderer's single game.
+"""Bot seats: the settlrl-agents registry adapted to a single game.
 
 ``POLICIES`` is settlrl-agents' registry (name -> ``AgentSpec``); a spec's class
 declares which protocol its policy speaks (``ObservationSpec`` /
@@ -7,7 +7,7 @@ its scalar build parameters (int / float / bool keyword arguments of
 ``spec.make``) are exposed as per-seat knobs — :func:`bot_catalog` describes
 them to the client and :func:`bot_act` builds (and caches) the configured
 policy. :func:`bot_act` hides the protocol dispatch: it slices the single
-game out of the renderer's batch-of-one env and calls the policy through the
+game out of the single-game env and calls the policy through the
 right protocol (belief seats read the env's honest ``belief_view``, so the
 env must be built with ``track_beliefs=True`` when any are seated).
 """
@@ -18,10 +18,11 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
-from settlrl_agents import POLICIES, AgentSpec, BeliefSpec, ObservationSpec
-from settlrl_agents.policy import BeliefPolicy, Policy, StatefulPolicy
 from settlrl_engine.board.state import KeyScalar
 from settlrl_engine.env import BatchedSettlrlEnv, Observation
+
+from settlrl_agents import POLICIES, AgentSpec, BeliefSpec, ObservationSpec
+from settlrl_agents.policy import BeliefPolicy, Policy, StatefulPolicy
 
 __all__ = [
     "POLICIES",

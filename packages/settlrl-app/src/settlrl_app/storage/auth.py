@@ -5,7 +5,7 @@ unchanged. Signing in gives a persistent identity (seats follow the account) and
 marks some users as **admins** — fastapi-users *superusers* — who manage the bot
 services. Login uses the OAuth2 password flow; tokens live in the ``access_token``
 table (fastapi-users :class:`DatabaseStrategy`), so logout truly revokes and the
-account system shares the one storage layer (:mod:`settlrl_render.storage.db`).
+account system shares the one storage layer (:mod:`settlrl_app.storage.db`).
 
 Emails in ``admin_emails`` are promoted to superuser on register and on every
 login, so an operator can anoint an admin from configuration alone.
@@ -30,7 +30,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyAccessTokenDatabase
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from settlrl_render.storage.db import AccessToken, Database, User
+from settlrl_app.storage.db import AccessToken, Database, User
 
 # A login token lasts this long; presenting it past expiry is a fresh login.
 ACCESS_TOKEN_TTL_S = 30 * 24 * 3600

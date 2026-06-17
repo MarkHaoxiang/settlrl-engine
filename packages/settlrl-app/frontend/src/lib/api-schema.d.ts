@@ -4,6 +4,27 @@
  */
 
 export interface paths {
+    "/api/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Preview
+         * @description The board a new game would open on, for the map picker — no game is
+         *     created. Terrain and ports depend only on the seed (not the placement).
+         */
+        get: operations["get_preview_api_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/games": {
         parameters: {
             query?: never;
@@ -229,27 +250,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/me/games": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * My Games
-         * @description The signed-in user's games — those still live where their account
-         *     owns a seat — so they can resume on any device without a seat token.
-         */
-        get: operations["my_games_api_me_games_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/bots": {
         parameters: {
             query?: never;
@@ -313,6 +313,27 @@ export interface paths {
          * @description Unregister a remote bot provider (admin only); ``404`` if unknown.
          */
         delete: operations["remove_bot_provider_api_admin_bot_providers__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/games": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Games
+         * @description The signed-in user's games — those still live where their account
+         *     owns a seat — so they can resume on any device without a seat token.
+         */
+        get: operations["my_games_api_me_games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -406,27 +427,6 @@ export interface paths {
         patch: operations["users_patch_user_api_users__id__patch"];
         trace?: never;
     };
-    "/api/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Preview
-         * @description The board a new game would open on, for the map picker — no game is
-         *     created. Terrain and ports depend only on the seed (not the placement).
-         */
-        get: operations["get_preview_api_preview_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -435,7 +435,7 @@ export interface components {
          * ActionModel
          * @description One legal move for the acting player.
          *
-         *     ``flat`` is the renderer's flat action index (post it back to apply the
+         *     ``flat`` is the game's flat action index (post it back to apply the
          *     move). ``type`` is the lowercased action type. Depending on the type, at
          *     most one geometry/resource group below is populated; the rest stay ``None``.
          */
@@ -1065,6 +1065,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_preview_api_preview_get: {
+        parameters: {
+            query?: {
+                seed?: number;
+                n_players?: number;
+                number_placement?: "random" | "spiral";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_create_api_games_post: {
         parameters: {
             query?: never;
@@ -1421,26 +1454,6 @@ export interface operations {
             };
         };
     };
-    my_games_api_me_games_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["_MyGameModel"][];
-                };
-            };
-        };
-    };
     get_bots_api_bots_get: {
         parameters: {
             query?: never;
@@ -1547,6 +1560,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_games_api_me_games_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_MyGameModel"][];
                 };
             };
         };
@@ -1899,39 +1932,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_preview_api_preview_get: {
-        parameters: {
-            query?: {
-                seed?: number;
-                n_players?: number;
-                number_placement?: "random" | "spiral";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardModel"];
-                };
             };
             /** @description Validation Error */
             422: {

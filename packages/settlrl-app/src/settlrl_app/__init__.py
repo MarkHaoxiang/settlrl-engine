@@ -13,7 +13,7 @@ def main() -> None:
     # production — the reloader is a dev file-watcher). Single worker only:
     # the game registry is in-memory.
     uvicorn.run(
-        "settlrl_render.server:app",
+        "settlrl_app.server:app",
         host=os.environ.get("HOST", "0.0.0.0"),
         port=int(os.environ.get("PORT", "8000")),
         reload=os.environ.get("RELOAD", "1") == "1",

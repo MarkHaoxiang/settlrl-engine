@@ -1,4 +1,4 @@
-"""Convert a ``settlrl_game.reference`` game into the renderer's wire model.
+"""Convert a ``settlrl_game.reference`` game into the game's wire model.
 
 Bridges a reference ``Game`` (its ``Layout`` plus the live occupancy/hands) to
 the JSON-friendly :class:`BoardModel`. All geometry comes from
@@ -12,8 +12,6 @@ from __future__ import annotations
 from typing import Literal
 
 import settlrl_game.reference as ref
-from settlrl_game.reference import board as rb
-
 from settlrl_game.models import (
     BankModel,
     BoardModel,
@@ -28,13 +26,14 @@ from settlrl_game.models import (
     Terrain,
     TileModel,
 )
+from settlrl_game.reference import board as rb
 
 PortResource = Literal["sheep", "wheat", "wood", "brick", "ore"]
 
 Cube = tuple[int, int, int]
 
 # Resource / dev-card field order, from the reference enums (matches the wire
-# ResourceCounts / DevCardCounts field order). Reused wherever the renderer
+# ResourceCounts / DevCardCounts field order). Reused wherever the game
 # indexes positionally (here and in api.flat).
 _RESOURCE_NAMES: tuple[PortResource, ...] = tuple(r.name.lower() for r in ref.RESOURCES)  # type: ignore[misc]
 _DEV_CARD_NAMES: tuple[str, ...] = tuple(d.name.lower() for d in ref.DevCard)

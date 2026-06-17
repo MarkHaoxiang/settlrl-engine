@@ -1,4 +1,4 @@
-"""Smoke test for the dev launcher (``packages/settlrl-render/dev.sh``).
+"""Smoke test for the dev launcher (``packages/settlrl-app/dev.sh``).
 
 The script chains real CLI entry points and HTTP routes to boot the stack with a
 seeded admin + registered bot service. Actually running all three (JAX, node) is
@@ -14,8 +14,8 @@ import tomllib
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from settlrl_agents.service.app import create_bot_app
-from settlrl_render.game.games import GameRegistry
-from settlrl_render.server import create_app
+from settlrl_app.game.games import GameRegistry
+from settlrl_app.server import create_app
 
 PKG = Path(__file__).resolve().parents[1]
 SCRIPT = PKG / "dev.sh"
@@ -35,13 +35,15 @@ def test_dev_script_uses_real_cli_entry_points() -> None:
     text = SCRIPT.read_text()
     # The game server's own entry point lives in this package; the bot service's
     # is in settlrl-agents (its [service] extra).
-    render_scripts = tomllib.loads((PKG / "pyproject.toml").read_text())["project"]["scripts"]
+    render_scripts = tomllib.loads((PKG / "pyproject.toml").read_text())["project"][
+        "scripts"
+    ]
     agents_scripts = tomllib.loads(
         (PKG.parent / "settlrl-agents" / "pyproject.toml").read_text()
     )["project"]["scripts"]
-    assert "settlrl-render" in render_scripts
+    assert "settlrl-app" in render_scripts
     assert "settlrl-bot-service" in agents_scripts
-    for name in ("settlrl-render", "settlrl-bot-service"):
+    for name in ("settlrl-app", "settlrl-bot-service"):
         assert name in text, f"dev.sh no longer launches {name}"
 
 
@@ -65,5 +67,5 @@ def test_dev_script_seeds_an_admin() -> None:
     # Registering the bot service only works if the seeded account is admin,
     # which depends on its email being passed as a configured admin email.
     text = SCRIPT.read_text()
-    assert "SETTLRL_RENDER_ADMIN_EMAILS" in text
+    assert "SETTLRL_APP_ADMIN_EMAILS" in text
     assert "$ADMIN_EMAIL" in text or "${ADMIN_EMAIL}" in text

@@ -3,6 +3,6 @@
   "venv": ".venv",
   "extraPaths": [
     "packages/settlrl-engine/src",
-    "packages/settlrl-render/src"
+    "packages/settlrl-app/src"
   ]
 }

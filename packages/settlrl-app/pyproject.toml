@@ -1,7 +1,7 @@
 [project]
-name = "settlrl-render"
+name = "settlrl-app"
 version = "0.1.0"
-description = "Settlrl rendering library"
+description = "The Settlrl game server: REST + SSE API, async game runtime, storage, auth, and the SPA frontend."
 authors = [
     { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
 ]
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-settlrl-render = "settlrl_render:main"
+settlrl-app = "settlrl_app:main"
 
 [build-system]
 requires = ["hatchling"]

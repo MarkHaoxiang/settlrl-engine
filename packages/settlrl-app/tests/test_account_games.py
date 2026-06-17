@@ -11,8 +11,8 @@ from collections.abc import Iterator
 import pytest
 from _helpers import bot_registry
 from fastapi.testclient import TestClient
-from settlrl_render.game.games import GameRegistry
-from settlrl_render.server import create_app
+from settlrl_app.game.games import GameRegistry
+from settlrl_app.server import create_app
 
 
 @pytest.fixture()

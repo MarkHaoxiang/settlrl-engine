@@ -9,9 +9,9 @@ the robber tile, and the general (3:1) port's ``resource is None``.
 from random import Random
 
 import settlrl_game.reference as ref
+from settlrl_game.convert import _DEV_CARD_NAMES, _RESOURCE_NAMES, board_to_model
 from settlrl_game.reference import board as rb
 from settlrl_game.reference.types import DEV_CARD_COUNTS, Building, DevCard
-from settlrl_game.convert import _DEV_CARD_NAMES, _RESOURCE_NAMES, board_to_model
 
 # Known cube coordinates to build on (all valid vertices / edge / tile).
 SETTLEMENT_CUBE = (1, 0, 0)

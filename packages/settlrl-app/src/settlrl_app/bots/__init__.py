@@ -1,1 +1,1 @@
-"""The bots layer of the renderer (see the package README)."""
+"""The bots layer of the app (see the package README)."""

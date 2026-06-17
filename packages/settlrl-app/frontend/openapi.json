@@ -5,6 +5,71 @@
   "version": "0.1.0"
  },
  "paths": {
+  "/api/preview": {
+   "get": {
+    "summary": "Get Preview",
+    "description": "The board a new game would open on, for the map picker \u2014 no game is\ncreated. Terrain and ports depend only on the seed (not the placement).",
+    "operationId": "get_preview_api_preview_get",
+    "parameters": [
+     {
+      "name": "seed",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Seed"
+      }
+     },
+     {
+      "name": "n_players",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 4,
+       "title": "N Players"
+      }
+     },
+     {
+      "name": "number_placement",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "random",
+        "spiral"
+       ],
+       "type": "string",
+       "default": "random",
+       "title": "Number Placement"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BoardModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/games": {
    "post": {
     "summary": "Post Create",
@@ -549,34 +614,6 @@
     }
    }
   },
-  "/api/me/games": {
-   "get": {
-    "summary": "My Games",
-    "description": "The signed-in user's games \u2014 those still live where their account\nowns a seat \u2014 so they can resume on any device without a seat token.",
-    "operationId": "my_games_api_me_games_get",
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "items": {
-          "$ref": "#/components/schemas/_MyGameModel"
-         },
-         "type": "array",
-         "title": "Response My Games Api Me Games Get"
-        }
-       }
-      }
-     }
-    },
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ]
-   }
-  },
   "/api/bots": {
    "get": {
     "summary": "Get Bots",
@@ -710,6 +747,34 @@
       }
      }
     }
+   }
+  },
+  "/api/me/games": {
+   "get": {
+    "summary": "My Games",
+    "description": "The signed-in user's games \u2014 those still live where their account\nowns a seat \u2014 so they can resume on any device without a seat token.",
+    "operationId": "my_games_api_me_games_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/_MyGameModel"
+         },
+         "type": "array",
+         "title": "Response My Games Api Me Games Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
    }
   },
   "/api/auth/login": {
@@ -1172,71 +1237,6 @@
      }
     }
    }
-  },
-  "/api/preview": {
-   "get": {
-    "summary": "Get Preview",
-    "description": "The board a new game would open on, for the map picker \u2014 no game is\ncreated. Terrain and ports depend only on the seed (not the placement).",
-    "operationId": "get_preview_api_preview_get",
-    "parameters": [
-     {
-      "name": "seed",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "type": "integer",
-       "default": 0,
-       "title": "Seed"
-      }
-     },
-     {
-      "name": "n_players",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "type": "integer",
-       "default": 4,
-       "title": "N Players"
-      }
-     },
-     {
-      "name": "number_placement",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "enum": [
-        "random",
-        "spiral"
-       ],
-       "type": "string",
-       "default": "random",
-       "title": "Number Placement"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/BoardModel"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
   }
  },
  "components": {
@@ -1362,7 +1362,7 @@
      "label"
     ],
     "title": "ActionModel",
-    "description": "One legal move for the acting player.\n\n``flat`` is the renderer's flat action index (post it back to apply the\nmove). ``type`` is the lowercased action type. Depending on the type, at\nmost one geometry/resource group below is populated; the rest stay ``None``."
+    "description": "One legal move for the acting player.\n\n``flat`` is the game's flat action index (post it back to apply the\nmove). ``type`` is the lowercased action type. Depending on the type, at\nmost one geometry/resource group below is populated; the rest stay ``None``."
    },
    "BankModel": {
     "properties": {

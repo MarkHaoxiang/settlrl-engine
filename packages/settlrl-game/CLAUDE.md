@@ -6,6 +6,14 @@ web app and the agents' bot service can build on it without pulling in the JAX
 engine, and `settlrl-engine`'s tests can use the reference as their oracle
 without a dependency cycle.
 
+Two layers: the reference rules (`settlrl_game.reference`, below) and the
+serialization/replay layer over them — `session.py` (`GameSession`: a live game
+driven by a stable flat action index), `actions.py` (the flat space + decode),
+`convert.py` (reference `Game` → `BoardModel`), `models.py` (the pydantic wire
+models), `record.py` (replayable records), and `botproto.py` (the bot-service
+`/act` wire protocol). The flat action indexing and record format are the
+contract the app and bot service agree on across the wire; keep them stable.
+
 ## `settlrl_game.reference` — the reference rules
 
 A plain-Python gold-standard implementation of the Settlrl base game, written from

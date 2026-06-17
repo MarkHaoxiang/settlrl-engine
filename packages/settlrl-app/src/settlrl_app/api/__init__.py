@@ -1,1 +1,1 @@
-"""The api layer of the renderer (see the package README)."""
+"""The api layer of the app (see the package README)."""

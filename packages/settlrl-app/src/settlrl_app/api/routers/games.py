@@ -17,16 +17,16 @@ import settlrl_game.reference as ref
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from settlrl_game.convert import board_to_model
+from settlrl_game.models import BoardModel, GameModel, ReplayStateModel
+from settlrl_game.session import HUMAN, GameSession, IllegalActionError
 from starlette.responses import Response
 
-from settlrl_game.convert import board_to_model
-from settlrl_render.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
-from settlrl_game.models import BoardModel, GameModel, ReplayStateModel
-from settlrl_render.api.routers.replay import load_replay
-from settlrl_render.api.views import game_model
-from settlrl_render.game.games import QueuePosition, RegistryFullError
-from settlrl_game.session import HUMAN, GameSession, IllegalActionError
-from settlrl_render.storage.db import User
+from settlrl_app.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
+from settlrl_app.api.routers.replay import load_replay
+from settlrl_app.api.views import game_model
+from settlrl_app.game.games import QueuePosition, RegistryFullError
+from settlrl_app.storage.db import User
 
 
 class _SeatSpec(BaseModel):
@@ -38,7 +38,7 @@ class _SeatSpec(BaseModel):
 
 class _CreateRequest(BaseModel):
     seed: int = 0
-    # Seats in the new game. The engine supports 2-4; the renderer offers 2
+    # Seats in the new game. The engine supports 2-4; the app offers 2
     # and 4 for now.
     n_players: Literal[2, 4] = 4
     number_placement: Literal["random", "spiral"] = "random"

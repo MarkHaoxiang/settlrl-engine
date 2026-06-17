@@ -1,7 +1,7 @@
 """Shared request helpers and the runtime context the routers close over.
 
 ``create_app`` builds one :class:`Deps` and hands it to each router factory in
-:mod:`settlrl_render.api.routers`; the routers read everything game-related through
+:mod:`settlrl_app.api.routers`; the routers read everything game-related through
 it (the registry, bot providers, the auth dependencies, the replay slot, and the
 driver spawner), so they hold no module-level state and tests stay isolated.
 """
@@ -14,13 +14,13 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Header, HTTPException
-
-from settlrl_render.bots.providers import ProviderRegistry
-from settlrl_render.game.games import GameHandle, GameRegistry
-from settlrl_render.game.replay import ReplaySession
 from settlrl_game.session import HUMAN
-from settlrl_render.storage.auth import Auth
-from settlrl_render.storage.db import User
+
+from settlrl_app.bots.providers import ProviderRegistry
+from settlrl_app.game.games import GameHandle, GameRegistry
+from settlrl_app.game.replay import ReplaySession
+from settlrl_app.storage.auth import Auth
+from settlrl_app.storage.db import User
 
 # The per-request seat-ownership proof: a comma-separated list of seat tokens.
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]

@@ -4,7 +4,7 @@ These exercise the full pipeline the server uses — drive the reference game,
 decode the legal moves, apply one, and convert the resulting board — asserting
 the pieces stay consistent. The decisive check is
 :func:`test_applied_placement_lands_at_decoded_coordinate`: it proves the
-renderer's decoded coordinate is *where the game actually places*, tying the
+app's decoded coordinate is *where the game actually places*, tying the
 decode layer to real play rather than to a parallel reconstruction.
 """
 

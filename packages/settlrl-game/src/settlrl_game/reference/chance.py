@@ -2,7 +2,7 @@
 
 The game itself takes realised outcomes on its actions (``Roll.value``, the
 drawn ``BuyDevelopmentCard.card``, the robber's ``stolen`` card) so a
-differential test can feed it the engine's. A live driver (the renderer)
+differential test can feed it the engine's. A live driver (the app)
 samples them instead; these helpers do that from an RNG. Each assumes the
 matching action is legal (the deck has a card, the victim has a hand).
 """

@@ -1,6 +1,11 @@
-# settlrl-render
+# settlrl-app
 
-Web-based renderer for settlrl-engine. FastAPI serves board state over a JSON API; a Vite + React + TypeScript frontend renders the board as SVG.
+The Settlrl game server. FastAPI serves the game over a JSON + SSE API, runs the
+async game runtime, persists games and accounts, and serves the SPA; a Vite +
+React + TypeScript frontend renders the board as SVG. The game model itself is
+`settlrl-game`; bot moves are delegated to a remote bot service
+(`settlrl-agents[service]`). The app depends on neither the engine nor the
+agents directly.
 
 A menu lets you choose between two modes, each at its own URL.
 
@@ -46,7 +51,7 @@ the frontend together, pre-registers an admin account (`dev@example.com` /
 load. Ctrl-C stops everything.
 
 ```bash
-./packages/settlrl-render/dev.sh
+./packages/settlrl-app/dev.sh
 ```
 
 To run the pieces by hand instead, start the API server and the frontend dev
@@ -54,7 +59,7 @@ server in separate terminals from the repo root.
 
 **Terminal 1 — API (port 8000)**
 ```bash
-uv run settlrl-render
+uv run settlrl-app
 ```
 
 The server runs JAX on CPU by default (one live game doesn't need a GPU, and JAX would
@@ -62,7 +67,7 @@ otherwise preallocate most of its memory). Set `JAX_PLATFORMS=cuda` to override.
 
 **Terminal 2 — frontend (port 5173)**
 ```bash
-cd packages/settlrl-render/frontend
+cd packages/settlrl-app/frontend
 npm install   # first time only
 npm run dev
 ```
@@ -74,8 +79,8 @@ Open http://localhost:5173. The Vite dev server proxies `/api/*` to the FastAPI 
 Build the frontend into `frontend/dist/`, then start the API server — it detects the built assets and serves them automatically.
 
 ```bash
-cd packages/settlrl-render/frontend && npm run build
-uv run settlrl-render
+cd packages/settlrl-app/frontend && npm run build
+uv run settlrl-app
 ```
 
 Open http://localhost:8000.
@@ -85,10 +90,10 @@ Open http://localhost:8000.
 The server is configured by environment variables: `HOST` (default `0.0.0.0`),
 `PORT` (default `8000`), `RELOAD` (default `1`; set `0` in production — the
 reloader is a dev file-watcher),
-`SETTLRL_RENDER_STATE_DIR` (a directory to persist games in — see below),
-`SETTLRL_RENDER_TURN_TIMEOUT_S` (default `0` = off; after this many seconds of an
+`SETTLRL_APP_STATE_DIR` (a directory to persist games in — see below),
+`SETTLRL_APP_TURN_TIMEOUT_S` (default `0` = off; after this many seconds of an
 idle human turn the server auto-plays a move, so an abandoned game still
-finishes instead of stalling), `SETTLRL_RENDER_MAX_ACTIVE` (default `16`; games
+finishes instead of stalling), `SETTLRL_APP_MAX_ACTIVE` (default `16`; games
 running at once before new creators are queued — keep it below the registry
 cap), and `ROOT_PATH` (the proxy prefix when served under a path). Run **one
 process, one worker**: live games are held in memory,
@@ -97,7 +102,7 @@ The registry holds up to 32 games, evicting finished games, hour-idle ones, or
 unstarted ones idle past a few minutes (so a burst of empty games can't pin
 every slot) to make room.
 
-**Persistence.** Without `SETTLRL_RENDER_STATE_DIR`, games live only in memory and
+**Persistence.** Without `SETTLRL_APP_STATE_DIR`, games live only in memory and
 a restart loses them. Point it at a (mounted) directory and each game is
 journalled — its setup plus every move, seat claim, and chat line — into the same
 SQLite database as accounts (`settlrl.db` there) and replayed back into the
@@ -106,7 +111,7 @@ seat tokens and all. Bot pacing restarts for resumed games. Evicted games are
 dropped from the database.
 
 Anyone can create games; the concurrency cap queues them past
-`SETTLRL_RENDER_MAX_ACTIVE`. For a public deployment, front the server with a
+`SETTLRL_APP_MAX_ACTIVE`. For a public deployment, front the server with a
 proxy that rate-limits — the built-in caps (a 2 MB request-body limit, a replay
 move-count cap, and high-entropy game ids) bound resource use but are not a
 substitute for one.
@@ -115,8 +120,8 @@ The repo-root `Dockerfile` builds a self-contained image (frontend compiled
 in, CPU JAX):
 
 ```bash
-docker build -t settlrl-render .
-docker run -p 8000:8000 settlrl-render
+docker build -t settlrl-app .
+docker run -p 8000:8000 settlrl-app
 ```
 
 To serve under a path instead of a (sub)domain — e.g. `markhaoxiang.com/settlrl`
@@ -124,8 +129,8 @@ behind a proxy that strips the prefix (Caddy `handle_path /settlrl/*`) — bake
 the prefix into the frontend and tell FastAPI about it:
 
 ```bash
-docker build -t settlrl-render --build-arg BASE_PATH=/settlrl/ .
-docker run -p 8000:8000 -e ROOT_PATH=/settlrl settlrl-render
+docker build -t settlrl-app --build-arg BASE_PATH=/settlrl/ .
+docker run -p 8000:8000 -e ROOT_PATH=/settlrl settlrl-app
 ```
 
 The mark-haoxiang repo's `infra/` wires this up as the `settlrl` compose
@@ -153,7 +158,7 @@ Login uses the OAuth2 password flow (`POST /api/auth/login` returns a bearer
 token presented as `Authorization: Bearer …`); tokens are stored server-side, so
 `POST /api/auth/logout` truly revokes one. Accounts, tokens, and games all share
 the one SQLite database (`settlrl.db` under the state dir, or
-`SETTLRL_RENDER_USER_DB`). Emails listed in `SETTLRL_RENDER_ADMIN_EMAILS`
+`SETTLRL_APP_USER_DB`). Emails listed in `SETTLRL_APP_ADMIN_EMAILS`
 (comma-separated) are granted admin on register and login. Endpoints:
 `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
 `GET /api/users/me`.
@@ -166,13 +171,10 @@ snapshot's `your_seats` lists the seats the requester owns either way.
 
 ## Bot services
 
-Where a seat's bot moves are computed is pluggable. By default the built-in
-`settlrl-agents` policies run **in-process**. They can instead — or
-additionally — run in a separate **bot service**, so the agent compute is
-deployed and scaled apart from the game server.
-
-A bot service is a small, stateless HTTP app (`settlrl-render-bot`) speaking a
-standardized two-call API:
+The game server runs **no** agent code in-process. A seat's bot moves are
+computed by a separate **bot service** — the agents' move-serving app
+(`settlrl-agents[service]`), deployed and scaled apart from the game server.
+It is small and stateless, speaking a standardized two-call API:
 
 - `GET /catalog` — the bot kinds it offers (same shape as `GET /api/bots`).
 - `POST /act` — given a game's setup and its flat moves so far, it replays them
@@ -182,11 +184,11 @@ standardized two-call API:
   setup + flat action indexing.
 
 ```bash
-BOT_PORT=8100 uv run settlrl-render-bot
+BOT_PORT=8100 uv run --package settlrl-agents settlrl-bot-service
 ```
 
 An **admin** registers a service at runtime; its kinds join the catalog and can
-be seated like any built-in:
+be seated:
 
 | Endpoint | Description |
 |---|---|
@@ -194,15 +196,14 @@ be seated like any built-in:
 | `POST /api/admin/bot-providers` | Register one `{ "name", "base_url" }` (admin); `400` if unreachable or a kind clashes |
 | `DELETE /api/admin/bot-providers/{name}` | Unregister one (admin) |
 
-The game server runs **no** agent code in-process: it offers only registered
-services' kinds, and every bot move is delegated over the API. A remote service
-that is slow or fails (or an abandoned human turn) falls back to a trivial local
-random move, so a game never stalls. Registrations live in memory, so
-re-register services after a restart.
+`GET /api/bots` is empty until a service is registered, and every bot move is
+delegated over the API. A remote service that is slow or fails (or an abandoned
+human turn) falls back to a trivial local random move, so a game never stalls.
+Registrations live in memory, so re-register services after a restart.
 
 ## Tests
 
-The renderer builds its board coordinate tables and resource / dev-card
+The app builds its board coordinate tables and resource / dev-card
 orderings from `settlrl-reference`'s geometry and enums, and defines its own
 flat action space over reference actions; the test suite checks the geometry is
 well-formed, pins the enum-derived orderings, and round-trips the flat table
@@ -218,7 +219,7 @@ schema, and the frontend's wire types are generated from it (`npm run gen-api`
 regenerates both whenever `models.py` changes).
 
 ```bash
-uv run pytest packages/settlrl-render/tests
+uv run pytest packages/settlrl-app/tests
 ```
 
 A browser end-to-end suite drives the real app (create / join / spectate and
@@ -226,7 +227,7 @@ per-seat redaction over the wire); it needs a running server with a built
 frontend and a system Chromium:
 
 ```bash
-cd packages/settlrl-render/frontend
+cd packages/settlrl-app/frontend
 BASE=http://localhost:8000 npm run e2e
 ```
 
@@ -267,34 +268,26 @@ Example response:
 }
 ```
 
-Tile position uses **axial coordinates** with a pointy-top hex orientation. The board is a hexagon of radius 2 (19 tiles) centred on `(0, 0)`. The layout (terrain and number tokens) is generated by `settlrl-engine`, so it is randomised per server start rather than fixed.
+Tile position uses **axial coordinates** with a pointy-top hex orientation. The board is a hexagon of radius 2 (19 tiles) centred on `(0, 0)`. The layout (terrain and number tokens) is generated by `settlrl-game`'s reference rules, so it is randomised per server start rather than fixed.
 
 ## Project layout
 
 ```
-packages/settlrl-render/
-├── src/settlrl_render/      # grouped by layer; server.py wires them together
+packages/settlrl-app/
+├── src/settlrl_app/      # grouped by layer; server.py wires them together
 │   ├── __init__.py      # CLI entry point (uvicorn)
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
-│   ├── api/             # the HTTP layer
+│   ├── api/             # the HTTP layer (game model + serialization is settlrl-game)
 │   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over
 │   │   ├── routers/       # Routes by area: games, replay, bots, me (each build(deps) -> APIRouter)
-│   │   ├── models.py      # Pydantic board / game / action wire models
 │   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
-│   │   ├── actions.py     # Flat action space over reference actions + wire ActionModels
-│   │   ├── convert.py     # settlrl-reference Game -> BoardModel
 │   │   └── openapi.py     # Schema dump backing the generated frontend types
-│   ├── game/            # the live game
-│   │   ├── session.py     # GameSession: one live game over a settlrl-reference Game
-│   │   ├── record.py      # Replayable GameRecord (seed + flat moves + resolved outcomes)
-│   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens)
+│   ├── game/            # the live game runtime
+│   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens), the lobby gate
 │   │   ├── driver.py      # Per-game asyncio task: bot pacing (remote) + idle-turn timeouts
 │   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
-│   ├── bots/            # where bot moves are computed
-│   │   ├── bots.py        # settlrl-agents registry adapted to the single game (bot_act)
-│   │   ├── bridge.py      # reference Game -> engine board/belief, so agents reason on the real board
-│   │   ├── providers.py   # Bot kinds -> the registered remote services that serve them
-│   │   └── bot_service.py # Standalone bot service (settlrl-render-bot): /catalog + /act
+│   ├── bots/            # the bot seam (no agent code runs here)
+│   │   └── providers.py   # Bot kinds -> the registered remote services that serve them
 │   └── storage/         # the one async DB: identity + persistence
 │       ├── db.py          # The async SQLAlchemy engine: users, login tokens, and game journals
 │       ├── auth.py        # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB

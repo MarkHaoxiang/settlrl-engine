@@ -6,16 +6,16 @@ A fast, batched implementation of Settlrl, a hex-tile trading board game, built 
 
 | Package | Description |
 |---|---|
-| [`settlrl-engine`](packages/settlrl-engine/) | The game engine — board generation, rules, and actions. |
-| [`settlrl-reference`](packages/settlrl-reference/) | A plain-Python, gold-standard reference implementation of the rules, used as the differential test oracle for `settlrl-engine`. |
-| [`settlrl-agents`](packages/settlrl-agents/) | Agents that play the game — heuristics and search (greedy, lookahead, MCTS) — plus a CLI for matches and benchmarks. |
+| [`settlrl-engine`](packages/settlrl-engine/) | The game engine — board generation, rules, and actions, vectorised in JAX. |
+| [`settlrl-game`](packages/settlrl-game/) | The shared game model: the plain-Python reference rules (the differential test oracle for `settlrl-engine`) plus the serialization / replay layer the app and bot service build on. Engine-free. |
+| [`settlrl-agents`](packages/settlrl-agents/) | Agents that play the game — heuristics and search (greedy, lookahead, MCTS) — plus a CLI for matches and benchmarks, and (`[service]`) the bot service that serves their moves over HTTP. |
 | [`settlrl-learn`](packages/settlrl-learn/) | Learned value and policy functions that plug into the agents. |
-| [`settlrl-render`](packages/settlrl-render/) | A web app for viewing a board in the browser. |
+| [`settlrl-app`](packages/settlrl-app/) | The web game server: REST + SSE API, async game runtime, storage, auth, and the browser frontend. |
 
 ## Requirements
 
 - Python ≥ 3.12 with [uv](https://docs.astral.sh/uv/)
-- Node.js ≥ 18 (only for `settlrl-render`)
+- Node.js ≥ 18 (only for `settlrl-app`)
 
 ## Getting started
 

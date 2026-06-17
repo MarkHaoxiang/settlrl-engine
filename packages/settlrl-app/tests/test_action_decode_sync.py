@@ -1,6 +1,6 @@
-"""Flat action table: the renderer's own enumeration round-trips and decodes.
+"""Flat action table: the app's own enumeration round-trips and decodes.
 
-The renderer assigns each concrete action a flat index (``api.actions``). Every
+The app assigns each concrete action a flat index (``api.actions``). Every
 row must decode to an :class:`ActionModel` carrying the right geometry, and
 ``to_action`` / ``flat_for_action`` must invert each other so a move chosen by
 flat id reconstructs the same reference action. Driven over a real game so only
@@ -10,7 +10,6 @@ genuinely reachable actions are exercised for legality.
 from random import Random
 
 import settlrl_game.reference as ref
-from settlrl_game.reference import board as rb
 from settlrl_game.actions import (
     N_FLAT,
     decode_actions,
@@ -18,6 +17,7 @@ from settlrl_game.actions import (
     to_action,
 )
 from settlrl_game.convert import _RESOURCE_NAMES
+from settlrl_game.reference import board as rb
 from settlrl_game.session import GameSession
 
 ALL_FLAT = list(range(N_FLAT))

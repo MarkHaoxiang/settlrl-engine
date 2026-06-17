@@ -3,7 +3,7 @@
 # account and the local bot service already registered, so bots are seatable
 # the moment the page loads. Ctrl-C tears the whole thing down.
 #
-#   ./packages/settlrl-render/dev.sh
+#   ./packages/settlrl-app/dev.sh
 #
 # Overridable via env: ADMIN_EMAIL, ADMIN_PASSWORD, API_PORT, BOT_PORT.
 set -euo pipefail
@@ -30,8 +30,8 @@ trap cleanup EXIT INT TERM
 #    survive (the file-watch reloader would wipe them on every save); restart
 #    the script after editing Python. The Vite frontend hot-reloads regardless.
 echo "starting API on ${API} (admin: ${ADMIN_EMAIL}) ..."
-SETTLRL_RENDER_ADMIN_EMAILS="$ADMIN_EMAIL" RELOAD=0 PORT="$API_PORT" \
-  uv run settlrl-render &
+SETTLRL_APP_ADMIN_EMAILS="$ADMIN_EMAIL" RELOAD=0 PORT="$API_PORT" \
+  uv run settlrl-app &
 pids+=($!)
 
 # 2. Bot service — hosts the settlrl-agents policies the game server delegates to.
@@ -81,6 +81,6 @@ cat <<EOF
 EOF
 
 # 4. Frontend dev server in the foreground — Ctrl-C here ends everything.
-cd packages/settlrl-render/frontend
+cd packages/settlrl-app/frontend
 [ -d node_modules ] || npm install
 npm run dev

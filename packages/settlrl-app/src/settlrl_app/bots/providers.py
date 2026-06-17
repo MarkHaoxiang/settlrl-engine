@@ -24,7 +24,13 @@ from typing import Any
 import httpx
 from settlrl_game.botproto import ActRequest, ActResponse
 
-__all__ = ["ActRequest", "ActResponse", "RemoteBotError", "RemoteBotProvider", "ProviderRegistry"]
+__all__ = [
+    "ActRequest",
+    "ActResponse",
+    "ProviderRegistry",
+    "RemoteBotError",
+    "RemoteBotProvider",
+]
 
 
 class RemoteBotError(Exception):

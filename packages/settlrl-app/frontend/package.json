@@ -1,5 +1,5 @@
 {
-  "name": "settlrl-render-frontend",
+  "name": "settlrl-app-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "gen-api": "uv run python -m settlrl_render.api.openapi > openapi.json && openapi-typescript openapi.json -o src/lib/api-schema.d.ts",
+    "gen-api": "uv run python -m settlrl_app.api.openapi > openapi.json && openapi-typescript openapi.json -o src/lib/api-schema.d.ts",
     "e2e": "node e2e/multiplayer.mjs"
   },
   "dependencies": {

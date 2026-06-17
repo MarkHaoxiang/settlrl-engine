@@ -2,7 +2,21 @@
 
 The Settlrl game model shared by the app and the bot service: the plain-Python
 reference rules (`settlrl_game.reference`) plus the serialization/replay layer
-built on them.
+built on them. Engine-free (depends only on its reference rules + pydantic).
+
+## Serialization / replay layer
+
+Built on the reference rules, shared by `settlrl-app` (the game server) and the
+bot service (`settlrl-agents[service]`):
+
+- `session.py` — `GameSession`: one live game over a reference `Game`, driven by
+  a stable flat action index (apply / replay / legal-move list, seat kinds).
+- `actions.py` — the flat action space: encode/decode between reference actions
+  and the stable flat index, plus the `ActionModel` wire form.
+- `models.py` — the pydantic board / game / status / belief wire models.
+- `convert.py` — a reference `Game` → `BoardModel`.
+- `record.py` — a replayable `GameRecord` (seed + flat moves + resolved outcomes).
+- `botproto.py` — the bot-service wire protocol (`ActRequest` / `ActResponse`).
 
 ## Reference rules (`settlrl_game.reference`)
 

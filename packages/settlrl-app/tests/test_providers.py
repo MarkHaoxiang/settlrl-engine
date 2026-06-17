@@ -18,9 +18,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from settlrl_agents.service.app import create_bot_app
-from settlrl_render.bots.providers import ActRequest, ProviderRegistry, RemoteBotError
-from settlrl_render.game.games import GameRegistry
-from settlrl_render.server import create_app
+from settlrl_app.bots.providers import ActRequest, ProviderRegistry, RemoteBotError
+from settlrl_app.game.games import GameRegistry
+from settlrl_app.server import create_app
 
 
 def _asgi_client(app: FastAPI) -> httpx.AsyncClient:

@@ -110,7 +110,7 @@ export async function postChat(
   );
 }
 
-// Seats in the new game; the renderer offers 2 and 4 for now.
+// Seats in the new game; the app offers 2 and 4 for now.
 export type PlayerCount = 2 | 4;
 export type NumberPlacement = "random" | "spiral";
 // What controls a seat: "human" (hotseat) or a bot kind from fetchBots.

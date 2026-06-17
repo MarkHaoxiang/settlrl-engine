@@ -1,4 +1,4 @@
-// Minimal JSON fetch wrapper for the renderer's API, plus the SSE reader.
+// Minimal JSON fetch wrapper for the app's API, plus the SSE reader.
 // All paths are prefixed with the build-time base (vite `--base`), so the
 // app works at / and behind a stripped proxy prefix (e.g. /settlrl) alike.
 

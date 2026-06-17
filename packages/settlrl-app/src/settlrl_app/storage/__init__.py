@@ -1,1 +1,1 @@
-"""The storage layer of the renderer (see the package README)."""
+"""The storage layer of the app (see the package README)."""

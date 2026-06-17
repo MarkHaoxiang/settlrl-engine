@@ -11,7 +11,7 @@ import httpx
 from fastapi import FastAPI
 from settlrl_agents.service.app import create_bot_app
 from settlrl_agents.service.bots import bot_catalog
-from settlrl_render.bots.providers import ProviderRegistry, RemoteBotProvider
+from settlrl_app.bots.providers import ProviderRegistry, RemoteBotProvider
 
 # The bot kinds the in-process service offers (used as ``external_kinds`` when a
 # test constructs a GameSession with bot seats directly).

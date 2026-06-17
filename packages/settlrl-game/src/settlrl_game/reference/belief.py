@@ -2,7 +2,7 @@
 
 A plain, independent statement of what each player can *prove* about the others'
 hands from public information alone -- the differential oracle for the engine's
-``belief.py`` and the source for the renderer's card-counting panel.
+``belief.py`` and the source for the app's card-counting panel.
 
 The only hidden thing in this game is the *type* of a card taken by a robber
 steal, seen only by the thief and the victim; the held identities of
@@ -18,7 +18,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from settlrl_game.reference.game import Action, Game, MoveRobber, PlayKnight, PlayMonopoly
+from settlrl_game.reference.game import (
+    Action,
+    Game,
+    MoveRobber,
+    PlayKnight,
+    PlayMonopoly,
+)
 from settlrl_game.reference.types import DEV_CARDS, RESOURCES, DevCard
 
 _NR = len(RESOURCES)
