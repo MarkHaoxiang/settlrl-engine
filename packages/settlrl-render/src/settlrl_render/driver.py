@@ -1,16 +1,20 @@
-"""Server-side game pacing: a daemon thread per game.
+"""Server-side game pacing: one asyncio task per game.
 
 It plays due bot moves (sleeping between them so each lands as its own pushed
 snapshot for clients to animate), and — when a turn timeout is set — auto-
 advances a human turn that has gone idle, so an abandoned game finishes instead
-of stalling. The thread waits on the game's condition while there is nothing to
-do, and exits when the game ends or is evicted. Moves are computed under the
-lock, so they never race a human request.
+of stalling. The task awaits the game's change event while there is nothing to
+do, and exits when the game ends or is evicted. The blocking engine call runs
+in a worker thread (``anyio.to_thread``) under the game lock, so it never races
+a human request nor stalls the event loop.
 """
 
-import threading
+import asyncio
+import contextlib
 import time
 from enum import Enum
+
+import anyio.to_thread
 
 from .actions import decode_actions
 from .games import GameHandle
@@ -52,10 +56,10 @@ def start_game_driver(
     delay: float,
     turn_timeout: float = 0.0,
     providers: ProviderRegistry | None = None,
-) -> None:
-    threading.Thread(
-        target=_drive, args=(handle, delay, turn_timeout, providers), daemon=True
-    ).start()
+) -> "asyncio.Task[None]":
+    """Schedule the driver for ``handle`` on the running loop (caller tracks the
+    task to cancel it on shutdown)."""
+    return asyncio.create_task(_drive(handle, delay, turn_timeout, providers))
 
 
 def _bot_due(handle: GameHandle) -> bool:
@@ -68,7 +72,7 @@ def _human_acting(handle: GameHandle) -> bool:
     return not session.terminal() and session.seats[session.acting_seat()] == HUMAN
 
 
-def _drive(
+async def _drive(
     handle: GameHandle,
     delay: float,
     turn_timeout: float,
@@ -76,19 +80,20 @@ def _drive(
 ) -> None:
     clock = _IdleClock(turn_timeout)
     while True:
-        due = _wait_for_due(handle, clock)
+        due = await _wait_for_due(handle, clock)
         if due is None:
             return  # closed or terminal
         if due is _Due.BOT:
-            time.sleep(delay)  # pace so each move animates as its own snapshot
-        _play(handle, clock, due, providers)
+            await asyncio.sleep(delay)  # pace so each move animates on its own
+        await _play(handle, clock, due, providers)
 
 
-def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
-    """Block until there is a move to make, returning its kind — or None when
-    the game has closed or ended."""
-    with handle.lock:
-        while True:
+async def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
+    """Wait until there is a move to make, returning its kind — or None when the
+    game has closed or ended."""
+    while True:
+        changed = handle._changed  # capture before checking, so no wakeup is lost
+        async with handle.lock:
             if handle.closed or handle.session.terminal():
                 return None
             if _bot_due(handle):
@@ -97,35 +102,39 @@ def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
                 remaining = clock.remaining(handle.version)
                 if remaining <= 0:
                     return _Due.TIMEOUT
-                handle.lock.wait(timeout=remaining)
+                timeout: float | None = remaining
             else:
                 clock.reset()
-                handle.lock.wait()
+                timeout = None
+        # On timeout (the idle clock expired) just re-check under the lock.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(changed.wait(), timeout=timeout)
 
 
-def _bot_move(
+async def _bot_move(
     handle: GameHandle, seat: int, providers: ProviderRegistry | None
 ) -> int | None:
     """The acting bot seat's move — locally for built-in kinds, or via the
     seat's remote provider (replay-based). A remote failure or an illegal answer
     falls back to a local random move, so a misbehaving service never stalls the
-    game. The remote call runs under the game lock (kept short by the provider's
-    timeout); the seat being a bot's, no human request races it meanwhile."""
+    game. The (blocking) engine and remote calls run in a worker thread under the
+    game lock; the seat being a bot's, no human request races it meanwhile."""
     session = handle.session
     remote = providers.remote_for(session.seats[seat]) if providers else None
     if remote is None:
-        return session.bot_step()
+        return await anyio.to_thread.run_sync(session.bot_step)
+    setup, moves = session.setup.to_dict(), session.moves_flat()
     try:
-        flat = remote.act(
-            handle.id, session.setup.to_dict(), session.moves_flat(), seat
+        flat = int(
+            await anyio.to_thread.run_sync(remote.act, handle.id, setup, moves, seat)
         )
-        session.apply(int(flat))
-        return int(flat)
+        await anyio.to_thread.run_sync(session.apply, flat)
+        return flat
     except (RemoteBotError, IllegalActionError):
-        return session.auto_step()
+        return await anyio.to_thread.run_sync(session.auto_step)
 
 
-def _play(
+async def _play(
     handle: GameHandle,
     clock: _IdleClock,
     due: _Due,
@@ -133,19 +142,19 @@ def _play(
 ) -> None:
     """Make the due move and push it — unless the moment passed (a human acted
     during the pacing sleep, or just beat the timeout)."""
-    with handle.lock:
+    async with handle.lock:
         if handle.closed:
             return
         if due is _Due.BOT:
             if not _bot_due(handle):
                 return
             seat = handle.session.acting_seat()
-            flat = _bot_move(handle, seat, providers)
+            flat = await _bot_move(handle, seat, providers)
         else:
             if not (_human_acting(handle) and clock.remaining(handle.version) <= 0):
                 return
             seat = handle.session.acting_seat()
-            flat = handle.session.auto_step()
+            flat = await anyio.to_thread.run_sync(handle.session.auto_step)
         if flat is not None:
             handle.bot_move = BotMoveModel(
                 player=seat, action=decode_actions([flat])[0]

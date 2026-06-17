@@ -95,9 +95,7 @@ Open http://localhost:8000.
 
 The server is configured by environment variables: `HOST` (default `0.0.0.0`),
 `PORT` (default `8000`), `RELOAD` (default `1`; set `0` in production — the
-reloader is a dev file-watcher), `SETTLRL_RENDER_MAX_STREAMS`
-(default `64`; concurrent event-stream subscribers, capped below the threadpool
-size so idle streams can't starve ordinary requests — extras get `503`),
+reloader is a dev file-watcher),
 `SETTLRL_RENDER_STATE_DIR` (a directory to persist games in — see below),
 `SETTLRL_RENDER_TURN_TIMEOUT_S` (default `0` = off; after this many seconds of an
 idle human turn the server auto-plays a move, so an abandoned game still

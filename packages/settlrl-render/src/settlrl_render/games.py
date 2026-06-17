@@ -1,18 +1,26 @@
 """The live-game registry: many concurrent games, each with claimed seats.
 
-A ``GameHandle`` owns one :class:`GameSession`, its lock (FastAPI runs sync
-endpoints in a threadpool, and a session is not thread-safe), and the seat
-claims: joining a human seat issues an opaque token, and every privileged
+A ``GameHandle`` owns one :class:`GameSession`, an :class:`asyncio.Lock` (the
+engine is blocking and not thread-safe, so each game's session is mutated by
+one task at a time — the lock is held across the ``to_thread`` offload), and the
+seat claims: joining a human seat issues an opaque token, and every privileged
 request proves seat ownership by presenting tokens. The registry caps the
 number of live games by evicting finished or long-idle ones; a running game
 that has been touched recently is never evicted, so a full registry of active
 games refuses creation instead.
+
+State changes are broadcast through a swap-on-bump :class:`asyncio.Event`
+(:meth:`GameHandle.bump`): waiters (the SSE stream, the bot driver) capture the
+current event and await it; a bump installs a fresh event and sets the old one,
+so it wakes everyone parked on it without a lost wakeup. Decoupling the waker
+from the mutation lock lets :meth:`bump` (and eviction) run from synchronous
+code — the registry, mutated only from the event loop, never needs to await.
 """
 
 from __future__ import annotations
 
+import asyncio
 import secrets
-import threading
 import time
 from dataclasses import dataclass
 from typing import cast
@@ -70,9 +78,12 @@ class GameHandle:
     def __init__(self, game_id: str, session: GameSession) -> None:
         self.id = game_id
         self.session = session
-        # A Condition doubles as the per-game lock: mutators hold it and call
-        # bump(); push subscribers and the bot driver wait() on it.
-        self.lock = threading.Condition()
+        # Held (async with) while mutating/reading the session, across the
+        # engine to_thread offload, so one task touches a session at a time.
+        self.lock = asyncio.Lock()
+        # Swapped and set on every bump; waiters capture it before checking the
+        # version, then await it (see the module docstring).
+        self._changed = asyncio.Event()
         # seat -> token for claimed human seats.
         self.claims: dict[int, str] = {}
         # seat -> owning user id, for seats claimed by a signed-in account (so
@@ -93,12 +104,20 @@ class GameHandle:
     def touch(self) -> None:
         self.touched = time.monotonic()
 
+    def _wake(self) -> None:
+        """Wake everyone parked on the current change event and arm the next."""
+        changed, self._changed = self._changed, asyncio.Event()
+        changed.set()
+
     def bump(self) -> None:
-        """Mark a state change and wake waiters (caller holds the lock)."""
+        """Mark a state change, journal new moves, and wake waiters.
+
+        Called by mutators while holding :attr:`lock`; the waker itself takes no
+        lock, so it is safe to call from synchronous code (e.g. eviction)."""
         self.version += 1
         if self.journal is not None:
             self.journal.sync_moves(self.session.moves)
-        self.lock.notify_all()
+        self._wake()
 
     def human_seats(self) -> list[int]:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
@@ -145,7 +164,10 @@ class GameHandle:
 
 
 class GameRegistry:
-    """Id-addressed live games. All methods are thread-safe.
+    """Id-addressed live games.
+
+    Every method runs on the event loop and does no awaiting, so the ``_games``
+    dict and the queue are mutated atomically without an explicit lock.
 
     ``max_games`` caps memory: past it, the least-recently-touched finished or
     abandoned game is evicted; ``create`` raises :class:`RegistryFullError`
@@ -167,11 +189,9 @@ class GameRegistry:
         self._max_active = max_active
         self._store = store
         self._queue: list[_Ticket] = []
-        self._lock = threading.Lock()
 
     def create(self, session: GameSession) -> GameHandle:
-        with self._lock:
-            return self._create_locked(session)
+        return self._create_locked(session)
 
     def admit(
         self, session: GameSession, ticket_id: str | None
@@ -182,22 +202,21 @@ class GameRegistry:
         FIFO: a freed slot seats the head of the queue, and a fresh request
         never jumps a non-empty line.
         """
-        with self._lock:
-            now = time.monotonic()
-            self._prune_tickets(now)
-            slot_free = self._active_count() < self._max_active
-            ticket = next((t for t in self._queue if t.id == ticket_id), None)
-            if ticket is not None:
-                ticket.last_seen = now
-                if slot_free and self._queue[0] is ticket:
-                    self._queue.remove(ticket)
-                    return self._create_locked(session)
-                return self._position(ticket)
-            if slot_free and not self._queue:
+        now = time.monotonic()
+        self._prune_tickets(now)
+        slot_free = self._active_count() < self._max_active
+        ticket = next((t for t in self._queue if t.id == ticket_id), None)
+        if ticket is not None:
+            ticket.last_seen = now
+            if slot_free and self._queue[0] is ticket:
+                self._queue.remove(ticket)
                 return self._create_locked(session)
-            ticket = _Ticket(secrets.token_urlsafe(_TICKET_BYTES), now)
-            self._queue.append(ticket)
             return self._position(ticket)
+        if slot_free and not self._queue:
+            return self._create_locked(session)
+        ticket = _Ticket(secrets.token_urlsafe(_TICKET_BYTES), now)
+        self._queue.append(ticket)
+        return self._position(ticket)
 
     def _create_locked(self, session: GameSession) -> GameHandle:
         self._evict()
@@ -220,22 +239,19 @@ class GameRegistry:
         return QueuePosition(ticket.id, self._queue.index(ticket) + 1, len(self._queue))
 
     def get(self, game_id: str) -> GameHandle | None:
-        with self._lock:
-            handle = self._games.get(game_id)
-            if handle is not None:
-                handle.touch()
-            return handle
+        handle = self._games.get(game_id)
+        if handle is not None:
+            handle.touch()
+        return handle
 
     def all_handles(self) -> list[GameHandle]:
         """A snapshot of the live handles (e.g. to start drivers after a
         restart)."""
-        with self._lock:
-            return list(self._games.values())
+        return list(self._games.values())
 
     def _insert(self, handle: GameHandle) -> None:
         """Place an already-built handle (used by restore; no eviction)."""
-        with self._lock:
-            self._games[handle.id] = handle
+        self._games[handle.id] = handle
 
     def _evict(self) -> None:
         while len(self._games) >= self._max:
@@ -255,9 +271,8 @@ class GameRegistry:
                 raise RegistryFullError("all games are active; try again later")
             victim = min(evictable, key=lambda h: (not h.session.terminal(), h.touched))
             del self._games[victim.id]
-            with victim.lock:
-                victim.closed = True
-                victim.bump()
+            victim.closed = True
+            victim._wake()  # the game is gone; just wake its SSE/driver to exit
             if victim.journal is not None:
                 victim.journal.close()
             if self._store is not None:

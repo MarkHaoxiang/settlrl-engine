@@ -81,10 +81,9 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
     store = GameStore(tmp_path)
     reg = GameRegistry(store=store)
     handle = reg.create(GameSession(seed=0, n_players=2, seats=["random", "random"]))
-    for _ in range(5):  # a few bot moves, journalled
-        with handle.lock:
-            if handle.session.bot_step() is not None:
-                handle.bump()
+    for _ in range(5):  # a few bot moves, journalled (no driver runs here)
+        if handle.session.bot_step() is not None:
+            handle.bump()
 
     # A fresh app restores the position and its startup restarts the driver,
     # which plays the game out to the end.

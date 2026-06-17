@@ -155,12 +155,14 @@ def _drive_to_terminal(client: TestClient, body: dict[str, object]) -> dict[str,
 @pytest.fixture()
 def remote_only_client() -> Iterator[TestClient]:
     """A game server with no local agent execution; all bots run in a separate
-    in-process bot service."""
+    in-process bot service. The ``with`` form keeps one loop alive so the bot
+    driver task runs across requests."""
     reg = ProviderRegistry(client=TestClient(create_bot_app()), local_bots=False)
     reg.register("svc", "http://svc")
-    yield TestClient(
+    with TestClient(
         create_app(GameRegistry(), providers=reg, bot_delay=0.0, warm=False)
-    )
+    ) as client:
+        yield client
 
 
 def test_remote_bots_play_a_game_to_completion(remote_only_client: TestClient) -> None:
@@ -187,20 +189,25 @@ def test_remote_failure_falls_back_and_game_progresses() -> None:
         client=TestClient(_erroring_act_app("flaky")), local_bots=False
     )
     reg.register("svc", "http://svc")
-    client = TestClient(
+    with TestClient(
         create_app(GameRegistry(), providers=reg, bot_delay=0.0, warm=False)
-    )
-    gid = client.post(
-        "/api/games",
-        json={"seed": 2, "n_players": 2, "seats": ["flaky", "flaky"], "claim": "none"},
-    ).json()["id"]
-    # A failing remote round-trip per move is slow, so assert clear progress
-    # (well past the setup phase) rather than full completion — the point is that
-    # the game is advancing via the fallback, not stalled.
-    snap: dict[str, Any] = {}
-    for _ in range(200):
-        snap = client.get(f"/api/games/{gid}").json()
-        if snap["status"]["terminal"] or len(snap["log"]) > 12:
-            break
-        time.sleep(0.05)
-    assert snap["status"]["terminal"] or len(snap["log"]) > 12
+    ) as client:
+        gid = client.post(
+            "/api/games",
+            json={
+                "seed": 2,
+                "n_players": 2,
+                "seats": ["flaky", "flaky"],
+                "claim": "none",
+            },
+        ).json()["id"]
+        # A failing remote round-trip per move is slow, so assert clear progress
+        # (well past the setup phase) rather than full completion — the point is
+        # that the game is advancing via the fallback, not stalled.
+        snap: dict[str, Any] = {}
+        for _ in range(200):
+            snap = client.get(f"/api/games/{gid}").json()
+            if snap["status"]["terminal"] or len(snap["log"]) > 12:
+                break
+            time.sleep(0.05)
+        assert snap["status"]["terminal"] or len(snap["log"]) > 12

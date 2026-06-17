@@ -31,7 +31,11 @@ def registry() -> GameRegistry:
 
 @pytest.fixture()
 def client(registry: GameRegistry) -> Iterator[TestClient]:
-    yield TestClient(create_app(registry))
+    # The ``with`` form runs the lifespan and keeps one event loop alive for the
+    # client's lifetime, so background driver tasks and the per-game asyncio
+    # locks share a single loop across requests.
+    with TestClient(create_app(registry, warm=False)) as client:
+        yield client
 
 
 def _create(client: TestClient, **body: object) -> tuple[str, dict[str, str]]:
@@ -66,21 +70,23 @@ def test_create_claim_first_takes_one_seat_and_leaves_the_rest(
 
 
 def test_full_registry_of_active_games_returns_503() -> None:
-    client = TestClient(create_app(GameRegistry(max_games=1)))
-    assert client.post("/api/games", json={"seed": 0}).status_code == 200
-    assert client.post("/api/games", json={"seed": 0}).status_code == 503
+    with TestClient(create_app(GameRegistry(max_games=1), warm=False)) as client:
+        assert client.post("/api/games", json={"seed": 0}).status_code == 200
+        assert client.post("/api/games", json={"seed": 0}).status_code == 503
 
 
 def test_create_queues_past_the_active_cap() -> None:
     # max_active=1: the second creator gets a 202 with their place in line.
-    client = TestClient(create_app(GameRegistry(max_games=8, max_active=1)))
-    body = {"seed": 0, "n_players": 2, "seats": ["human", "human"]}
-    assert client.post("/api/games", json=body).status_code == 200
-    queued = client.post("/api/games", json=body)
-    assert queued.status_code == 202
-    doc = queued.json()
-    assert doc["queued"] is True and doc["ticket"]
-    assert doc["position"] == 1 and doc["total"] == 1
+    with TestClient(
+        create_app(GameRegistry(max_games=8, max_active=1), warm=False)
+    ) as client:
+        body = {"seed": 0, "n_players": 2, "seats": ["human", "human"]}
+        assert client.post("/api/games", json=body).status_code == 200
+        queued = client.post("/api/games", json=body)
+        assert queued.status_code == 202
+        doc = queued.json()
+        assert doc["queued"] is True and doc["ticket"]
+        assert doc["position"] == 1 and doc["total"] == 1
 
 
 def test_unknown_game_404s(client: TestClient) -> None:
@@ -228,38 +234,16 @@ def test_events_stream_snapshot_now_then_on_every_change() -> None:
     assert len(second["log"]) == len(first["log"]) + 1  # type: ignore[arg-type]
 
 
-def test_event_stream_cap_rejects_extra_subscribers() -> None:
-    # One permit: the first stream holds it, so a second subscriber is shed
-    # with 503 instead of pinning another threadpool thread.
-    with (
-        _live_server(create_app(GameRegistry(), max_streams=1, warm=False)) as port,
-        httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http,
-    ):
-        # All-human: no bot driver to compile, so the test only measures the cap.
-        game = http.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
-            "id"
-        ]
-        events = f"/api/games/{game}/events"
-        with http.stream("GET", events) as first:
-            _next_event(first.iter_lines())  # the permit is now held
-            with http.stream("GET", events) as second:
-                assert second.status_code == 503
-
-
 def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
-    registry = GameRegistry()
-    client = TestClient(create_app(registry, bot_delay=0.0))
-    game, _ = _create(client, n_players=2, seats=["random", "random"])
-    handle = registry.get(game)
-    assert handle is not None
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        with handle.lock:
-            if handle.session.terminal():
+    with TestClient(create_app(GameRegistry(), bot_delay=0.0, warm=False)) as client:
+        game, _ = _create(client, n_players=2, seats=["random", "random"])
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            if client.get(f"/api/games/{game}").json()["status"]["terminal"]:
                 break
-        time.sleep(0.1)
-    body = client.get(f"/api/games/{game}").json()
-    assert body["status"]["terminal"] and body["status"]["winner"] is not None
+            time.sleep(0.1)
+        body = client.get(f"/api/games/{game}").json()
+        assert body["status"]["terminal"] and body["status"]["winner"] is not None
 
 
 def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
@@ -340,39 +324,48 @@ def test_chat_requires_seat_ownership(client: TestClient) -> None:
     )
 
 
-def _finish(registry: GameRegistry, game: str) -> None:
-    """Drive an all-bot game to completion in-process (HTTP would be slow)."""
-    handle = registry.get(game)
-    assert handle is not None
-    with handle.lock:  # the game's own bot driver steps it concurrently
-        handle.session._run_bots()
-        assert handle.session.terminal()
-        handle.bump()
+@contextmanager
+def _finished_bot_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
+    """A fast all-bot app whose game the in-process driver has played to the end,
+    yielding the client and the finished game's id."""
+    with TestClient(create_app(GameRegistry(), bot_delay=0.0, warm=False)) as client:
+        game, _ = _create(client, seed=seed, n_players=2, seats=["random", "random"])
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            if client.get(f"/api/games/{game}").json()["status"]["terminal"]:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("game did not finish in time")
+        yield client, game
 
 
-def test_record_and_replay_export_finished_games_only(
-    client: TestClient, registry: GameRegistry
-) -> None:
-    game, _ = _create(client, n_players=2, seats=["random", "random"])
-    # A live game's record would reconstruct hidden hands when replayed.
-    assert client.get(f"/api/games/{game}/record").status_code == 409
-    assert client.post(f"/api/games/{game}/replay").status_code == 409
-    _finish(registry, game)
-    doc = client.get(f"/api/games/{game}/record").json()
-    assert doc["winner"] is not None and len(doc["moves"]) > 0
-    opening = client.post(f"/api/games/{game}/replay").json()
-    assert opening["move"] == 0 and opening["n_moves"] == len(doc["moves"])
-    mid = client.get("/api/replay/state", params={"move": 5}).json()
-    assert mid["move"] == 5
-    assert client.get("/api/replay/state", params={"move": 99999}).status_code == 422
+def test_record_and_replay_export_finished_games_only() -> None:
+    with TestClient(create_app(GameRegistry(), bot_delay=0.0, warm=False)) as client:
+        game, _ = _create(client, n_players=2, seats=["random", "random"])
+        # A live game's record would reconstruct hidden hands when replayed.
+        assert client.get(f"/api/games/{game}/record").status_code == 409
+        assert client.post(f"/api/games/{game}/replay").status_code == 409
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            if client.get(f"/api/games/{game}").json()["status"]["terminal"]:
+                break
+            time.sleep(0.05)
+        doc = client.get(f"/api/games/{game}/record").json()
+        assert doc["winner"] is not None and len(doc["moves"]) > 0
+        opening = client.post(f"/api/games/{game}/replay").json()
+        assert opening["move"] == 0 and opening["n_moves"] == len(doc["moves"])
+        mid = client.get("/api/replay/state", params={"move": 5}).json()
+        assert mid["move"] == 5
+        bad = client.get("/api/replay/state", params={"move": 99999})
+        assert bad.status_code == 422
 
 
-def test_replay_upload_roundtrip(client: TestClient, registry: GameRegistry) -> None:
-    game, _ = _create(client, n_players=2, seats=["random", "random"])
-    _finish(registry, game)
-    doc = client.get(f"/api/games/{game}/record").json()
-    assert client.post("/api/replay", json=doc).status_code == 200
-    assert client.get("/api/replay/record").status_code == 200
+def test_replay_upload_roundtrip() -> None:
+    with _finished_bot_game() as (client, game):
+        doc = client.get(f"/api/games/{game}/record").json()
+        assert client.post("/api/replay", json=doc).status_code == 200
+        assert client.get("/api/replay/record").status_code == 200
 
 
 def test_replay_state_404_until_loaded(client: TestClient) -> None:
@@ -397,24 +390,23 @@ def test_replay_rejects_bad_records(client: TestClient) -> None:
 
 
 def test_oversized_request_body_is_rejected_before_parsing() -> None:
-    client = TestClient(create_app(GameRegistry(), max_body_bytes=100))
-    big = client.post("/api/replay", json={"pad": "x" * 500})
-    assert big.status_code == 413
-    # A small body still reaches the route (and is rejected on its merits).
-    assert client.post("/api/replay", json={"seed": 1}).status_code == 422
+    with TestClient(create_app(GameRegistry(), max_body_bytes=100, warm=False)) as c:
+        big = c.post("/api/replay", json={"pad": "x" * 500})
+        assert big.status_code == 413
+        # A small body still reaches the route (and is rejected on its merits).
+        assert c.post("/api/replay", json={"seed": 1}).status_code == 422
 
 
 def test_replay_with_too_many_moves_is_rejected(
-    client: TestClient, registry: GameRegistry, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    game, _ = _create(client, n_players=2, seats=["random", "random"])
-    _finish(registry, game)
-    doc = client.get(f"/api/games/{game}/record").json()
-    monkeypatch.setattr(
-        "settlrl_render.server._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
-    )
-    resp = client.post("/api/replay", json=doc)
-    assert resp.status_code == 422 and "too many moves" in resp.json()["detail"]
+    with _finished_bot_game() as (client, game):
+        doc = client.get(f"/api/games/{game}/record").json()
+        monkeypatch.setattr(
+            "settlrl_render.server._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
+        )
+        resp = client.post("/api/replay", json=doc)
+        assert resp.status_code == 422 and "too many moves" in resp.json()["detail"]
 
 
 def test_get_bots_lists_policies(client: TestClient) -> None:

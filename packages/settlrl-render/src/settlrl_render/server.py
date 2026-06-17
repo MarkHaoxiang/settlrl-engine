@@ -5,10 +5,11 @@ hold the per-game lock, map errors to status codes — game logic lives in
 apps with their own registries instead of sharing module state.
 """
 
+import asyncio
 import json
 import os
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
@@ -131,7 +132,7 @@ class _ReplaySlot:
     """The loaded replay, if any (server-wide tooling; one at a time)."""
 
     def __init__(self) -> None:
-        self.lock = threading.Lock()
+        self.lock = asyncio.Lock()
         self.session: ReplaySession | None = None
 
 
@@ -218,7 +219,6 @@ def create_app(
     games: GameRegistry | None = None,
     bot_delay: float = 0.65,
     root_path: str = "",
-    max_streams: int = 64,
     max_body_bytes: int = 2 * 1024 * 1024,
     state_dir: str | None = None,
     turn_timeout: float = 0.0,
@@ -233,19 +233,16 @@ def create_app(
 
     ``bot_delay`` paces the server-side bot driver (seconds between bot moves,
     so clients can animate each one). ``root_path`` is the proxy prefix the app
-    is served under.
-    ``max_streams`` caps concurrent event-stream subscribers (each pins a
-    threadpool thread, so this must stay well under the pool size or idle
-    streams starve ordinary requests); ``max_body_bytes`` rejects oversized
-    request bodies before they are parsed. ``state_dir`` turns on persistence:
-    games are journalled there and replayed back on the next startup (ignored
-    when ``games`` is passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a
-    human turn that has gone idle that long, so an abandoned game still finishes.
-    ``max_active`` caps how many games run at once; beyond it, new creators are
-    queued (``POST /api/games`` returns their place in line). ``warm``
-    pre-compiles the engine at startup (off in tests, which compile lazily and
-    don't want the background contention). ``user_db`` overrides the shared
-    SQLite path (defaults to ``settlrl.db`` under ``state_dir``, else in-memory);
+    is served under. ``max_body_bytes`` rejects oversized request bodies before
+    they are parsed. ``state_dir`` turns on persistence: games are journalled
+    there and replayed back on the next startup (ignored when ``games`` is
+    passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a human turn that has
+    gone idle that long, so an abandoned game still finishes. ``max_active`` caps
+    how many games run at once; beyond it, new creators are queued
+    (``POST /api/games`` returns their place in line). ``warm`` pre-compiles the
+    engine at startup (off in tests, which compile lazily and don't want the
+    background contention). ``user_db`` overrides the shared SQLite path
+    (defaults to ``settlrl.db`` under ``state_dir``, else in-memory);
     ``admin_emails`` are granted admin on register / login.
     """
     registry = _build_registry(games, state_dir, max_active)
@@ -255,24 +252,27 @@ def create_app(
         providers if providers is not None else ProviderRegistry(local_bots=local_bots)
     )
     replays = _ReplaySlot()
-    # Each live event stream holds one permit for its whole connection; past
-    # the cap, new subscribers get 503 rather than exhausting the threadpool.
-    sse_gate = threading.Semaphore(max_streams)
+    # The live bot/timeout driver tasks, so the lifespan can cancel them on
+    # shutdown; each removes itself when it ends (game over or evicted).
+    drivers: set[asyncio.Task[None]] = set()
+
+    def spawn_driver(handle: GameHandle) -> None:
+        task = start_game_driver(handle, bot_delay, turn_timeout, bots)
+        drivers.add(task)
+        task.add_done_callback(drivers.discard)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await database.init()
         if warm:
             threading.Thread(target=_warm_jit_cache, daemon=True).start()
-        # Each event-stream subscriber occupies a threadpool thread for its
-        # whole connection; the anyio default (40) would cap concurrent clients
-        # and then starve ordinary requests.
-        anyio.to_thread.current_default_thread_limiter().total_tokens = 160
         # Resume pacing/timeouts for any games replayed in from the store.
         for handle in registry.all_handles():
             if _needs_driver(handle, turn_timeout):
-                start_game_driver(handle, bot_delay, turn_timeout, bots)
+                spawn_driver(handle)
         yield
+        for task in drivers:
+            task.cancel()
         await database.dispose()
 
     app = FastAPI(title="Settlrl Render", lifespan=lifespan, root_path=root_path)
@@ -303,7 +303,7 @@ def create_app(
         return str(user.id) if user is not None else None
 
     @app.post("/api/games")
-    def post_create(
+    async def post_create(
         req: _CreateRequest, response: Response, user: CurrentUser = None
     ) -> _CreatedModel | _QueuedModel:
         """Create a game, or return the caller's place in line when the server
@@ -317,11 +317,13 @@ def create_app(
         _validate_seat_kinds(req.seats, req.n_players, catalog)
         try:
             session = GameSession(seed=req.seed, n_players=req.n_players)
-            session.reset(
-                req.seed,
-                number_placement=req.number_placement,
-                seats=seats,
-                external_kinds=bots.remote_kinds(),
+            await anyio.to_thread.run_sync(
+                lambda: session.reset(
+                    req.seed,
+                    number_placement=req.number_placement,
+                    seats=seats,
+                    external_kinds=bots.remote_kinds(),
+                )
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -340,15 +342,15 @@ def create_app(
         )
         tokens = dict(seated.claim(seat, _uid(user)) for seat in claiming)
         if _needs_driver(seated, turn_timeout):
-            start_game_driver(seated, bot_delay, turn_timeout, bots)
+            spawn_driver(seated)
         return _CreatedModel(id=seated.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
-    def post_join(
+    async def post_join(
         game_id: str, req: _JoinRequest, user: CurrentUser = None
     ) -> _JoinedModel:
         handle = handle_of(game_id)
-        with handle.lock:
+        async with handle.lock:
             try:
                 seat, token = handle.claim(req.seat, _uid(user))
             except (LookupError, ValueError) as exc:
@@ -357,17 +359,17 @@ def create_app(
         return _JoinedModel(id=game_id, seat=seat, token=token)
 
     @app.get("/api/games/{game_id}")
-    def get_game(
+    async def get_game(
         game_id: str, user: CurrentUser = None, x_seat_tokens: SeatTokens = None
     ) -> GameModel:
         handle = handle_of(game_id)
-        with handle.lock:
+        async with handle.lock:
             return game_model(
                 handle, handle.owned_seats(_tokens(x_seat_tokens), _uid(user))
             )
 
     @app.post("/api/games/{game_id}/action")
-    def post_action(
+    async def post_action(
         game_id: str,
         req: _ActionRequest,
         user: CurrentUser = None,
@@ -375,12 +377,12 @@ def create_app(
     ) -> GameModel:
         """Apply the acting seat's move; the request must prove that seat."""
         handle = handle_of(game_id)
-        with handle.lock:
+        async with handle.lock:
             owned = handle.owned_seats(_tokens(x_seat_tokens), _uid(user))
             if handle.session.acting_seat() not in owned:
                 raise HTTPException(status_code=403, detail="not your seat")
             try:
-                handle.session.apply(req.flat)
+                await anyio.to_thread.run_sync(handle.session.apply, req.flat)
             except IllegalActionError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             handle.bot_move = None
@@ -388,7 +390,7 @@ def create_app(
             return game_model(handle, owned)
 
     @app.get("/api/games/{game_id}/events")
-    def get_events(
+    async def get_events(
         game_id: str, user: CurrentUser = None, x_seat_tokens: SeatTokens = None
     ) -> StreamingResponse:
         """Server-sent events: the requester's snapshot now, then again on
@@ -397,34 +399,33 @@ def create_app(
         handle = handle_of(game_id)
         tokens = _tokens(x_seat_tokens)
         uid = _uid(user)
-        if not sse_gate.acquire(blocking=False):
-            raise HTTPException(
-                status_code=503, detail="too many event streams; try again"
-            )
 
-        def stream() -> Iterator[str]:
+        async def stream() -> AsyncIterator[str]:
             seen = -1
-            try:
-                while True:
-                    with handle.lock:
-                        if handle.version == seen:
-                            handle.lock.wait(timeout=15.0)
-                        if handle.closed:
-                            return
-                        if handle.version == seen:
-                            body = None  # idle: fall through to a keepalive
-                        else:
-                            seen = handle.version
-                            model = game_model(handle, handle.owned_seats(tokens, uid))
-                            body = model.model_dump_json()
-                    yield f"data: {body}\n\n" if body else ": keepalive\n\n"
-            finally:
-                sse_gate.release()
+            while True:
+                changed = handle._changed  # capture before serialising/waiting
+                async with handle.lock:
+                    if handle.closed:
+                        return
+                    if handle.version != seen:
+                        seen = handle.version
+                        body: str | None = game_model(
+                            handle, handle.owned_seats(tokens, uid)
+                        ).model_dump_json()
+                    else:
+                        body = None  # idle: fall through to a keepalive
+                if body is not None:
+                    yield f"data: {body}\n\n"
+                    continue
+                try:
+                    await asyncio.wait_for(changed.wait(), timeout=15.0)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 
     @app.post("/api/games/{game_id}/chat")
-    def post_chat(
+    async def post_chat(
         game_id: str,
         req: _ChatRequest,
         user: CurrentUser = None,
@@ -437,7 +438,7 @@ def create_app(
                 status_code=422, detail="chat text must be 1-500 characters"
             )
         handle = handle_of(game_id)
-        with handle.lock:
+        async with handle.lock:
             owned = handle.owned_seats(_tokens(x_seat_tokens), _uid(user))
             if req.player is not None and req.player not in owned:
                 raise HTTPException(status_code=403, detail="not your seat")
@@ -448,39 +449,39 @@ def create_app(
             return game_model(handle, owned)
 
     @app.get("/api/games/{game_id}/record")
-    def get_record(game_id: str) -> Response:
+    async def get_record(game_id: str) -> Response:
         """The finished game as ``settlrl_engine.record`` JSON -- a
         self-contained, replayable transcript. 409 while running: replaying a
         record reconstructs hidden hands, so live games don't export."""
         handle = handle_of(game_id)
-        with handle.lock:
+        async with handle.lock:
             if not handle.session.terminal():
                 raise HTTPException(status_code=409, detail="game still running")
             body = handle.session.record().to_json()
         return Response(content=body, media_type="application/json")
 
-    def load_replay(record: GameRecord) -> ReplayStateModel:
+    async def load_replay(record: GameRecord) -> ReplayStateModel:
         try:
-            session = ReplaySession(record)
+            session = await anyio.to_thread.run_sync(ReplaySession, record)
         except (ReplayError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        with replays.lock:
+        async with replays.lock:
             replays.session = session
             return session.state(0)
 
     @app.post("/api/games/{game_id}/replay")
-    def post_replay_from_game(game_id: str) -> ReplayStateModel:
+    async def post_replay_from_game(game_id: str) -> ReplayStateModel:
         """Load a finished game for replay (409 while it is still running:
         replaying reconstructs hidden hands)."""
         handle = handle_of(game_id)
-        with handle.lock:
+        async with handle.lock:
             if not handle.session.terminal():
                 raise HTTPException(status_code=409, detail="game still running")
             record = handle.session.record()
-        return load_replay(record)
+        return await load_replay(record)
 
     @app.post("/api/replay")
-    def post_replay(doc: dict[str, object]) -> ReplayStateModel:
+    async def post_replay(doc: dict[str, object]) -> ReplayStateModel:
         """Load a game record (the ``settlrl_engine.record`` JSON document) for
         replay; returns the opening state. ``422`` if the record is malformed
         or fails replay validation."""
@@ -493,16 +494,16 @@ def create_app(
                 status_code=422,
                 detail=f"record has too many moves (max {_MAX_REPLAY_MOVES})",
             )
-        return load_replay(record)
+        return await load_replay(record)
 
     @app.get("/api/replay/state")
-    def get_replay_state(move: int = 0) -> ReplayStateModel:
+    async def get_replay_state(move: int = 0) -> ReplayStateModel:
         """The loaded replay after ``move`` moves (0 = the opening board).
 
         ``404`` when no replay is loaded; ``422`` when ``move`` is out of
         range.
         """
-        with replays.lock:
+        async with replays.lock:
             if replays.session is None:
                 raise HTTPException(status_code=404, detail="no replay loaded")
             try:
@@ -511,9 +512,9 @@ def create_app(
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/replay/record")
-    def get_replay_record() -> Response:
+    async def get_replay_record() -> Response:
         """The loaded replay's record JSON (e.g. to save it to a file)."""
-        with replays.lock:
+        async with replays.lock:
             if replays.session is None:
                 raise HTTPException(status_code=404, detail="no replay loaded")
             body = replays.session.record.to_json()
@@ -608,7 +609,6 @@ def _admin_emails() -> frozenset[str]:
 
 app = create_app(
     root_path=os.environ.get("ROOT_PATH", ""),
-    max_streams=int(os.environ.get("SETTLRL_RENDER_MAX_STREAMS", "64")),
     state_dir=os.environ.get("SETTLRL_RENDER_STATE_DIR") or None,
     turn_timeout=float(os.environ.get("SETTLRL_RENDER_TURN_TIMEOUT_S", "0")),
     max_active=int(os.environ.get("SETTLRL_RENDER_MAX_ACTIVE", "16")),
