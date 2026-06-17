@@ -712,59 +712,18 @@
     }
    }
   },
-  "/api/auth/register": {
-   "post": {
-    "tags": [
-     "auth"
-    ],
-    "summary": "Register",
-    "operationId": "register_api_auth_register_post",
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/RegisterRequest"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "201": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/UserModel"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
   "/api/auth/login": {
    "post": {
     "tags": [
      "auth"
     ],
-    "summary": "Login",
-    "operationId": "login_api_auth_login_post",
+    "summary": "Auth:Db.Login",
+    "operationId": "auth_db_login_api_auth_login_post",
     "requestBody": {
      "content": {
       "application/x-www-form-urlencoded": {
        "schema": {
-        "$ref": "#/components/schemas/Body_login_api_auth_login_post"
+        "$ref": "#/components/schemas/Body_auth_db_login_api_auth_login_post"
        }
       }
      },
@@ -776,7 +735,35 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/TokenModel"
+         "$ref": "#/components/schemas/BearerResponse"
+        },
+        "example": {
+         "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiOTIyMWZmYzktNjQwZi00MzcyLTg2ZDMtY2U2NDJjYmE1NjAzIiwiYXVkIjoiZmFzdGFwaS11c2VyczphdXRoIiwiZXhwIjoxNTcxNTA0MTkzfQ.M10bjOe45I5Ncu_uXvOmVV8QxnL-nZfcH96U90JaocI",
+         "token_type": "bearer"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Bad Request",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorModel"
+        },
+        "examples": {
+         "LOGIN_BAD_CREDENTIALS": {
+          "summary": "Bad credentials or the user is inactive.",
+          "value": {
+           "detail": "LOGIN_BAD_CREDENTIALS"
+          }
+         },
+         "LOGIN_USER_NOT_VERIFIED": {
+          "summary": "The user is not verified.",
+          "value": {
+           "detail": "LOGIN_USER_NOT_VERIFIED"
+          }
+         }
         }
        }
       }
@@ -799,11 +786,19 @@
     "tags": [
      "auth"
     ],
-    "summary": "Logout",
-    "operationId": "logout_api_auth_logout_post",
+    "summary": "Auth:Db.Logout",
+    "operationId": "auth_db_logout_api_auth_logout_post",
     "responses": {
-     "204": {
-      "description": "Successful Response"
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "401": {
+      "description": "Missing token or inactive user."
      }
     },
     "security": [
@@ -813,20 +808,165 @@
     ]
    }
   },
-  "/api/auth/me": {
-   "get": {
+  "/api/auth/register": {
+   "post": {
     "tags": [
      "auth"
     ],
-    "summary": "Me",
-    "operationId": "me_api_auth_me_get",
+    "summary": "Register:Register",
+    "operationId": "register_register_api_auth_register_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserRead"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Bad Request",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorModel"
+        },
+        "examples": {
+         "REGISTER_USER_ALREADY_EXISTS": {
+          "summary": "A user with this email already exists.",
+          "value": {
+           "detail": "REGISTER_USER_ALREADY_EXISTS"
+          }
+         },
+         "REGISTER_INVALID_PASSWORD": {
+          "summary": "Password validation failed.",
+          "value": {
+           "detail": {
+            "code": "REGISTER_INVALID_PASSWORD",
+            "reason": "Password should beat least 3 characters"
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/users/me": {
+   "get": {
+    "tags": [
+     "users"
+    ],
+    "summary": "Users:Current User",
+    "operationId": "users_current_user_api_users_me_get",
     "responses": {
      "200": {
       "description": "Successful Response",
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/UserModel"
+         "$ref": "#/components/schemas/UserRead"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing token or inactive user."
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
+   },
+   "patch": {
+    "tags": [
+     "users"
+    ],
+    "summary": "Users:Patch Current User",
+    "operationId": "users_patch_current_user_api_users_me_patch",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserRead"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing token or inactive user."
+     },
+     "400": {
+      "description": "Bad Request",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorModel"
+        },
+        "examples": {
+         "UPDATE_USER_EMAIL_ALREADY_EXISTS": {
+          "summary": "A user with this email already exists.",
+          "value": {
+           "detail": "UPDATE_USER_EMAIL_ALREADY_EXISTS"
+          }
+         },
+         "UPDATE_USER_INVALID_PASSWORD": {
+          "summary": "Password validation failed.",
+          "value": {
+           "detail": {
+            "code": "UPDATE_USER_INVALID_PASSWORD",
+            "reason": "Password should beat least 3 characters"
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
         }
        }
       }
@@ -837,6 +977,200 @@
       "OAuth2PasswordBearer": []
      }
     ]
+   }
+  },
+  "/api/users/{id}": {
+   "get": {
+    "tags": [
+     "users"
+    ],
+    "summary": "Users:User",
+    "operationId": "users_user_api_users__id__get",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserRead"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing token or inactive user."
+     },
+     "403": {
+      "description": "Not a superuser."
+     },
+     "404": {
+      "description": "The user does not exist."
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "users"
+    ],
+    "summary": "Users:Patch User",
+    "operationId": "users_patch_user_api_users__id__patch",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserUpdate"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserRead"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing token or inactive user."
+     },
+     "403": {
+      "description": "Not a superuser."
+     },
+     "404": {
+      "description": "The user does not exist."
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "examples": {
+         "UPDATE_USER_EMAIL_ALREADY_EXISTS": {
+          "summary": "A user with this email already exists.",
+          "value": {
+           "detail": "UPDATE_USER_EMAIL_ALREADY_EXISTS"
+          }
+         },
+         "UPDATE_USER_INVALID_PASSWORD": {
+          "summary": "Password validation failed.",
+          "value": {
+           "detail": {
+            "code": "UPDATE_USER_INVALID_PASSWORD",
+            "reason": "Password should beat least 3 characters"
+           }
+          }
+         }
+        },
+        "schema": {
+         "$ref": "#/components/schemas/ErrorModel"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "users"
+    ],
+    "summary": "Users:Delete User",
+    "operationId": "users_delete_user_api_users__id__delete",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "401": {
+      "description": "Missing token or inactive user."
+     },
+     "403": {
+      "description": "Not a superuser."
+     },
+     "404": {
+      "description": "The user does not exist."
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
    }
   }
  },
@@ -983,6 +1317,24 @@
     "title": "BankModel",
     "description": "Cards left in the supply: resource stacks plus the development deck."
    },
+   "BearerResponse": {
+    "properties": {
+     "access_token": {
+      "type": "string",
+      "title": "Access Token"
+     },
+     "token_type": {
+      "type": "string",
+      "title": "Token Type"
+     }
+    },
+    "type": "object",
+    "required": [
+     "access_token",
+     "token_type"
+    ],
+    "title": "BearerResponse"
+   },
    "BeliefModel": {
     "properties": {
      "observer": {
@@ -1073,7 +1425,7 @@
     ],
     "title": "BoardModel"
    },
-   "Body_login_api_auth_login_post": {
+   "Body_auth_db_login_api_auth_login_post": {
     "properties": {
      "grant_type": {
       "anyOf": [
@@ -1130,7 +1482,7 @@
      "username",
      "password"
     ],
-    "title": "Body_login_api_auth_login_post"
+    "title": "Body_auth_db_login_api_auth_login_post"
    },
    "BotMoveModel": {
     "properties": {
@@ -1251,6 +1603,29 @@
     ],
     "title": "EdgeModel",
     "description": "A board edge between two vertices (in cube coordinates)."
+   },
+   "ErrorModel": {
+    "properties": {
+     "detail": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       }
+      ],
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "required": [
+     "detail"
+    ],
+    "title": "ErrorModel"
    },
    "GameModel": {
     "properties": {
@@ -1609,27 +1984,6 @@
     "title": "PortModel",
     "description": "A harbour spanning two coastal vertices.\n\n``resource`` is the resource of a 2:1 port, or ``None`` for a 3:1 general\nport."
    },
-   "RegisterRequest": {
-    "properties": {
-     "email": {
-      "type": "string",
-      "format": "email",
-      "title": "Email"
-     },
-     "password": {
-      "type": "string",
-      "maxLength": 128,
-      "minLength": 8,
-      "title": "Password"
-     }
-    },
-    "type": "object",
-    "required": [
-     "email",
-     "password"
-    ],
-    "title": "RegisterRequest"
-   },
    "ReplayStateModel": {
     "properties": {
      "move": {
@@ -1787,28 +2141,6 @@
     ],
     "title": "TileModel"
    },
-   "TokenModel": {
-    "properties": {
-     "access_token": {
-      "type": "string",
-      "title": "Access Token"
-     },
-     "token_type": {
-      "type": "string",
-      "title": "Token Type",
-      "default": "bearer"
-     },
-     "user": {
-      "$ref": "#/components/schemas/UserModel"
-     }
-    },
-    "type": "object",
-    "required": [
-     "access_token",
-     "user"
-    ],
-    "title": "TokenModel"
-   },
    "TradeOfferModel": {
     "properties": {
      "proposer": {
@@ -1838,28 +2170,157 @@
     "title": "TradeOfferModel",
     "description": "The pending 1:1 domestic trade awaiting the partner's answer."
    },
-   "UserModel": {
+   "UserCreate": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "password": {
+      "type": "string",
+      "title": "Password"
+     },
+     "is_active": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Active",
+      "default": true
+     },
+     "is_superuser": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Superuser",
+      "default": false
+     },
+     "is_verified": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Verified",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "email",
+     "password"
+    ],
+    "title": "UserCreate"
+   },
+   "UserRead": {
     "properties": {
      "id": {
-      "type": "integer",
+      "type": "string",
+      "format": "uuid",
       "title": "Id"
      },
      "email": {
       "type": "string",
+      "format": "email",
       "title": "Email"
      },
-     "is_admin": {
+     "is_active": {
       "type": "boolean",
-      "title": "Is Admin"
+      "title": "Is Active",
+      "default": true
+     },
+     "is_superuser": {
+      "type": "boolean",
+      "title": "Is Superuser",
+      "default": false
+     },
+     "is_verified": {
+      "type": "boolean",
+      "title": "Is Verified",
+      "default": false
      }
     },
     "type": "object",
     "required": [
      "id",
-     "email",
-     "is_admin"
+     "email"
     ],
-    "title": "UserModel"
+    "title": "UserRead"
+   },
+   "UserUpdate": {
+    "properties": {
+     "password": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Password"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "email"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "is_active": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Active"
+     },
+     "is_superuser": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Superuser"
+     },
+     "is_verified": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Verified"
+     }
+    },
+    "type": "object",
+    "title": "UserUpdate"
    },
    "ValidationError": {
     "properties": {

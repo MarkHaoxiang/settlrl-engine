@@ -23,7 +23,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
-from .auth import Auth, User, UserStore
+from .auth import Auth
+from .db import Database, User
 from .driver import start_game_driver
 from .games import (
     GameHandle,
@@ -68,14 +69,14 @@ def _build_registry(
     return GameRegistry(max_active=max_active)
 
 
-def _user_store(user_db: str | None, state_dir: str | None) -> UserStore:
-    """The accounts db: an explicit path, ``users.db`` under the state dir when
-    persistence is on, or an ephemeral in-memory db (tests / stateless runs)."""
+def _database(user_db: str | None, state_dir: str | None) -> Database:
+    """The one async db: an explicit path, ``settlrl.db`` under the state dir
+    when persistence is on, or an ephemeral in-memory db (tests / stateless)."""
     if user_db is not None:
-        return UserStore(user_db)
+        return Database(user_db)
     if state_dir:
-        return UserStore(str(Path(state_dir) / "users.db"))
-    return UserStore(None)
+        return Database(str(Path(state_dir) / "settlrl.db"))
+    return Database(None)
 
 
 def _validate_seat_kinds(
@@ -243,12 +244,13 @@ def create_app(
     ``max_active`` caps how many games run at once; beyond it, new creators are
     queued (``POST /api/games`` returns their place in line). ``warm``
     pre-compiles the engine at startup (off in tests, which compile lazily and
-    don't want the background contention). ``user_db`` is the accounts SQLite
-    path (defaults to ``users.db`` under ``state_dir``, else in-memory);
+    don't want the background contention). ``user_db`` overrides the shared
+    SQLite path (defaults to ``settlrl.db`` under ``state_dir``, else in-memory);
     ``admin_emails`` are granted admin on register / login.
     """
     registry = _build_registry(games, state_dir, max_active)
-    auth = Auth(_user_store(user_db, state_dir), admin_emails=admin_emails)
+    database = _database(user_db, state_dir)
+    auth = Auth(database, admin_emails=admin_emails)
     bots = (
         providers if providers is not None else ProviderRegistry(local_bots=local_bots)
     )
@@ -259,6 +261,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        await database.init()
         if warm:
             threading.Thread(target=_warm_jit_cache, daemon=True).start()
         # Each event-stream subscriber occupies a threadpool thread for its
@@ -270,6 +273,7 @@ def create_app(
             if _needs_driver(handle, turn_timeout):
                 start_game_driver(handle, bot_delay, turn_timeout, bots)
         yield
+        await database.dispose()
 
     app = FastAPI(title="Settlrl Render", lifespan=lifespan, root_path=root_path)
 
@@ -295,8 +299,8 @@ def create_app(
     # The signed-in requester (None when anonymous); a FastAPI dependency.
     CurrentUser = Annotated[User | None, Depends(auth.optional_user)]
 
-    def _uid(user: User | None) -> int | None:
-        return user.id if user is not None else None
+    def _uid(user: User | None) -> str | None:
+        return str(user.id) if user is not None else None
 
     @app.post("/api/games")
     def post_create(
@@ -516,13 +520,15 @@ def create_app(
         return Response(content=body, media_type="application/json")
 
     @app.get("/api/me/games")
-    def my_games(user: Annotated[User, Depends(auth.current_user)]) -> list[_MyGameModel]:
+    def my_games(
+        user: Annotated[User, Depends(auth.current_user)],
+    ) -> list[_MyGameModel]:
         """The signed-in user's games — those still live where their account
         owns a seat — so they can resume on any device without a seat token."""
         return [
             _MyGameModel(id=handle.id, seats=seats)
             for handle in registry.all_handles()
-            if (seats := handle.seats_for_user(user.id))
+            if (seats := handle.seats_for_user(str(user.id)))
         ]
 
     @app.get("/api/bots")

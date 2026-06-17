@@ -38,7 +38,7 @@ export default function AccountMenu({
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
         <span style={{ opacity: 0.8 }}>
           {user.email}
-          {user.is_admin ? " · admin" : ""}
+          {user.is_superuser ? " · admin" : ""}
         </span>
         <button
           style={smallButtonStyle}

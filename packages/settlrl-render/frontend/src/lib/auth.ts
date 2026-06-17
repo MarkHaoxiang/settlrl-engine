@@ -5,9 +5,9 @@
 import { API_BASE, ApiError, api } from "./api";
 
 export interface AuthUser {
-  id: number;
+  id: string;
   email: string;
-  is_admin: boolean;
+  is_superuser: boolean;
 }
 
 const TOKEN_KEY = "settlrl-auth-token";
@@ -45,9 +45,12 @@ export async function login(email: string, password: string): Promise<AuthUser> 
       .catch(() => resp.statusText);
     throw new ApiError(resp.status, detail);
   }
-  const data = (await resp.json()) as { access_token: string; user: AuthUser };
+  // fastapi-users login returns only the bearer token; fetch the user with it.
+  const data = (await resp.json()) as { access_token: string };
   setToken(data.access_token);
-  return data.user;
+  const user = await currentUser();
+  if (!user) throw new ApiError(500, "logged in but could not load the account");
+  return user;
 }
 
 export async function logout(): Promise<void> {
@@ -79,7 +82,7 @@ export async function myGames(): Promise<MyGame[]> {
 export async function currentUser(): Promise<AuthUser | null> {
   const token = authToken();
   if (!token) return null;
-  const resp = await fetch(API_BASE + "/api/auth/me", {
+  const resp = await fetch(API_BASE + "/api/users/me", {
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => null);
   if (!resp || !resp.ok) {

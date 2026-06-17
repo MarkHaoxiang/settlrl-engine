@@ -77,7 +77,7 @@ class GameHandle:
         self.claims: dict[int, str] = {}
         # seat -> owning user id, for seats claimed by a signed-in account (so
         # the seat follows the user across devices, without the seat token).
-        self.claim_users: dict[int, int] = {}
+        self.claim_users: dict[int, str] = {}
         self.touched = time.monotonic()
         # Monotonic change counter: every state change bumps it, and waiters
         # re-serialise their view when it moves.
@@ -104,7 +104,7 @@ class GameHandle:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
 
     def claim(
-        self, seat: int | None = None, user_id: int | None = None
+        self, seat: int | None = None, user_id: str | None = None
     ) -> tuple[int, str]:
         """Claim ``seat`` (or the first unclaimed human seat) and mint its token.
         When ``user_id`` is given (a signed-in claimer) the seat is also tied to
@@ -130,7 +130,7 @@ class GameHandle:
             self.journal.claim(seat, token, user_id)
         return seat, token
 
-    def owned_seats(self, tokens: list[str], user_id: int | None = None) -> set[int]:
+    def owned_seats(self, tokens: list[str], user_id: str | None = None) -> set[int]:
         """The seats the requester owns: any proven by ``tokens`` plus any tied
         to their ``user_id`` (unknown tokens are ignored)."""
         presented = set(tokens)
@@ -139,7 +139,7 @@ class GameHandle:
             owned |= {s for s, uid in self.claim_users.items() if uid == user_id}
         return owned
 
-    def seats_for_user(self, user_id: int) -> list[int]:
+    def seats_for_user(self, user_id: str) -> list[int]:
         """The seats this account owns in this game (for the user's game list)."""
         return sorted(s for s, uid in self.claim_users.items() if uid == user_id)
 
@@ -284,7 +284,7 @@ def _rebuild_handle(
     """Reconstruct one game from its header and event log, or None if it can't
     be replayed (a corrupt file is dropped rather than failing the boot)."""
     claims: dict[int, str] = {}
-    claim_users: dict[int, int] = {}
+    claim_users: dict[int, str] = {}
     try:
         session = GameSession.from_setup(GameSetup.from_dict(header))
         for event in events:
@@ -304,7 +304,7 @@ def _rebuild_handle(
 def _replay_event(
     session: GameSession,
     claims: dict[int, str],
-    claim_users: dict[int, int],
+    claim_users: dict[int, str],
     event: dict[str, object],
 ) -> None:
     """Apply one journalled event back onto the rebuilding game."""
@@ -320,4 +320,4 @@ def _replay_event(
             claims[seat] = str(event["token"])
             user_id = event.get("user_id")
             if user_id is not None:
-                claim_users[seat] = cast(int, user_id)
+                claim_users[seat] = cast(str, user_id)

@@ -12,6 +12,11 @@ dependencies = [
     # Bot policies for the non-human seats.
     "settlrl-agents",
     "fastapi[standard]>=0.115.0",
+    # Accounts + the single async storage layer: fastapi-users on async
+    # SQLAlchemy (it bundles password hashing, so we don't hand-roll it).
+    "fastapi-users[sqlalchemy]>=13.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [project.scripts]

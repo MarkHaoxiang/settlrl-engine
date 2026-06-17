@@ -54,7 +54,7 @@ class GameJournal:
             )
         self._moves_written = len(moves)
 
-    def claim(self, seat: int, token: str, user_id: int | None = None) -> None:
+    def claim(self, seat: int, token: str, user_id: str | None = None) -> None:
         self._store._append(
             self._game_id,
             {"t": "claim", "seat": seat, "token": token, "user_id": user_id},

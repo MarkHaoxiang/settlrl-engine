@@ -23,6 +23,12 @@ dev = [
     "scikit-learn>=1.9.0",
     "tabulate>=0.9.0",
     "types-tabulate>=0.9.0",
+    "hydra-core>=1.3.3",
+    "pydantic>=2.13.4",
+    "optax>=0.2.8",
+    "equinox>=0.13.8",
+    "wandb>=0.27.2",
+    "jraph>=0.0.6.dev0",
 ]
 # GPU support can't be marker-detected (markers see the OS, not the hardware),
 # so it's a *default* group on Linux: a plain `uv sync` no longer prunes the
@@ -47,6 +53,7 @@ mypy_path = [
     "packages/settlrl-engine/src",
     "packages/settlrl-render/src",
     "packages/settlrl-reference/src",
+    "packages/settlrl-learn/src",
 ]
 strict = true
 disallow_any_explicit = false
@@ -57,7 +64,7 @@ module = ["jax.*", "jaxlib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pettingzoo.*", "gymnasium.*"]
+module = ["pettingzoo.*", "gymnasium.*", "sklearn.*", "jraph.*", "optax.*", "wandb.*"]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
@@ -66,8 +73,10 @@ ignore_missing_imports = true
 extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-# Experiment scripts bootstrap sys.path before importing experiments/_lib.
-"experiments/**" = ["E402"]
+# Experiment scripts bootstrap sys.path before importing experiments/_lib; the
+# NN frameworks carry jaxtyping shape strings (same forward-ref trip as src,
+# and UP037's autofix would strip the quotes those annotations need).
+"experiments/**" = ["E402", "F722", "F821", "UP037"]
 # jaxtyping shape strings in annotations ("*batch ...") trip the forward-ref
 # rules (and UP037's autofix strips the quotes they need — keep it off
 # everywhere under src, or any --fix run corrupts the annotations).
@@ -80,5 +89,6 @@ extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 "packages/settlrl-engine/src/settlrl_engine/mechanics/flat.py" = ["F722", "F821"]
 "packages/settlrl-agents/src/settlrl_agents/search/mcts.py" = ["F722", "F821"]
 "packages/settlrl-agents/src/settlrl_agents/search/smcts.py" = ["F722", "F821"]
+"packages/settlrl-agents/src/settlrl_agents/search/ismcts.py" = ["F722", "F821"]
 "packages/settlrl-learn/src/**" = ["F722", "F821"]
 "packages/settlrl-agents/src/settlrl_agents/evaluate.py" = ["F722", "F821"]
