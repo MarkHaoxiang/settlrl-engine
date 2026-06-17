@@ -152,6 +152,56 @@ games.example.com {
 }
 ```
 
+## Accounts
+
+Accounts are optional: anonymous play (claim a seat, get a per-seat token) works
+exactly as before. Registering gives a player a persistent identity and lets an
+operator mark some users as **admins**, who manage the bot services below.
+
+Login uses the OAuth2 password flow (`POST /api/auth/login` returns a bearer
+token presented as `Authorization: Bearer …`); passwords are hashed with stdlib
+scrypt and accounts persist in SQLite (`users.db` under the state dir, or
+`SETTLRL_RENDER_USER_DB`). Emails listed in `SETTLRL_RENDER_ADMIN_EMAILS`
+(comma-separated) are granted admin on register and login. Endpoints:
+`POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
+`GET /api/auth/me`.
+
+## Bot services
+
+Where a seat's bot moves are computed is pluggable. By default the built-in
+`settlrl-agents` policies run **in-process** (no change to how games are
+served). They can instead — or additionally — run in a separate **bot service**,
+so the agent compute is deployed and scaled apart from the game server.
+
+A bot service is a small, stateless HTTP app (`settlrl-render-bot`) speaking a
+standardized two-call API:
+
+- `GET /catalog` — the bot kinds it offers (same shape as `GET /api/bots`).
+- `POST /act` — given a game's setup and its flat moves so far (the data a
+  `settlrl_engine.record` carries), it replays them and returns the acting
+  seat's chosen flat action. No engine observation crosses the wire, so the two
+  sides only agree on the (stable) record format and flat action indexing.
+
+```bash
+BOT_PORT=8100 uv run settlrl-render-bot
+```
+
+An **admin** registers a service at runtime; its kinds join the catalog and can
+be seated like any built-in:
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/admin/bot-providers` | List registered remote bot services (admin) |
+| `POST /api/admin/bot-providers` | Register one `{ "name", "base_url" }` (admin); `400` if unreachable or a kind clashes |
+| `DELETE /api/admin/bot-providers/{name}` | Unregister one (admin) |
+
+Set `SETTLRL_RENDER_LOCAL_BOTS=0` to run the game server with **no** in-process
+agent execution at all: it then offers only registered services' kinds, so every
+bot move is delegated over the API (an abandoned-turn auto-play still uses a
+trivial local random move as a liveness fallback). A remote service that is slow
+or fails simply falls back to a local random move, so a game never stalls.
+Registrations live in memory, so re-register services after a restart.
+
 ## Tests
 
 The renderer builds its board coordinate tables directly from the engine's
@@ -199,7 +249,9 @@ BASE=http://localhost:8000 npm run e2e
 | `POST /api/replay` | Load a game record (the record JSON) for replay; returns the opening state. `422` if malformed |
 | `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board). `404` until a replay is loaded |
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
-| `GET /api/bots` | Bot kinds available for seats, each with the player counts it supports and its configurable parameters |
+| `GET /api/bots` | Bot kinds available for seats (built-in + registered remote services), each with the player counts it supports and its configurable parameters |
+| `POST /api/auth/register` · `/login` · `/logout` · `GET /api/auth/me` | Optional accounts (OAuth2 password flow; see [Accounts](#accounts)) |
+| `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
 Each legal move in `GET /api/games/{id}` is a decoded action descriptor carrying its `flat` index
@@ -227,7 +279,8 @@ packages/settlrl-render/
 ├── src/settlrl_render/
 │   ├── __init__.py      # CLI entry point (uvicorn)
 │   ├── server.py        # create_app + thin routes: auth, locking, status codes, SSE
-│   ├── driver.py        # Per-game daemon: bot pacing + idle-turn timeouts
+│   ├── auth.py          # Optional accounts: sqlite UserStore + OAuth2 login + deps
+│   ├── driver.py        # Per-game daemon: bot pacing (local or remote) + idle-turn timeouts
 │   ├── views.py         # Per-seat snapshots: the hidden-information boundary
 │   ├── games.py         # Game registry: ids, per-game locks, seat claims (tokens)
 │   ├── store.py         # Crash-recovery journals: persist games, replay on boot
@@ -235,6 +288,8 @@ packages/settlrl-render/
 │   ├── session.py       # GameSession: one live game vs bots (wraps the AEC env)
 │   ├── replay.py        # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots.py          # settlrl-agents registry adapted to the single game (bot_act)
+│   ├── providers.py     # Bot kinds -> where they run: local vs registered remote services
+│   ├── bot_service.py   # Standalone bot service (settlrl-render-bot): /catalog + /act
 │   ├── actions.py       # Decode AEC flat actions -> wire ActionModels
 │   ├── convert.py       # settlrl-engine Board -> BoardModel
 │   └── models.py        # Pydantic board / game / action models

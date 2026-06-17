@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import anyio.to_thread
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,7 +24,6 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from .auth import Auth, UserStore
-from .bots import bot_catalog
 from .driver import start_game_driver
 from .games import (
     GameHandle,
@@ -34,6 +33,7 @@ from .games import (
     restore_registry,
 )
 from .models import GameModel, ReplayStateModel
+from .providers import ProviderRegistry, RemoteBotError
 from .replay import ReplaySession
 from .session import HUMAN, GameSession, IllegalActionError
 from .store import GameStore
@@ -76,6 +76,32 @@ def _user_store(user_db: str | None, state_dir: str | None) -> UserStore:
     if state_dir:
         return UserStore(str(Path(state_dir) / "users.db"))
     return UserStore(None)
+
+
+def _validate_seat_kinds(
+    seats: "list[str | _SeatSpec] | None",
+    n_players: int,
+    catalog: dict[str, dict[str, object]],
+) -> None:
+    """Reject a create whose bot seats name unknown kinds or kinds that don't
+    support the player count, against the aggregated provider catalog (so remote
+    kinds are validated the same way local ones are). The session re-checks
+    local kinds; remote kinds are only knowable here."""
+    if seats is None:
+        return
+    for entry in seats:
+        kind = entry if isinstance(entry, str) else entry.kind
+        if kind == HUMAN:
+            continue
+        spec = catalog.get(kind)
+        if spec is None:
+            raise HTTPException(status_code=422, detail=f"unknown bot kind: {kind!r}")
+        counts = spec.get("counts", [])
+        if isinstance(counts, list) and n_players not in counts:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{kind} is not available in a {n_players}-player game",
+            )
 
 
 def _needs_driver(handle: GameHandle, turn_timeout: float) -> bool:
@@ -173,6 +199,13 @@ class _ChatRequest(BaseModel):
     player: int | None = None
 
 
+class _ProviderRequest(BaseModel):
+    """A remote bot service to register: a short name and its base URL."""
+
+    name: str
+    base_url: str
+
+
 def create_app(
     games: GameRegistry | None = None,
     bot_delay: float = 0.65,
@@ -185,6 +218,8 @@ def create_app(
     warm: bool = True,
     user_db: str | None = None,
     admin_emails: frozenset[str] = frozenset(),
+    providers: ProviderRegistry | None = None,
+    local_bots: bool = True,
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -207,6 +242,9 @@ def create_app(
     """
     registry = _build_registry(games, state_dir, max_active)
     auth = Auth(_user_store(user_db, state_dir), admin_emails=admin_emails)
+    bots = (
+        providers if providers is not None else ProviderRegistry(local_bots=local_bots)
+    )
     replays = _ReplaySlot()
     # Each live event stream holds one permit for its whole connection; past
     # the cap, new subscribers get 503 rather than exhausting the threadpool.
@@ -223,7 +261,7 @@ def create_app(
         # Resume pacing/timeouts for any games replayed in from the store.
         for handle in registry.all_handles():
             if _needs_driver(handle, turn_timeout):
-                start_game_driver(handle, bot_delay, turn_timeout)
+                start_game_driver(handle, bot_delay, turn_timeout, bots)
         yield
 
     app = FastAPI(title="Settlrl Render", lifespan=lifespan, root_path=root_path)
@@ -258,9 +296,16 @@ def create_app(
             if req.seats is not None
             else None
         )
+        catalog = bots.catalog()
+        _validate_seat_kinds(req.seats, req.n_players, catalog)
         try:
             session = GameSession(seed=req.seed, n_players=req.n_players)
-            session.reset(req.seed, number_placement=req.number_placement, seats=seats)
+            session.reset(
+                req.seed,
+                number_placement=req.number_placement,
+                seats=seats,
+                external_kinds=bots.remote_kinds(),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
@@ -278,7 +323,7 @@ def create_app(
         )
         tokens = dict(seated.claim(seat) for seat in claiming)
         if _needs_driver(seated, turn_timeout):
-            start_game_driver(seated, bot_delay, turn_timeout)
+            start_game_driver(seated, bot_delay, turn_timeout, bots)
         return _CreatedModel(id=seated.id, seats=session.seats, tokens=tokens)
 
     @app.post("/api/games/{game_id}/join")
@@ -444,9 +489,42 @@ def create_app(
 
     @app.get("/api/bots")
     def get_bots() -> dict[str, dict[str, object]]:
-        """Bot kinds available for seats (settlrl-agents names), each with the
-        player counts it supports and its configurable build parameters."""
-        return bot_catalog()
+        """Bot kinds available for seats — built-in (settlrl-agents) names plus
+        any registered remote providers' — each with the player counts it
+        supports and its configurable build parameters."""
+        return bots.catalog()
+
+    @app.get("/api/admin/bot-providers")
+    def list_bot_providers(
+        _: Annotated[object, Depends(auth.admin_user)],
+    ) -> list[dict[str, object]]:
+        """Registered remote bot providers (admin only)."""
+        return bots.providers()
+
+    @app.post("/api/admin/bot-providers", status_code=201)
+    def register_bot_provider(
+        req: _ProviderRequest, _: Annotated[object, Depends(auth.admin_user)]
+    ) -> dict[str, object]:
+        """Register (or replace) a remote bot service by name + base URL; its
+        bot kinds join the catalog. ``400`` if it is unreachable or a kind
+        clashes with an existing one (admin only)."""
+        try:
+            provider = bots.register(req.name, req.base_url)
+        except RemoteBotError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "name": provider.name,
+            "base_url": provider.base_url,
+            "kinds": sorted(provider.kinds),
+        }
+
+    @app.delete("/api/admin/bot-providers/{name}", status_code=204)
+    def remove_bot_provider(
+        name: str, _: Annotated[object, Depends(auth.admin_user)]
+    ) -> None:
+        """Unregister a remote bot provider (admin only); ``404`` if unknown."""
+        if not bots.unregister(name):
+            raise HTTPException(status_code=404, detail="no such provider")
 
     app.include_router(auth.router)
 
@@ -492,4 +570,5 @@ app = create_app(
     max_active=int(os.environ.get("SETTLRL_RENDER_MAX_ACTIVE", "16")),
     user_db=os.environ.get("SETTLRL_RENDER_USER_DB") or None,
     admin_emails=_admin_emails(),
+    local_bots=os.environ.get("SETTLRL_RENDER_LOCAL_BOTS", "1") != "0",
 )

@@ -96,17 +96,28 @@ class GameSession:
         seed: int = 0,
         n_players: int = 4,
         seats: Sequence[SeatLike] | None = None,
+        external_kinds: frozenset[str] = frozenset(),
     ) -> None:
         self.n_players = n_players
-        self.reset(seed, seats=seats)
+        self.reset(seed, seats=seats, external_kinds=external_kinds)
 
     @classmethod
-    def from_setup(cls, setup: GameSetup) -> GameSession:
+    def from_setup(
+        cls, setup: GameSetup, external_kinds: frozenset[str] = frozenset()
+    ) -> GameSession:
         """A fresh game at its opening position (replay its moves to advance)."""
-        session = cls(seed=setup.seed, n_players=setup.n_players, seats=setup.seats)
+        session = cls(
+            seed=setup.seed,
+            n_players=setup.n_players,
+            seats=setup.seats,
+            external_kinds=external_kinds,
+        )
         if setup.number_placement != "random":  # the ctor already used "random"
             session.reset(
-                setup.seed, number_placement=setup.number_placement, seats=setup.seats
+                setup.seed,
+                number_placement=setup.number_placement,
+                seats=setup.seats,
+                external_kinds=external_kinds,
             )
         return session
 
@@ -116,6 +127,7 @@ class GameSession:
         n_players: int | None = None,
         number_placement: Literal["random", "spiral"] = "random",
         seats: Sequence[SeatLike] | None = None,
+        external_kinds: frozenset[str] | None = None,
     ) -> None:
         """Start a fresh game.
 
@@ -123,10 +135,16 @@ class GameSession:
         every seat (None means a human on seat 0 and ``"random"`` bots
         elsewhere) and must have ``n_players`` entries, each ``"human"``, a
         policy name, or ``{"kind": name, "params": {...}}`` with knob
-        overrides from the bot catalog.
+        overrides from the bot catalog. ``external_kinds`` are extra bot-kind
+        names accepted beyond the local ``POLICIES`` — seats a remote bot
+        provider plays (:mod:`settlrl_render.providers`); their params are
+        stored verbatim (the provider validates them) and they are never played
+        locally. None keeps the current set.
         """
         if n_players is not None:
             self.n_players = n_players
+        if external_kinds is not None:
+            self._external_kinds = external_kinds
         if seats is None:
             seats = [HUMAN] + ["random"] * (self.n_players - 1)
         if len(seats) != self.n_players:
@@ -147,14 +165,18 @@ class GameSession:
                 if raw:
                     raise ValueError("a human seat takes no params")
                 all_params.append({})
-            elif kind not in POLICIES:
-                raise ValueError(f"unknown seat kind: {kind!r}")
-            else:
+            elif kind in POLICIES:
                 all_params.append(coerce_params(kind, raw))
+            elif kind in self._external_kinds:
+                # A remote provider's kind: stored verbatim, validated and played
+                # there rather than against the local POLICIES.
+                all_params.append(dict(raw))
+            else:
+                raise ValueError(f"unknown seat kind: {kind!r}")
         unsupported = sorted(
             kind
             for kind in set(kinds) - {HUMAN}
-            if self.n_players not in POLICIES[kind].n_players
+            if kind in POLICIES and self.n_players not in POLICIES[kind].n_players
         )
         if unsupported:
             raise ValueError(
@@ -201,6 +223,10 @@ class GameSession:
     def moves(self) -> list[Move]:
         """The full applied-move trace, in order (uncapped, unlike the log)."""
         return self._moves
+
+    def moves_flat(self) -> list[int]:
+        """The applied moves as flat action indices (the bot-service wire form)."""
+        return [m.flat for m in self._moves]
 
     @property
     def setup(self) -> GameSetup:
@@ -266,11 +292,14 @@ class GameSession:
         self.env.step(int(flat))
         self._log_move(seat, int(flat))
 
-    def bot_step(self) -> int | None:
-        """Play one bot move if a bot seat is acting; return the flat played.
+    def bot_choice(self) -> int | None:
+        """The flat action the acting *local* bot seat would play, without
+        applying it (the bot service's move endpoint, which replays a game and
+        must not advance past the requested move).
 
         Returns None when no bot move is due: a human seat is acting, the game
-        is over, or the acting bot has no legal move.
+        is over, or the acting bot has no legal move. Only valid for a seat
+        whose kind is a local ``POLICIES`` policy.
         """
         if self.terminal():
             return None
@@ -278,7 +307,17 @@ class GameSession:
         if self.seats[seat] == HUMAN or self.legal_flat().size == 0:
             return None
         self._key, k = jax.random.split(self._key)
-        flat = bot_act(self.seats[seat], self.seat_params[seat], k, self.env._env, seat)
+        return int(
+            bot_act(self.seats[seat], self.seat_params[seat], k, self.env._env, seat)
+        )
+
+    def bot_step(self) -> int | None:
+        """Play one local bot move if a bot seat is acting; return the flat
+        played (None when no bot move is due — see :meth:`bot_choice`)."""
+        seat = self.acting_seat()
+        flat = self.bot_choice()
+        if flat is None:
+            return None
         self.env.step(flat)
         self._log_move(seat, flat)
         return flat

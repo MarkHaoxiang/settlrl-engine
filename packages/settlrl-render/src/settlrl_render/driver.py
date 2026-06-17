@@ -10,13 +10,13 @@ lock, so they never race a human request.
 
 import threading
 import time
-from collections.abc import Callable
 from enum import Enum
 
 from .actions import decode_actions
 from .games import GameHandle
 from .models import BotMoveModel
-from .session import HUMAN
+from .providers import ProviderRegistry, RemoteBotError
+from .session import HUMAN, IllegalActionError
 
 
 class _Due(Enum):
@@ -48,10 +48,13 @@ class _IdleClock:
 
 
 def start_game_driver(
-    handle: GameHandle, delay: float, turn_timeout: float = 0.0
+    handle: GameHandle,
+    delay: float,
+    turn_timeout: float = 0.0,
+    providers: ProviderRegistry | None = None,
 ) -> None:
     threading.Thread(
-        target=_drive, args=(handle, delay, turn_timeout), daemon=True
+        target=_drive, args=(handle, delay, turn_timeout, providers), daemon=True
     ).start()
 
 
@@ -65,7 +68,12 @@ def _human_acting(handle: GameHandle) -> bool:
     return not session.terminal() and session.seats[session.acting_seat()] == HUMAN
 
 
-def _drive(handle: GameHandle, delay: float, turn_timeout: float) -> None:
+def _drive(
+    handle: GameHandle,
+    delay: float,
+    turn_timeout: float,
+    providers: ProviderRegistry | None,
+) -> None:
     clock = _IdleClock(turn_timeout)
     while True:
         due = _wait_for_due(handle, clock)
@@ -73,7 +81,7 @@ def _drive(handle: GameHandle, delay: float, turn_timeout: float) -> None:
             return  # closed or terminal
         if due is _Due.BOT:
             time.sleep(delay)  # pace so each move animates as its own snapshot
-        _play(handle, clock, due)
+        _play(handle, clock, due, providers)
 
 
 def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
@@ -95,23 +103,49 @@ def _wait_for_due(handle: GameHandle, clock: _IdleClock) -> _Due | None:
                 handle.lock.wait()
 
 
-def _play(handle: GameHandle, clock: _IdleClock, due: _Due) -> None:
+def _bot_move(
+    handle: GameHandle, seat: int, providers: ProviderRegistry | None
+) -> int | None:
+    """The acting bot seat's move — locally for built-in kinds, or via the
+    seat's remote provider (replay-based). A remote failure or an illegal answer
+    falls back to a local random move, so a misbehaving service never stalls the
+    game. The remote call runs under the game lock (kept short by the provider's
+    timeout); the seat being a bot's, no human request races it meanwhile."""
+    session = handle.session
+    remote = providers.remote_for(session.seats[seat]) if providers else None
+    if remote is None:
+        return session.bot_step()
+    try:
+        flat = remote.act(
+            handle.id, session.setup.to_dict(), session.moves_flat(), seat
+        )
+        session.apply(int(flat))
+        return int(flat)
+    except (RemoteBotError, IllegalActionError):
+        return session.auto_step()
+
+
+def _play(
+    handle: GameHandle,
+    clock: _IdleClock,
+    due: _Due,
+    providers: ProviderRegistry | None,
+) -> None:
     """Make the due move and push it — unless the moment passed (a human acted
     during the pacing sleep, or just beat the timeout)."""
     with handle.lock:
         if handle.closed:
             return
-        step: Callable[[], int | None]
         if due is _Due.BOT:
             if not _bot_due(handle):
                 return
-            step = handle.session.bot_step
+            seat = handle.session.acting_seat()
+            flat = _bot_move(handle, seat, providers)
         else:
             if not (_human_acting(handle) and clock.remaining(handle.version) <= 0):
                 return
-            step = handle.session.auto_step
-        seat = handle.session.acting_seat()
-        flat = step()
+            seat = handle.session.acting_seat()
+            flat = handle.session.auto_step()
         if flat is not None:
             handle.bot_move = BotMoveModel(
                 player=seat, action=decode_actions([flat])[0]

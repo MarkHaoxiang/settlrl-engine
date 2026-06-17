@@ -238,13 +238,60 @@ export interface paths {
         };
         /**
          * Get Bots
-         * @description Bot kinds available for seats (settlrl-agents names), each with the
-         *     player counts it supports and its configurable build parameters.
+         * @description Bot kinds available for seats — built-in (settlrl-agents) names plus
+         *     any registered remote providers' — each with the player counts it
+         *     supports and its configurable build parameters.
          */
         get: operations["get_bots_api_bots_get"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/bot-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bot Providers
+         * @description Registered remote bot providers (admin only).
+         */
+        get: operations["list_bot_providers_api_admin_bot_providers_get"];
+        put?: never;
+        /**
+         * Register Bot Provider
+         * @description Register (or replace) a remote bot service by name + base URL; its
+         *     bot kinds join the catalog. ``400`` if it is unreachable or a kind
+         *     clashes with an existing one (admin only).
+         */
+        post: operations["register_bot_provider_api_admin_bot_providers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/bot-providers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Bot Provider
+         * @description Unregister a remote bot provider (admin only); ``404`` if unknown.
+         */
+        delete: operations["remove_bot_provider_api_admin_bot_providers__name__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -839,6 +886,16 @@ export interface components {
             token: string;
         };
         /**
+         * _ProviderRequest
+         * @description A remote bot service to register: a short name and its base URL.
+         */
+        _ProviderRequest: {
+            /** Name */
+            name: string;
+            /** Base Url */
+            base_url: string;
+        };
+        /**
          * _QueuedModel
          * @description The server is at its concurrency cap: the caller's place in line. They
          *     re-POST with ``ticket`` until they get a :class:`_CreatedModel` back.
@@ -1257,6 +1314,92 @@ export interface operations {
                             [key: string]: unknown;
                         };
                     };
+                };
+            };
+        };
+    };
+    list_bot_providers_api_admin_bot_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    register_bot_provider_api_admin_bot_providers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_bot_provider_api_admin_bot_providers__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

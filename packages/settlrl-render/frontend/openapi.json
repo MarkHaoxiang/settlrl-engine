@@ -522,7 +522,7 @@
   "/api/bots": {
    "get": {
     "summary": "Get Bots",
-    "description": "Bot kinds available for seats (settlrl-agents names), each with the\nplayer counts it supports and its configurable build parameters.",
+    "description": "Bot kinds available for seats \u2014 built-in (settlrl-agents) names plus\nany registered remote providers' \u2014 each with the player counts it\nsupports and its configurable build parameters.",
     "operationId": "get_bots_api_bots_get",
     "responses": {
      "200": {
@@ -536,6 +536,117 @@
          },
          "type": "object",
          "title": "Response Get Bots Api Bots Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/bot-providers": {
+   "get": {
+    "summary": "List Bot Providers",
+    "description": "Registered remote bot providers (admin only).",
+    "operationId": "list_bot_providers_api_admin_bot_providers_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         "type": "array",
+         "title": "Response List Bot Providers Api Admin Bot Providers Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
+   },
+   "post": {
+    "summary": "Register Bot Provider",
+    "description": "Register (or replace) a remote bot service by name + base URL; its\nbot kinds join the catalog. ``400`` if it is unreachable or a kind\nclashes with an existing one (admin only).",
+    "operationId": "register_bot_provider_api_admin_bot_providers_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ProviderRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Register Bot Provider Api Admin Bot Providers Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
+   }
+  },
+  "/api/admin/bot-providers/{name}": {
+   "delete": {
+    "summary": "Remove Bot Provider",
+    "description": "Unregister a remote bot provider (admin only); ``404`` if unknown.",
+    "operationId": "remove_bot_provider_api_admin_bot_providers__name__delete",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "name",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Name"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
         }
        }
       }
@@ -1901,6 +2012,25 @@
      "token"
     ],
     "title": "_JoinedModel"
+   },
+   "_ProviderRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "base_url": {
+      "type": "string",
+      "title": "Base Url"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "base_url"
+    ],
+    "title": "_ProviderRequest",
+    "description": "A remote bot service to register: a short name and its base URL."
    },
    "_QueuedModel": {
     "properties": {
