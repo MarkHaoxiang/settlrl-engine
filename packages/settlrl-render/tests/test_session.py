@@ -29,8 +29,7 @@ _TWO_ONLY_KINDS = sorted(
 # a heavy default (mcts at 32 simulations) would only burn time.
 _FAST_PARAMS: dict[str, dict[str, int]] = {
     "mcts": {
-        "num_worlds": 1,
-        "num_futures": 1,
+        "num_trees": 1,
         "num_simulations": 2,
         "max_num_considered_actions": 2,
     },

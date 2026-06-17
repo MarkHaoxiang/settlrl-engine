@@ -23,9 +23,8 @@ from settlrl_agents.policy import (
 from settlrl_agents.sample import sample_world
 from settlrl_agents.search import (
     lookahead_policy,
-    make_greedy,
-    make_mcts,
-    mcts_policy,
+    make_search,
+    search_policy,
 )
 from settlrl_agents.value import (
     TUNED_WEIGHTS,
@@ -43,18 +42,21 @@ POLICIES: dict[str, ObservationSpec | BeliefSpec | StatefulSpec] = {
     "random": ObservationSpec(lambda: random_policy, _ANY_COUNT),
     "greedy": ObservationSpec(lambda: greedy_policy, _ANY_COUNT),
     "planner": StatefulSpec(make_planner, _ANY_COUNT),
+    # Lookahead is the search at zero simulations (root one-step sweep); the
+    # only configuration that offers trades.
     "lookahead": BeliefSpec(
-        make_greedy, _ANY_COUNT, defaults={"value": heuristic_value}
+        make_search,
+        _ANY_COUNT,
+        defaults={"value": heuristic_value, "num_simulations": 0, "propose_rate": 0.5},
     ),
     "mcts": BeliefSpec(
-        make_mcts,
+        make_search,
         _ANY_COUNT,
         defaults={"value": heuristic_value},
-        # One world/future and a small Gumbel budget: a cheap member of the
-        # same family for the protocol tests.
+        # One tree and a small Gumbel budget: a cheap member of the same family
+        # for the protocol tests.
         for_testing={
-            "num_worlds": 1,
-            "num_futures": 1,
+            "num_trees": 1,
             "num_simulations": 8,
             "max_num_considered_actions": 8,
         },
@@ -83,13 +85,12 @@ __all__ = [
     "greedy_policy",
     "heuristic_value",
     "lookahead_policy",
-    "make_greedy",
     "make_heuristic",
     "make_linear",
-    "make_mcts",
     "make_planner",
-    "mcts_policy",
+    "make_search",
     "random_policy",
     "sample_world",
+    "search_policy",
     "tuned_value",
 ]

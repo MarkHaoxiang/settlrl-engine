@@ -13,21 +13,25 @@ opponent next to the hand-tuned baseline, and is gated head-to-head against
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from _lib import Run
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import _picker, evaluate
+from settlrl_agents.experiment import Run
 from settlrl_agents.internal.feature_engineering import BoardFeatures, board_features
-from settlrl_agents.policy import AgentSpec, BeliefSpec
-from settlrl_agents.search.lookahead import make_greedy
+from settlrl_agents.policy import BeliefSpec, ObservationSpec, StatefulSpec
+from settlrl_agents.search import make_search
 from settlrl_agents.value import make_linear
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import roc_auc_score
+
+Spec = ObservationSpec | BeliefSpec | StatefulSpec
+Match = Callable[[Spec, Spec, int, int], tuple[int, int]]
 
 # The hand-tuned heuristic's nonzero-weight terms, with their weights — the
 # default feature subset and the maximise target's starting point.
@@ -41,12 +45,18 @@ HAND_WEIGHTS = {
 
 def _spec(weights: dict[str, float]) -> BeliefSpec:
     return BeliefSpec(
-        make_greedy, frozenset((2, 3, 4)), defaults={"value": make_linear(weights)}
+        make_search,
+        frozenset((2, 3, 4)),
+        defaults={
+            "value": make_linear(weights),
+            "num_simulations": 0,
+            "propose_rate": 0.5,
+        },
     )
 
 
 def seat_swapped(
-    spec_a: AgentSpec, spec_b: AgentSpec, n_games: int, seed: int
+    spec_a: Spec, spec_b: Spec, n_games: int, seed: int
 ) -> tuple[int, int]:
     """(a's wins, episodes) over a seat-swapped 2p match."""
     r1 = evaluate([spec_a, spec_b], n_episodes=n_games // 2, batch_size=32, seed=seed)
@@ -57,14 +67,14 @@ def seat_swapped(
 
 
 def seat_rotated(
-    spec_a: AgentSpec, spec_b: AgentSpec, players: int, n_games: int, seed: int
+    spec_a: Spec, spec_b: Spec, players: int, n_games: int, seed: int
 ) -> tuple[int, int]:
     """(a's wins, episodes) with ``a`` rotated through every seat of an
     otherwise all-``b`` table (chance = 1/players)."""
     wins = episodes = 0
     per = n_games // players
     for pos in range(players):
-        agents: list[AgentSpec] = [spec_b] * players
+        agents: list[Spec] = [spec_b] * players
         agents[pos] = spec_a
         r = evaluate(agents, n_episodes=per, batch_size=32, seed=seed + pos)
         wins += int(r.wins[pos])
@@ -72,21 +82,19 @@ def seat_rotated(
     return wins, episodes
 
 
-def _match(cfg: dict):
+def _match(cfg: dict) -> Match:
     """The arena's match function: seat-swapped at 2p, seat-rotated above."""
     players = cfg.get("players", 2)
     if players == 2:
         return seat_swapped
 
-    def rotated(spec_a: AgentSpec, spec_b: AgentSpec, n: int, seed: int):
+    def rotated(spec_a: Spec, spec_b: Spec, n: int, seed: int) -> tuple[int, int]:
         return seat_rotated(spec_a, spec_b, players, n, seed)
 
     return rotated
 
 
-def collect(
-    run: Run, cfg: dict, spec_a: AgentSpec, spec_b: AgentSpec
-) -> tuple[np.ndarray, ...]:
+def collect(run: Run, cfg: dict, spec_a: Spec, spec_b: Spec) -> tuple[np.ndarray, ...]:
     """Positions from ``spec_a`` [seat 0] vs ``spec_b`` [seat 1].
 
     Rows are seat0 features minus seat1 features, labels seat0-won; episode
@@ -96,6 +104,9 @@ def collect(
         batch_size=c["batch_size"], seed=cfg["seed"], reward="sparse",
         n_players=2, track_beliefs=True,
     )  # fmt: skip
+    assert not isinstance(spec_a, StatefulSpec) and not isinstance(
+        spec_b, StatefulSpec
+    ), "collect drives pure (non-stateful) agents through _picker"
     pickers = [
         jax.jit(_picker(spec_a, 2, 0)),
         jax.jit(_picker(spec_b, 2, 1)),
@@ -133,7 +144,7 @@ def collect(
             flat[sel == i] = np.asarray(picks)[sel == i]
         env.step(*flat_to_action(jnp.asarray(flat)))
         rewards = np.asarray(env.rewards)
-        for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)):
+        for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)).tolist():
             won = int(rewards[lane, 0] > 0)
             k_rows = len(buffers[lane])
             xs.extend(buffers[lane])
@@ -192,7 +203,7 @@ def fit_predict(
 
 
 def probe_best(
-    run: Run, cfg: dict, candidates: dict[str, dict[str, Any]], opponent: AgentSpec
+    run: Run, cfg: dict, candidates: dict[str, dict[str, Any]], opponent: Spec
 ) -> dict[str, float]:
     """Rank candidate weights by cheap seat-swapped matches vs the opponent."""
     probes: dict[str, float] = {}
@@ -206,7 +217,7 @@ def probe_best(
 def maximise(
     run: Run,
     cfg: dict,
-    opponent: AgentSpec,
+    opponent: Spec,
     init: dict[str, float],
     seed_offset: int = 0,
 ) -> dict[str, float]:

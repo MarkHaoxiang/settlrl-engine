@@ -36,8 +36,14 @@ jobs:
           packages/settlrl-agents/src packages/settlrl-agents/tests
           packages/settlrl-render/src packages/settlrl-reference/src
           packages/settlrl-learn/src packages/settlrl-learn/tests/test_learn.py
+      - run: bash mypy_experiments.sh
       - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
       - run: uv run --package settlrl-reference pytest packages/settlrl-reference
       - run: uv run --package settlrl-render pytest packages/settlrl-render
       - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
       - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests
+      # Experiment smoke tests (full, including `slow`): exercise every
+      # framework's plumbing end-to-end at trivial budgets. `-n auto` runs the
+      # frameworks' smokes in parallel (each is JIT-compile-bound and otherwise
+      # serial); the wall clock is then the slowest one, not their sum.
+      - run: WANDB_MODE=disabled uv run pytest experiments/tests -n auto

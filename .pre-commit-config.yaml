@@ -25,9 +25,23 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: mypy-experiments
+        name: mypy (experiments)
+        entry: bash mypy_experiments.sh
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: pytest
         name: pytest
         entry: uv run pytest packages/settlrl-engine/tests/
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: pytest-experiments-smoke
+        name: pytest (experiment smoke, fast)
+        # The `slow` smokes (JAX recompiles dominate) are CI-only; here we run
+        # only the fast plumbing checks.
+        entry: uv run pytest experiments/tests -m "not slow"
         language: system
         pass_filenames: false
         always_run: true

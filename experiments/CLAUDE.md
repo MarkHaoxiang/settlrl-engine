@@ -7,11 +7,39 @@ per concluded variant. Don't scaffold a new number for a question an
 existing framework can express as a config — extend its `VARIANTS` instead;
 git history is the framework's changelog, the report its conclusions.
 
-## `_lib.py` (shared by every framework)
+## Shared harness — `settlrl_agents.experiment`
 
-`start_run` (run dir + manifest pinning git commit / uncommitted-diff digest /
-merged config / environment), `Run.log` (metrics.jsonl), `Run.save_json`,
-`Run.finish` (result.json + the printed verdict).
+No shared libraries live under `experiments/` (only per-framework scripts +
+`new.py`). The reusable harness is the `settlrl_agents.experiment` subpackage:
+
+- `start_run` (run dir + manifest pinning git commit / uncommitted-diff digest
+  / merged config / environment; repo root derived from the framework dir it's
+  handed, so it's location-independent), `Run.log` (metrics.jsonl),
+  `Run.save_json`, `Run.finish` (result.json + the printed verdict). `Run` takes
+  any `dir`, so a smoke test points it at `tmp_path` and skips the git/manifest
+  work.
+- `Config`: the pydantic base + `resolve(base, variant, overrides)` (OmegaConf
+  merge of schema-defaults ◁ variant-delta ◁ CLI dotlist, then validate). The
+  pydra seam, kept beside `start_run` rather than under `@hydra.main` (hydra's
+  cwd takeover would fight the run-dir management). `extra="forbid"`, so a
+  typo'd knob fails loudly. Heavier frameworks validate at the boundary and pass
+  `cfg.dump()` (a plain dict) inward so their internals stay dict-threaded.
+
+The subpackage is not imported by the agents runtime, so `import settlrl_agents`
+does not pull `pydantic`/`omegaconf`. A framework's *same-dir* helpers (e.g.
+`value_fitting`, `data`, `models`) still live beside its `run.py`.
+
+## Testing (`tests/`, mypy)
+
+`tests/test_smoke.py` runs every framework end-to-end at trivial budgets
+(`conftest.load_run` imports a `run.py` by path; the digit-prefixed dirs
+aren't packages). A smoke asserts only a recorded verdict, never strength.
+Mark a smoke `slow` when JAX recompiles dominate (CI-only; pre-commit runs
+`-m "not slow"`). `mypy_experiments.sh` checks each framework dir separately
+(the `run.py` modules would collide on one invocation) plus `new.py` and the
+tests; the shared harness is checked by the agents package mypy. New
+frameworks: add a `smoke` variant and a `test_<nnnn>_*` case, and the mypy loop
+picks the dir up automatically.
 
 ## `0002_linear_value_fitting/` — linear fits over the engineered features
 
@@ -45,3 +73,26 @@ Lessons baked into the design:
 - Each distinct weight vector is a fresh value closure: `evaluate` retraces
   its scan per candidate (~seconds), which is most of a maximise
   generation's overhead — budget `eval_games` accordingly.
+
+## `0003_neural_board_architectures/` — representation × architecture sweep
+
+Supervised benchmark for *which net learns the board best*, the seam toward a
+learned value (settlrl-learn Stage 1). `data.py` rolls out greedy self-play and
+caches seat-0 positions (true board) under `runs/_cache`, labelled with both the
+hand-tuned `heuristic_value` and the eventual win. `features.py` emits the board
+as a fixed-topology graph (54 vertices / 72 edges; only features vary, so
+senders/receivers are module constants) plus the engineered vector, so every
+architecture sees the same position. `models.py` (equinox) holds four:
+`mlp_engineered` (baseline), `mlp_flat` (structure-blind), `deepset` (set), and
+`gnn` (jraph `GraphNetwork` + global readout). `train.py` is optax adamw + wandb
+(`mode` configurable; `disabled` in tests) + best-val equinox checkpointing,
+standardizing inputs on the train split.
+
+Stack additions (dev group): `equinox`, `optax`, `jraph`, `wandb`. Run on GPU
+with `XLA_PYTHON_CLIENT_PREALLOCATE=false` to coexist with other GPU work.
+
+First finding (report.md): a GNN over the *raw* board nearly matches the
+engineered-feature MLP (heuristic R² 0.978 vs 0.996; win AUC 0.825 vs 0.834),
+while a flat MLP on the same raw inputs is ≈chance — structure is what makes raw
+board features usable. Not yet promoted to a shipped value; close the win gap,
+then gate `lookahead(gnn)` through `settlrl-agents bench`.

@@ -1,0 +1,161 @@
+"""Architectures over a :class:`features.Sample`, in equinox.
+
+All four read the *same* position and emit ``out_dim`` logits/regressands, so a
+benchmark isolates representation x architecture:
+
+- ``mlp_engineered`` — MLP over the hand-tuned feature vector (the baseline to
+  beat);
+- ``mlp_flat`` — MLP over the flattened graph (sees every node feature in fixed
+  vertex order, no structure);
+- ``deepset`` — permutation-invariant pool over node features + globals (set, no
+  edges);
+- ``gnn`` — message passing over the board graph (jraph ``GraphNetwork``), then a
+  global readout (uses topology and edge ownership).
+
+The forward takes one un-batched ``Sample``; the training loop ``vmap``s it over
+the minibatch.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+import jraph
+from features import (
+    EDGE_DIM,
+    GLOBAL_DIM,
+    N_DIR_EDGES,
+    NODE_DIM,
+    RECEIVERS,
+    SENDERS,
+    Sample,
+)
+from jaxtyping import Array, Float
+from settlrl_engine.board.layout import N_VERTICES
+from settlrl_engine.board.state import KeyScalar
+from settlrl_learn.features import FEATURE_DIM
+
+Model = Callable[[Sample], Float[Array, "out"]]
+
+
+class MLPModel(eqx.Module):
+    net: eqx.nn.MLP
+    engineered: bool = eqx.field(static=True)
+
+    def __init__(
+        self, key: KeyScalar, *, out_dim: int, width: int, depth: int, engineered: bool
+    ) -> None:
+        in_dim = FEATURE_DIM if engineered else N_VERTICES * NODE_DIM + GLOBAL_DIM
+        self.net = eqx.nn.MLP(in_dim, out_dim, width, depth, key=key)
+        self.engineered = engineered
+
+    def __call__(self, s: Sample) -> Float[Array, "out"]:
+        x = (
+            s.engineered
+            if self.engineered
+            else jnp.concatenate([s.nodes.reshape(-1), s.glob])
+        )
+        return self.net(x)
+
+
+class DeepSetModel(eqx.Module):
+    phi: eqx.nn.MLP  # per-node encoder
+    rho: eqx.nn.MLP  # head over pooled nodes + globals
+
+    def __init__(self, key: KeyScalar, *, out_dim: int, width: int, depth: int) -> None:
+        k1, k2 = jax.random.split(key)
+        self.phi = eqx.nn.MLP(NODE_DIM, width, width, depth, key=k1)
+        self.rho = eqx.nn.MLP(width + GLOBAL_DIM, out_dim, width, depth, key=k2)
+
+    def __call__(self, s: Sample) -> Float[Array, "out"]:
+        h = jax.vmap(self.phi)(s.nodes).mean(axis=0)
+        return self.rho(jnp.concatenate([h, s.glob]))
+
+
+class _GNNLayer(eqx.Module):
+    edge_mlp: eqx.nn.MLP
+    node_mlp: eqx.nn.MLP
+
+    def __init__(self, key: KeyScalar, hidden: int) -> None:
+        k1, k2 = jax.random.split(key)
+        # edge update sees [edge, sender, receiver, global]; node update sees
+        # [node, aggregated-received-edges, global] (all width `hidden`).
+        self.edge_mlp = eqx.nn.MLP(4 * hidden, hidden, hidden, 1, key=k1)
+        self.node_mlp = eqx.nn.MLP(3 * hidden, hidden, hidden, 1, key=k2)
+
+    def __call__(self, graph: jraph.GraphsTuple) -> jraph.GraphsTuple:
+        def update_edge_fn(
+            edges: Array, senders: Array, receivers: Array, globals_: Array
+        ) -> Array:
+            x = jnp.concatenate([edges, senders, receivers, globals_], axis=-1)
+            return edges + jax.vmap(self.edge_mlp)(x)  # residual
+
+        def update_node_fn(
+            nodes: Array, sent: Array, received: Array, globals_: Array
+        ) -> Array:
+            x = jnp.concatenate([nodes, received, globals_], axis=-1)
+            return nodes + jax.vmap(self.node_mlp)(x)  # residual
+
+        net = jraph.GraphNetwork(update_edge_fn, update_node_fn)
+        return net(graph)
+
+
+class GNNModel(eqx.Module):
+    node_enc: eqx.nn.Linear
+    edge_enc: eqx.nn.Linear
+    glob_enc: eqx.nn.Linear
+    layers: tuple[_GNNLayer, ...]
+    head: eqx.nn.MLP
+
+    def __init__(
+        self, key: KeyScalar, *, out_dim: int, width: int, depth: int, layers: int
+    ) -> None:
+        keys = jax.random.split(key, 4 + layers)
+        self.node_enc = eqx.nn.Linear(NODE_DIM, width, key=keys[0])
+        self.edge_enc = eqx.nn.Linear(EDGE_DIM, width, key=keys[1])
+        self.glob_enc = eqx.nn.Linear(GLOBAL_DIM, width, key=keys[2])
+        self.layers = tuple(_GNNLayer(keys[4 + i], width) for i in range(layers))
+        # readout: mean-pooled nodes + final globals.
+        self.head = eqx.nn.MLP(2 * width, out_dim, width, depth, key=keys[3])
+
+    def __call__(self, s: Sample) -> Float[Array, "out"]:
+        graph = jraph.GraphsTuple(
+            nodes=jax.vmap(self.node_enc)(s.nodes),
+            edges=jax.vmap(self.edge_enc)(s.edges),
+            senders=SENDERS,
+            receivers=RECEIVERS,
+            globals=self.glob_enc(s.glob)[None, :],
+            n_node=jnp.asarray([N_VERTICES]),
+            n_edge=jnp.asarray([N_DIR_EDGES]),
+        )
+        for layer in self.layers:
+            graph = layer(graph)
+        pooled = jnp.concatenate([graph.nodes.mean(axis=0), graph.globals[0]])
+        return self.head(pooled)
+
+
+def make_model(
+    arch: str,
+    key: KeyScalar,
+    *,
+    out_dim: int,
+    width: int,
+    depth: int,
+    layers: int,
+) -> eqx.Module:
+    """Build the named architecture (``mlp_engineered`` / ``mlp_flat`` /
+    ``deepset`` / ``gnn``)."""
+    if arch == "mlp_engineered":
+        return MLPModel(key, out_dim=out_dim, width=width, depth=depth, engineered=True)
+    if arch == "mlp_flat":
+        return MLPModel(
+            key, out_dim=out_dim, width=width, depth=depth, engineered=False
+        )
+    if arch == "deepset":
+        return DeepSetModel(key, out_dim=out_dim, width=width, depth=depth)
+    if arch == "gnn":
+        return GNNModel(key, out_dim=out_dim, width=width, depth=depth, layers=layers)
+    raise SystemExit(f"unknown arch {arch!r}")

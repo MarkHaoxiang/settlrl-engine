@@ -24,3 +24,10 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   reads 30.4% ± 3.2% vs three hand lookaheads (chance 25%, lower 2σ 24.0%,
   n=230) and 69.3% vs greedy tables; 4p tuned slot stays hand-tuned pending
   an n≈600 confirmation.
+- 0003_neural_board_architectures — pass (framework + first sweep, 12k
+  positions): a jraph GNN over the *raw* board nearly matches the hand-tuned
+  feature MLP — heuristic R² 0.978 vs 0.996, win AUC 0.825 vs 0.834 — while a
+  structure-blind flat MLP on the same inputs is ≈chance (R² 0.54, AUC 0.52)
+  and DeepSet sits between. Structure is what makes raw board features usable;
+  a learnable leaf is within reach (settlrl-learn Stage 1 seam). Not yet
+  promoted: close the win gap, then gate lookahead(gnn) through bench.

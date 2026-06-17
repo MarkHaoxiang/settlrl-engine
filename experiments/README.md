@@ -12,7 +12,7 @@ class of related experiments sharing machinery — committed; everything a run
   the *conclusions* in its report are what stays immutable, and `runs/`
   collects many logs per framework.
 - Each run is deterministic given its config (seeds included); it writes only
-  under its run directory, which `_lib.start_run` creates with a manifest
+  under its run directory, which `start_run` creates with a manifest
   (git commit + uncommitted-diff digest, the merged config, environment).
 - `NNNN_slug/report.md` — hypothesis → setup → results → decision, one
   section per concluded variant, citing the `runs/` directories the numbers
@@ -22,12 +22,30 @@ class of related experiments sharing machinery — committed; everything a run
   machine-readable verdict) or an in-run match with the threshold asserted in
   code — the script decides pass/fail, not a reading of it.
 
-## Workflow
+## Configuration
+
+A framework's config is a typed `settlrl_agents.experiment.Config` (pydantic)
+schema — the defaults live in the schema, named *variants* are deltas onto them,
+and `key=value` arguments on the command line override either (OmegaConf
+dotlist: `maximise.iterations=1`). `Config.resolve(base, variant, overrides)`
+merges and validates; the *validated* config is what the run manifest pins. The
+shared harness (`Run` / `start_run` / `Config`) lives in that subpackage, not
+under `experiments/` — these directories hold only per-framework scripts and
+`new.py`.
 
 ```
-uv run python experiments/new.py "<title>"            # scaffold a framework
-uv run python experiments/NNNN_slug/run.py [variant]  # run a config of it
+uv run python experiments/new.py "<title>"                    # scaffold a framework
+uv run python experiments/NNNN_slug/run.py [variant] [k=v...]  # run a config of it
 ```
 
 `0001_bench_smoke` is the minimal worked example;
 `0002_linear_value_fitting` a multi-variant framework.
+
+## Checks
+
+Every framework is type-checked (`mypy_experiments.sh`, on pre-commit and CI)
+and has a `smoke` path exercised end-to-end at trivial budgets by
+`experiments/tests/test_smoke.py`. Smokes that recompile JAX repeatedly are
+marked `slow` (CI-only); pre-commit runs `-m "not slow"`. A smoke proves the
+plumbing (config → data/optimisation → bench gate → verdict), never a strength
+claim — keep its budgets minimal and its `Run` in `tmp_path`.

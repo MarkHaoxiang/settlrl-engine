@@ -2,9 +2,9 @@
 
 A framework for a class of experiments: optimize linear weights over
 ``BoardFeatures``, deploy them in one-step lookahead, and gate against the
-hand-tuned weights. Pick a variant::
+hand-tuned weights. Pick a variant (and optional ``key=value`` overrides)::
 
-    uv run python experiments/0002_linear_value_fitting/run.py [variant]
+    uv run python experiments/0002_linear_value_fitting/run.py [variant] [k=v ...]
 
 - ``predict``   — fit weights to predict game outcomes vs a known opponent
 - ``maximise``  — CEM search over weights for match win rate vs a known
@@ -17,37 +17,63 @@ hand-tuned weights. Pick a variant::
 - ``self_play_4p`` — the same ladder in a four-player arena (one challenger
   seat rotating against a champion table; acceptance and the gate clear the
   1/players chance line)
+- ``smoke``     — trivial budgets for the end-to-end plumbing test (not a
+  real result; the gate is meaningless here)
+
+The schema below carries the defaults; ``VARIANTS`` are deltas onto them.
 """
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _lib import start_run
+from pydantic import Field, model_validator
+from settlrl_agents.experiment import Config, start_run
 from settlrl_agents.internal.feature_engineering import BoardFeatures
 from value_fitting import HAND_WEIGHTS, run_experiment
 
-BASE = {
-    "seed": 0,
-    "players": 2,  # the optimization arena's player count
-    "features": list(HAND_WEIGHTS),  # BoardFeatures names to optimize
-    "collect": {"steps": 12_000, "batch_size": 64, "snapshot_every": 4},
-    "maximise": {
-        "iterations": 3,
-        "population": 6,
-        "elites": 3,
-        "eval_games": 60,
-        "sigma": 0.3,
-    },
-    "probe_games": 120,
-    "eval_players": [2, 4],  # deployment numbers per count (gate stays 2p)
-    "games_multi": 240,  # 3-4p matches need n>=240 (seed-batch variance)
-    "bench_opponent": "greedy",
-    "bench_games": 200,
-    "gate_games": 300,
-}
 
-VARIANTS = {
+class Collect(Config):
+    steps: int = 12_000
+    batch_size: int = 64
+    snapshot_every: int = 4
+
+
+class Maximise(Config):
+    iterations: int = 3
+    population: int = 6
+    elites: int = 3
+    eval_games: int = 60
+    sigma: float = 0.3
+
+
+class ValueFittingConfig(Config):
+    seed: int = 0
+    players: int = 2  # the optimization arena's player count
+    # BoardFeatures names to optimize (or "ALL", expanded by _expand_all).
+    features: list[str] = Field(default_factory=lambda: list(HAND_WEIGHTS))
+    collect: Collect = Field(default_factory=Collect)
+    maximise: Maximise = Field(default_factory=Maximise)
+    probe_games: int = 120
+    # deployment numbers per count (the gate is the 2p arena)
+    eval_players: list[int] = Field(default_factory=lambda: [2, 4])
+    games_multi: int = 240  # 3-4p matches need n>=240 (seed-batch variance)
+    bench_opponent: str = "greedy"
+    bench_games: int = 200
+    gate_games: int = 300
+    target: str = "predict"  # predict | maximise
+    opponent: str = "greedy"  # a POLICIES name, or "self" for the ladder
+    rounds: int = 1
+    variant: str = "predict"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_all(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("features") == "ALL":
+            data = {**data, "features": list(BoardFeatures._fields)}
+        return data
+
+
+VARIANTS: dict[str, dict[str, object]] = {
     "predict": {"target": "predict", "opponent": "greedy", "rounds": 1},
     "maximise": {"target": "maximise", "opponent": "greedy", "rounds": 1},
     "self_play": {"target": "maximise", "opponent": "self", "rounds": 3},
@@ -55,7 +81,7 @@ VARIANTS = {
         "target": "maximise",
         "opponent": "self",
         "rounds": 4,
-        "features": "ALL",  # resolved below: every BoardFeatures term
+        "features": "ALL",
         "maximise": {
             "iterations": 3,
             "population": 8,
@@ -80,17 +106,33 @@ VARIANTS = {
         "eval_players": [4],
         "games_multi": 200,
     },
+    "smoke": {
+        "target": "maximise",
+        "opponent": "greedy",
+        "rounds": 1,
+        "maximise": {
+            "iterations": 1,
+            "population": 2,
+            "elites": 1,
+            "eval_games": 2,
+            "sigma": 0.3,
+        },
+        "probe_games": 2,
+        "eval_players": [2],
+        "bench_games": 2,
+        "gate_games": 2,
+    },
 }
 
 
 def main() -> None:
     variant = sys.argv[1] if len(sys.argv) > 1 else "predict"
     if variant not in VARIANTS:
-        raise SystemExit(f"usage: run.py [{'|'.join(VARIANTS)}]")
-    config = {**BASE, **VARIANTS[variant], "variant": variant}
-    if config["features"] == "ALL":
-        config["features"] = list(BoardFeatures._fields)
-    run_experiment(start_run(Path(__file__).parent, config), config)
+        raise SystemExit(f"usage: run.py [{'|'.join(VARIANTS)}] [key=value ...]")
+    cfg = ValueFittingConfig.resolve(
+        {**VARIANTS[variant], "variant": variant}, overrides=sys.argv[2:]
+    )
+    run_experiment(start_run(Path(__file__).parent, cfg.dump()), cfg.dump())
 
 
 if __name__ == "__main__":

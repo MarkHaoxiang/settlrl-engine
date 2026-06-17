@@ -6,8 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from settlrl_agents.policy import PolicyPrior
-from settlrl_agents.search.lookahead import make_greedy
-from settlrl_agents.search.mcts import make_mcts
+from settlrl_agents.search import make_search
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.board import Board, make_board
 from settlrl_engine.env import BatchedSettlrlEnv
@@ -66,11 +65,11 @@ def test_stand_ins_satisfy_the_seams_and_play_legally() -> None:
         *[env.belief_view(i) for i in range(2)],
     )
     for policy in (
-        make_greedy(value),
-        make_mcts(
+        make_search(value, num_simulations=0, propose_rate=0.5),
+        make_search(
             value,
             prior=prior,
-            num_worlds=1,
+            num_trees=1,
             num_simulations=8,
             max_num_considered_actions=8,
         ),

@@ -211,3 +211,6 @@ node_modules/
 
 # Experiment run outputs (reproducible from each run's manifest)
 runs/
+
+# wandb local run cache (experiment 0003 training logs)
+wandb/
