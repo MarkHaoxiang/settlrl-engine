@@ -196,6 +196,13 @@ export default function NewGameDialog({
 
   const reroll = () => setSeed(Math.floor(Math.random() * 65536));
 
+  // Switching the number layout rerolls the map too, so the change is visibly a
+  // fresh board rather than the same tiles with shuffled tokens.
+  const pickPlacement = (p: NumberPlacement) => {
+    setNumberPlacement(p);
+    reroll();
+  };
+
   const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
 
   const setSeat = (i: number, seat: SeatConfig) =>
@@ -298,7 +305,7 @@ export default function NewGameDialog({
             label="Numbers"
             options={["random", "spiral"] as const}
             value={numberPlacement}
-            onChange={setNumberPlacement}
+            onChange={pickPlacement}
             optionTitle={(o) => PLACEMENT_HELP[o]}
           />
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
