@@ -211,8 +211,13 @@ class GraphNet(eqx.Module):
         return self.head(jnp.concatenate([readout, g]))
 
 
-# Named presets: ``base`` is plain message passing + mean readout (the closest to
-# the legacy ``gnn``); each other flips one lever, plus a stacked ``full``.
+# Named presets: ``gn_base`` is plain message passing + mean readout (the closest
+# to the legacy ``gnn``); each other flips one lever, plus a stacked ``full``.
+# Experiment 0003's ablation recommends ``gn_global`` as the value+policy net:
+# the robust all-rounder across local/global/structural targets. Attention
+# (``gn_gat``) leads on the global win target but is catastrophic on structural
+# counting (longest road), so it is rejected for a net that must read structure;
+# GraphNorm and JK don't pay on this 54-node graph. See report.md.
 PRESETS: dict[str, GraphNetConfig] = {
     "gn_base": GraphNetConfig(
         conv="mpnn", norm="none", global_node=False, readout="mean"

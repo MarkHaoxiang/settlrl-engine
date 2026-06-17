@@ -97,3 +97,9 @@ engineered-feature MLP (heuristic R² 0.978 vs 0.996; win AUC 0.825 vs 0.834),
 while a flat MLP on the same raw inputs is ≈chance — structure is what makes raw
 board features usable. Not yet promoted to a shipped value; close the win gap,
 then gate `lookahead(gnn)` through `settlrl-agents bench`.
+
+The `road` target (seat-0 longest-road trail length) and the `ablate_*`
+variants drive the GraphNet lever ablation over `settlrl_learn.graphnet.PRESETS`
+(report.md): GNNs ≫ engineered on the structural target (R² 0.99 vs 0.83),
+attention is the wrong bias for counting tasks, and `gn_global` (sum-MPNN +
+global node + multi readout + LayerNorm) is the recommended net.
