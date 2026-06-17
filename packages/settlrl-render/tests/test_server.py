@@ -36,9 +36,7 @@ def client(registry: GameRegistry) -> Iterator[TestClient]:
     # client's lifetime, so background driver tasks and the per-game asyncio
     # locks share a single loop across requests. Bot-backed so the bot seats
     # these tests use validate and play (the server runs no bots itself).
-    with TestClient(
-        create_app(registry, warm=False, providers=bot_registry())
-    ) as client:
+    with TestClient(create_app(registry, providers=bot_registry())) as client:
         yield client
 
 
@@ -75,16 +73,14 @@ def test_create_claim_first_takes_one_seat_and_leaves_the_rest(
 
 
 def test_full_registry_of_active_games_returns_503() -> None:
-    with TestClient(create_app(GameRegistry(max_games=1), warm=False)) as client:
+    with TestClient(create_app(GameRegistry(max_games=1))) as client:
         assert client.post("/api/games", json={"seed": 0}).status_code == 200
         assert client.post("/api/games", json={"seed": 0}).status_code == 503
 
 
 def test_create_queues_past_the_active_cap() -> None:
     # max_active=1: the second creator gets a 202 with their place in line.
-    with TestClient(
-        create_app(GameRegistry(max_games=8, max_active=1), warm=False)
-    ) as client:
+    with TestClient(create_app(GameRegistry(max_games=8, max_active=1))) as client:
         body = {"seed": 0, "n_players": 2, "seats": ["human", "human"]}
         assert client.post("/api/games", json=body).status_code == 200
         queued = client.post("/api/games", json=body)
@@ -222,7 +218,7 @@ def test_events_stream_snapshot_now_then_on_every_change() -> None:
     # The never-ending stream needs a real server: TestClient buffers whole
     # responses, so it would block on the open stream forever.
     with (
-        _live_server(create_app(GameRegistry(), warm=False)) as port,
+        _live_server(create_app(GameRegistry())) as port,
         httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http,
     ):
         # All-human so no bot driver mutates the game mid-test.
@@ -241,7 +237,7 @@ def test_events_stream_snapshot_now_then_on_every_change() -> None:
 
 def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
     with TestClient(
-        create_app(GameRegistry(), bot_delay=0.0, warm=False, providers=bot_registry())
+        create_app(GameRegistry(), bot_delay=0.0, providers=bot_registry())
     ) as client:
         game, _ = _create(client, n_players=2, seats=["random", "random"])
         deadline = time.monotonic() + 120
@@ -256,7 +252,7 @@ def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
 def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
     # All human, but a turn timeout is set: nobody acts, so the driver auto-
     # plays the idle turn and the game advances on its own.
-    with TestClient(create_app(turn_timeout=0.2, warm=False)) as c:
+    with TestClient(create_app(turn_timeout=0.2)) as c:
         game = c.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
             "id"
         ]
@@ -272,7 +268,7 @@ def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
 
 def test_no_turn_timeout_leaves_an_idle_human_turn_alone() -> None:
     # Default (no timeout): an all-human game has no driver and never self-plays.
-    with TestClient(create_app(warm=False)) as c:
+    with TestClient(create_app()) as c:
         game = c.post("/api/games", json={"seed": 0, "seats": ["human"] * 4}).json()[
             "id"
         ]
@@ -336,7 +332,7 @@ def _finished_bot_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
     """A fast all-bot app whose game the in-process driver has played to the end,
     yielding the client and the finished game's id."""
     with TestClient(
-        create_app(GameRegistry(), bot_delay=0.0, warm=False, providers=bot_registry())
+        create_app(GameRegistry(), bot_delay=0.0, providers=bot_registry())
     ) as client:
         game, _ = _create(client, seed=seed, n_players=2, seats=["random", "random"])
         deadline = time.monotonic() + 120
@@ -351,7 +347,7 @@ def _finished_bot_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
 
 def test_record_and_replay_export_finished_games_only() -> None:
     with TestClient(
-        create_app(GameRegistry(), bot_delay=0.0, warm=False, providers=bot_registry())
+        create_app(GameRegistry(), bot_delay=0.0, providers=bot_registry())
     ) as client:
         game, _ = _create(client, n_players=2, seats=["random", "random"])
         # A live game's record would reconstruct hidden hands when replayed.
@@ -392,7 +388,8 @@ def test_replay_rejects_bad_records(client: TestClient) -> None:
                 "seed": 1,
                 "n_players": 4,
                 "number_placement": "random",
-                "moves": [{"player": 0, "flat": 9}],
+                # An action illegal at the opening (a roll, not a setup move).
+                "moves": [{"player": 0, "flat": 126}],
                 "winner": None,
             },
         ).status_code
@@ -401,7 +398,7 @@ def test_replay_rejects_bad_records(client: TestClient) -> None:
 
 
 def test_oversized_request_body_is_rejected_before_parsing() -> None:
-    with TestClient(create_app(GameRegistry(), max_body_bytes=100, warm=False)) as c:
+    with TestClient(create_app(GameRegistry(), max_body_bytes=100)) as c:
         big = c.post("/api/replay", json={"pad": "x" * 500})
         assert big.status_code == 413
         # A small body still reaches the route (and is rejected on its merits).

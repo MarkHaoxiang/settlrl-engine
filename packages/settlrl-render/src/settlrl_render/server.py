@@ -8,7 +8,6 @@ their own registries instead of sharing module state.
 
 import asyncio
 import os
-import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,25 +24,9 @@ from settlrl_render.api.deps import Deps, ReplaySlot, needs_driver
 from settlrl_render.bots.providers import ProviderRegistry
 from settlrl_render.game.driver import start_game_driver
 from settlrl_render.game.games import GameHandle, GameRegistry, restore_games
-from settlrl_render.game.session import GameSession
 from settlrl_render.storage.auth import Auth
 from settlrl_render.storage.db import Database
 from settlrl_render.storage.store import GameStore
-
-
-def _warm_jit_cache() -> None:
-    """Play throwaway moves so XLA compiles before the first real click.
-
-    The first engine step in a fresh process compiles for a couple of seconds,
-    once per seat count (the compiled shapes depend on n_players). Scratch
-    sessions take that hit at startup instead of the user's first placement;
-    the in-process jit cache is shared, so live sessions then step in
-    milliseconds.
-    """
-    for n_players in (4, 2):
-        scratch = GameSession(seed=0, n_players=n_players)
-        scratch.apply(int(scratch.legal_flat()[0]))  # compiles the env step
-        scratch.auto_step()  # compiles a second step + the random fallback
 
 
 def _build_registry(
@@ -81,7 +64,6 @@ def create_app(
     state_dir: str | None = None,
     turn_timeout: float = 0.0,
     max_active: int = 16,
-    warm: bool = True,
     user_db: str | None = None,
     admin_emails: frozenset[str] = frozenset(),
     providers: ProviderRegistry | None = None,
@@ -96,11 +78,9 @@ def create_app(
     passed). ``turn_timeout`` (seconds, 0 = off) auto-plays a human turn that has
     gone idle that long, so an abandoned game still finishes. ``max_active`` caps
     how many games run at once; beyond it, new creators are queued
-    (``POST /api/games`` returns their place in line). ``warm`` pre-compiles the
-    engine at startup (off in tests, which compile lazily and don't want the
-    background contention). ``user_db`` overrides the shared SQLite path
-    (defaults to ``settlrl.db`` under ``state_dir``, else in-memory);
-    ``admin_emails`` are granted admin on register / login.
+    (``POST /api/games`` returns their place in line). ``user_db`` overrides the
+    shared SQLite path (defaults to ``settlrl.db`` under ``state_dir``, else
+    in-memory); ``admin_emails`` are granted admin on register / login.
     """
     database = _database(user_db, state_dir)
     registry, store = _build_registry(games, database, state_dir, max_active)
@@ -131,8 +111,6 @@ def create_app(
         if store is not None:
             store.start()
             await restore_games(registry, store)
-        if warm:
-            threading.Thread(target=_warm_jit_cache, daemon=True).start()
         # Resume pacing/timeouts for any games replayed in from the store.
         for handle in registry.all_handles():
             if needs_driver(handle, turn_timeout):

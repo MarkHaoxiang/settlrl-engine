@@ -10,14 +10,14 @@ import json
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
-from settlrl_engine.record import GameRecord, ReplayError
 from starlette.responses import Response
 
 from settlrl_render.api.deps import Deps, ReplaySlot
 from settlrl_render.api.models import ReplayStateModel
+from settlrl_render.game.record import GameRecord, ReplayError
 from settlrl_render.game.replay import ReplaySession
 
-# Replaying a submitted record steps the engine once per move; cap the count so
+# Replaying a submitted record steps the reference once per move; cap the count so
 # an untrusted POST /api/replay can't hand us an arbitrarily long game to grind
 # through. Well above any real game (random games run a few thousand moves).
 _MAX_REPLAY_MOVES = 20_000
@@ -40,9 +40,9 @@ def build(deps: Deps) -> APIRouter:
 
     @router.post("/api/replay")
     async def post_replay(doc: dict[str, object]) -> ReplayStateModel:
-        """Load a game record (the ``settlrl_engine.record`` JSON document) for
-        replay; returns the opening state. ``422`` if the record is malformed
-        or fails replay validation."""
+        """Load a game record (the ``GameRecord`` JSON document) for replay;
+        returns the opening state. ``422`` if the record is malformed or fails
+        replay validation."""
         try:
             record = GameRecord.from_json(json.dumps(doc))
         except (KeyError, TypeError, ValueError) as exc:

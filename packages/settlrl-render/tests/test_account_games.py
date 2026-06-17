@@ -18,9 +18,7 @@ from settlrl_render.server import create_app
 @pytest.fixture()
 def client() -> Iterator[TestClient]:
     # Bot-backed so the non-human seats these tests use validate and play.
-    with TestClient(
-        create_app(GameRegistry(), warm=False, providers=bot_registry())
-    ) as client:
+    with TestClient(create_app(GameRegistry(), providers=bot_registry())) as client:
         yield client
 
 
@@ -123,7 +121,7 @@ def test_account_seat_ownership_survives_a_restart() -> None:
     """The seat<->account tie is journalled, so a restored game still knows it."""
     with tempfile.TemporaryDirectory() as state_dir:
         with TestClient(
-            create_app(state_dir=state_dir, warm=False, providers=bot_registry())
+            create_app(state_dir=state_dir, providers=bot_registry())
         ) as first:
             token = _token(first, "a@example.com")
             game = first.post(
@@ -134,7 +132,7 @@ def test_account_seat_ownership_survives_a_restart() -> None:
 
         # A fresh app restores games + accounts from the same state dir.
         with TestClient(
-            create_app(state_dir=state_dir, warm=False, providers=bot_registry())
+            create_app(state_dir=state_dir, providers=bot_registry())
         ) as restored:
             token2 = str(
                 restored.post(

@@ -16,9 +16,7 @@ from settlrl_render.server import create_app
 @pytest.fixture()
 def client() -> Iterator[TestClient]:
     with TestClient(
-        create_app(
-            GameRegistry(), warm=False, admin_emails=frozenset({"boss@example.com"})
-        )
+        create_app(GameRegistry(), admin_emails=frozenset({"boss@example.com"}))
     ) as client:
         yield client
 

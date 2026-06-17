@@ -1,40 +1,29 @@
 """Geometry smoke check for the renderer's coordinate tables.
 
-``convert.py`` now builds its tile / vertex / edge / port coordinate tables
-directly from the engine's authoritative host-side lookups
-(``vertex_cube`` / ``edge_cubes`` / ``tile_cube`` / ``PORT_V``), so they can no
-longer drift from the engine. This test just sanity-checks shapes/counts and
-that the derived tables are internally consistent (no stray placeholders).
+``convert.py`` builds its tile / vertex / edge coordinate tables from
+``settlrl_reference.board``'s cube lookups, so they can no longer drift. This
+sanity-checks counts and internal consistency (no stray placeholders).
 """
 
-from settlrl_engine.board.layout import N_EDGES, N_PORTS, N_TILES, N_VERTICES
-from settlrl_render.api.convert import (
-    _TILE_CUBES,
-    EDGE_VERTICES,
-    PORT_VERTEX_COORDS,
-    TILE_COORDS,
-    VERTEX_COORDS,
-)
+from settlrl_reference import board as rb
+from settlrl_render.api.convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS
 
 
-def test_counts_match_engine() -> None:
-    assert len(_TILE_CUBES) == N_TILES
-    assert len(TILE_COORDS) == N_TILES
-    assert len(VERTEX_COORDS) == N_VERTICES
-    assert len(EDGE_VERTICES) == N_EDGES
-    assert len(PORT_VERTEX_COORDS) == N_PORTS
+def test_counts_match_reference() -> None:
+    assert len(TILE_COORDS) == rb.N_TILES
+    assert len(VERTEX_COORDS) == rb.N_VERTICES
+    assert len(EDGE_VERTICES) == rb.N_EDGES
 
 
 def test_tables_are_well_formed() -> None:
     # Tile axial coords are the (q, r) projection of the tile cube centres.
-    for (q, r), cube in zip(TILE_COORDS, _TILE_CUBES, strict=True):
-        assert (q, r) == cube[:2]
-    # Edges reference valid vertex indices (and aren't self-loops).
-    for v1, v2 in EDGE_VERTICES:
-        assert 0 <= v1 < N_VERTICES and 0 <= v2 < N_VERTICES
-        assert v1 != v2
-    # Vertices are cube triples summing to +/-1; ports carry two distinct ones.
+    for t, (q, r) in enumerate(TILE_COORDS):
+        cq, cr, _ = rb.tile_cube(t)
+        assert (q, r) == (cq, cr)
+    # Vertices are distinct cube triples summing to +/-1.
+    assert len(set(VERTEX_COORDS)) == rb.N_VERTICES
     for cube in VERTEX_COORDS:
         assert sum(cube) in (1, -1)
-    for a, b in PORT_VERTEX_COORDS:
-        assert a != b
+    # Every edge joins two real, distinct vertices.
+    for a, b in EDGE_VERTICES:
+        assert 0 <= a < rb.N_VERTICES and 0 <= b < rb.N_VERTICES and a != b

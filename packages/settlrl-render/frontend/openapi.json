@@ -453,7 +453,7 @@
   "/api/replay": {
    "post": {
     "summary": "Post Replay",
-    "description": "Load a game record (the ``settlrl_engine.record`` JSON document) for\nreplay; returns the opening state. ``422`` if the record is malformed\nor fails replay validation.",
+    "description": "Load a game record (the ``GameRecord`` JSON document) for replay;\nreturns the opening state. ``422`` if the record is malformed or fails\nreplay validation.",
     "operationId": "post_replay_api_replay_post",
     "requestBody": {
      "content": {

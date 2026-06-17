@@ -30,7 +30,7 @@ from sqlalchemy import delete, select
 from settlrl_render.storage.db import Database, GameEvent, GameRow
 
 if TYPE_CHECKING:
-    from settlrl_engine.record import Move
+    from settlrl_render.game.record import Move
 
 
 @dataclass(frozen=True)

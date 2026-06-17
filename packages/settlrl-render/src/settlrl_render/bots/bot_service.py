@@ -28,6 +28,7 @@ import jax
 from fastapi import FastAPI, HTTPException
 
 from settlrl_render.bots.bots import bot_act, bot_catalog
+from settlrl_render.bots.bridge import engine_env, renderer_flat
 from settlrl_render.bots.providers import ActRequest, ActResponse
 from settlrl_render.game.session import (
     HUMAN,
@@ -78,18 +79,22 @@ class _SessionCache:
 
 def _choose(session: GameSession, seat: int) -> int | None:
     """The flat move the seat's bot plays in ``session`` (None when no bot move
-    is due: the game is over, the seat is human, or it has no legal move)."""
+    is due: the game is over, the seat is human, or it has no legal move).
+
+    The agent reasons on an engine env bridged from the reference game, then its
+    chosen engine action is translated back to the renderer's flat index.
+    """
     if session.terminal() or session.seats[seat] == HUMAN:
         return None
-    if session.legal_flat().size == 0:
+    if not session.legal_flat():
         return None
-    # Reproducible per position, independent of the engine's own randomness.
+    env = engine_env(session.game, session.belief_state)
+    # Reproducible per position, independent of the bridged env's own key.
     key = jax.random.fold_in(jax.random.key(0), len(session.moves_flat()))
-    return int(
-        bot_act(
-            session.seats[seat], session.seat_params[seat], key, session.env._env, seat
-        )
+    engine_flat = bot_act(
+        session.seats[seat], session.seat_params[seat], key, env, seat
     )
+    return renderer_flat(engine_flat)
 
 
 def create_bot_app() -> FastAPI:

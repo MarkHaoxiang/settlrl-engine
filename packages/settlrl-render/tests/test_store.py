@@ -41,7 +41,7 @@ def test_session_setup_captures_its_seats() -> None:
 def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
     # First boot: create a game (with a bot seat), play a move, leave a chat line.
     with TestClient(
-        create_app(state_dir=str(tmp_path), warm=False, providers=bot_registry())
+        create_app(state_dir=str(tmp_path), providers=bot_registry())
     ) as c1:
         doc = c1.post(
             "/api/games",
@@ -64,7 +64,7 @@ def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
 
     # Second boot from the same dir: the game is back, at the same position.
     with TestClient(
-        create_app(state_dir=str(tmp_path), warm=False, providers=bot_registry())
+        create_app(state_dir=str(tmp_path), providers=bot_registry())
     ) as c2:
         after = c2.get(f"/api/games/{game}", headers=hdr).json()
         assert after["id"] == game
@@ -98,9 +98,7 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
     # First boot: an all-bot game plays a few moves, journalled, then we shut
     # down cleanly (draining the queued writes).
     with TestClient(
-        create_app(
-            state_dir=str(tmp_path), bot_delay=0.0, warm=False, providers=bot_registry()
-        )
+        create_app(state_dir=str(tmp_path), bot_delay=0.0, providers=bot_registry())
     ) as c1:
         game = c1.post(
             "/api/games",
@@ -123,9 +121,7 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
     # which plays the game out to the end (random fallback even before the bot
     # service is re-registered).
     with TestClient(
-        create_app(
-            state_dir=str(tmp_path), bot_delay=0.0, warm=False, providers=bot_registry()
-        )
+        create_app(state_dir=str(tmp_path), bot_delay=0.0, providers=bot_registry())
     ) as c2:
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:

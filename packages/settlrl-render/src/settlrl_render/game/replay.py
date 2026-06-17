@@ -1,19 +1,18 @@
 """A loaded game record, replayed into per-move snapshots for the Replay view.
 
-``ReplaySession`` takes a ``settlrl_engine.record.GameRecord`` (e.g. the JSON
-from ``GET /api/game/record``), replays it through the engine once, and keeps
-the wire-format board after every move plus a move log -- so scrubbing to any
-point of the game is a lookup, not a re-simulation. Replaying validates the
-record (``settlrl_engine.record.ReplayError`` on tampering / drift).
+``ReplaySession`` takes a :class:`GameRecord` (e.g. the JSON from
+``GET /api/game/record``), replays it on a reference game once, and keeps the
+wire-format board after every move plus a move log -- so scrubbing to any point
+of the game is a lookup, not a re-simulation. Replaying validates the record
+(:class:`ReplayError` on tampering / drift).
 """
 
 from __future__ import annotations
 
-from settlrl_engine.record import GameRecord, initial_board, replay
-
 from settlrl_render.api.actions import decode_actions
 from settlrl_render.api.convert import board_to_model
 from settlrl_render.api.models import BoardModel, LogEntryModel, ReplayStateModel
+from settlrl_render.game.record import GameRecord, initial_game, replay
 
 # Refuse pathologically long records (snapshots are kept in memory).
 _MAX_MOVES = 20_000
@@ -29,12 +28,12 @@ class ReplaySession:
         if len(record.moves) > _MAX_MOVES:
             raise ValueError(f"record has more than {_MAX_MOVES} moves")
         self.record = record
-        self._boards: list[BoardModel] = [board_to_model(initial_board(record))]
+        self._boards: list[BoardModel] = [board_to_model(initial_game(record))]
         self._log: list[LogEntryModel] = []
-        for i, (move, board) in enumerate(
+        for i, (move, game) in enumerate(
             zip(record.moves, replay(record), strict=True)
         ):
-            self._boards.append(board_to_model(board))
+            self._boards.append(board_to_model(game))
             action = decode_actions([move.flat])[0]
             text = f"rolled {move.dice}" if move.dice is not None else action.label
             self._log.append(

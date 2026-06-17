@@ -23,11 +23,7 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
     session = handle.session
     status = session.status()
     status.your_turn = (not status.terminal) and status.acting_player in owned
-    actions = (
-        decode_actions([int(f) for f in session.legal_flat()])
-        if status.your_turn
-        else []
-    )
+    actions = decode_actions(session.legal_flat()) if status.your_turn else []
     observer = (
         status.acting_player
         if status.acting_player in owned
@@ -35,7 +31,7 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
         if owned
         else None
     )
-    board = board_to_model(session.board)
+    board = board_to_model(session.game)
     if not status.terminal:
         for player in board.players:
             if player.player not in owned:

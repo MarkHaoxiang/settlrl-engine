@@ -142,7 +142,6 @@ def test_admin_register_provider_requires_admin() -> None:
         create_app(
             GameRegistry(),
             providers=reg,
-            warm=False,
             admin_emails=frozenset({"a@x.com"}),
         )
     ) as client:
@@ -202,7 +201,6 @@ def remote_only_client() -> Iterator[TestClient]:
             GameRegistry(),
             providers=reg,
             bot_delay=0.0,
-            warm=False,
             admin_emails=frozenset({"a@x.com"}),
         )
     ) as client:
@@ -237,7 +235,6 @@ def test_remote_failure_falls_back_and_game_progresses() -> None:
             GameRegistry(),
             providers=reg,
             bot_delay=0.0,
-            warm=False,
             admin_emails=frozenset({"a@x.com"}),
         )
     ) as client:

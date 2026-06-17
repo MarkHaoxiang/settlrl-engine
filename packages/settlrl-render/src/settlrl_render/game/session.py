@@ -1,27 +1,27 @@
-"""A single live Settlrl game, driven through the engine's AEC wrapper.
+"""A single live Settlrl game, backed by the plain-Python ``settlrl_reference``.
 
-``GameSession`` wraps ``SettlrlAECEnv``: each seat is a human (hotseat) or a bot
-played by a remote bot service (:mod:`settlrl_render.bots.providers`) — the game
-server runs no bot policies in-process. It exposes the board, the acting seat's
-legal flat actions, a status snapshot, the chat / move log, a replayable
-``GameRecord`` export, and :meth:`auto_step` (a random legal move) for advancing
-a stalled turn or standing in for an unreachable bot.
+``GameSession`` wraps a reference ``Game``: each seat is a human (hotseat) or a
+bot played by a remote bot service (:mod:`settlrl_render.bots.providers`) — the
+game server runs no bot policies in-process. It owns a seeded RNG that samples
+the stochastic outcomes the game's actions take (dice, dev draws, steals), so a
+game is reproducible from its seed and its flat move trace. It exposes the
+board, the acting seat's legal flat actions, a status snapshot, the chat / move
+log, card counting, a replayable ``GameRecord`` export, and :meth:`auto_step`
+(a random legal move) for advancing a stalled turn or standing in for an
+unreachable bot.
 """
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from random import Random
 from typing import Literal, cast
 
-import jax
-import numpy as np
-from settlrl_engine.board import Board
-from settlrl_engine.board.state import NO_INDEX, GamePhase
-from settlrl_engine.env.aec import SettlrlAECEnv
-from settlrl_engine.record import GameRecord, Move
+import settlrl_reference as ref
 
-from settlrl_render.api.actions import decode_actions
+from settlrl_render.api.actions import N_FLAT, decode_actions, legal_flats, to_action
 from settlrl_render.api.convert import _RESOURCE_NAMES
 from settlrl_render.api.models import (
     BeliefModel,
@@ -31,6 +31,7 @@ from settlrl_render.api.models import (
     ResourceCounts,
     TradeOfferModel,
 )
+from settlrl_render.game.record import GameRecord, Move
 
 # A seat assignment: "human", a bot kind, or a configured bot
 # {"kind": name, "params": {knob: value}}.
@@ -51,8 +52,7 @@ _LOG_CAP = 500
 @dataclass(frozen=True)
 class GameSetup:
     """What determines a fresh game; with the move trace it reconstructs one
-    exactly (the model behind ``settlrl_engine.record``). Round-trips through a
-    plain dict for persistence."""
+    exactly. Round-trips through a plain dict for persistence."""
 
     seed: int
     n_players: int
@@ -83,7 +83,7 @@ class IllegalActionError(ValueError):
 
 
 class GameSession:
-    """A live game behind the single-game AEC env.
+    """A live game over a reference ``Game``.
 
     ``n_players`` (2..4) is how many seats the game has. ``seats`` assigns a
     controller to every seat: ``"human"`` or a remote bot kind (default: all
@@ -106,20 +106,12 @@ class GameSession:
         cls, setup: GameSetup, external_kinds: frozenset[str] = frozenset()
     ) -> GameSession:
         """A fresh game at its opening position (replay its moves to advance)."""
-        session = cls(
+        return cls(
             seed=setup.seed,
             n_players=setup.n_players,
             seats=setup.seats,
             external_kinds=external_kinds,
         )
-        if setup.number_placement != "random":  # the ctor already used "random"
-            session.reset(
-                setup.seed,
-                number_placement=setup.number_placement,
-                seats=setup.seats,
-                external_kinds=external_kinds,
-            )
-        return session
 
     def reset(
         self,
@@ -135,10 +127,11 @@ class GameSession:
         every seat (None means all human) and must have ``n_players`` entries,
         each ``"human"`` or ``{"kind": name, "params": {...}}`` (a bare kind
         string is shorthand). Every non-human kind is a remote bot from
-        ``external_kinds`` — the kinds a registered provider serves
-        (:mod:`settlrl_render.bots.providers`); their params are stored verbatim
-        (the provider validates and plays them; the server runs no bots).
-        ``external_kinds`` None keeps the current set.
+        ``external_kinds`` — the kinds a registered provider serves; their
+        params are stored verbatim (the provider validates and plays them; the
+        server runs no bots). ``external_kinds`` None keeps the current set.
+        (``number_placement`` is kept for the setup wire; the reference board
+        is always randomly placed.)
         """
         if n_players is not None:
             self.n_players = n_players
@@ -165,8 +158,6 @@ class GameSession:
                     raise ValueError("a human seat takes no params")
                 all_params.append({})
             elif kind in self._external_kinds:
-                # A remote provider's kind: stored verbatim, validated and played
-                # there rather than on the server.
                 all_params.append(dict(raw))
             else:
                 raise ValueError(f"unknown seat kind: {kind!r}")
@@ -174,32 +165,33 @@ class GameSession:
         self.seat_params: list[dict[str, Knob]] = all_params
         self.seed = seed
         self.number_placement: Literal["random", "spiral"] = number_placement
-        self.env = SettlrlAECEnv(
-            seed=seed,
-            n_players=self.n_players,
-            number_placement=number_placement,
-            # Always on: belief bots read it, and the UI's card-counting panel
-            # serves it to human seats (a tracked step costs microseconds).
-            track_beliefs=True,
+        # One seeded RNG drives the board and every later stochastic outcome, so
+        # the game is reproducible from (seed, flat moves).
+        self._rng = Random(seed)
+        layout = ref.random_layout(self._rng)
+        self.game = ref.Game.new(
+            layout, ref.desert_tile(layout), n_players=self.n_players
         )
-        # Dedicated key so bot choices are reproducible per seed and independent
-        # of the engine's own randomness.
-        self._key = jax.random.key(seed)
+        self._belief = ref.Belief.new(self.n_players)
         self._log: list[LogEntryModel] = []
         self._log_id = 0
         self._win_logged = False
-        # Full move trace for GameRecord export (unlike the capped chat log).
         self._moves: list[Move] = []
 
-    # -- engine views -----------------------------------------------------
-
-    @property
-    def board(self) -> Board:
-        """The underlying batched ``(BoardLayout, BoardState)`` (one game)."""
-        return self.env._env.board
+    # -- views ------------------------------------------------------------
 
     def acting_seat(self) -> int:
-        return int(self.env._env.agent_selection[0])
+        """Whose move it is: an owing player during discard, the partner during
+        a trade response, otherwise the current player."""
+        g = self.game
+        if g.phase is ref.Phase.DISCARD:
+            return next(
+                (p for p in range(g.n_players) if g.pending_discard[p] > 0),
+                g.current_player,
+            )
+        if g.phase is ref.Phase.TRADE_RESPONSE and g.trade_partner is not None:
+            return g.trade_partner
+        return g.current_player
 
     @property
     def moves_played(self) -> int:
@@ -216,6 +208,11 @@ class GameSession:
         return [m.flat for m in self._moves]
 
     @property
+    def belief_state(self) -> ref.Belief:
+        """The raw card-counting tracker (for the bot-service engine bridge)."""
+        return self._belief
+
+    @property
     def setup(self) -> GameSetup:
         """This game's reconstructable setup (seat params fold back into the
         ``{"kind", "params"}`` form ``reset`` accepts)."""
@@ -228,12 +225,11 @@ class GameSession:
         return GameSetup(self.seed, self.n_players, self.number_placement, seats)
 
     def terminal(self) -> bool:
-        return all(self.env.terminations.values())
+        return self.game.phase is ref.Phase.GAME_OVER
 
-    def legal_flat(self) -> np.ndarray:
+    def legal_flat(self) -> list[int]:
         """Flat indices of the actions legal for the acting player right now."""
-        mask = np.asarray(self.env.observe(self.env.agent_selection)["action_mask"])
-        return np.flatnonzero(mask)
+        return legal_flats(self.game)
 
     def belief(self, observer: int | None = None) -> BeliefModel | None:
         """Card counting from ``observer``'s perspective (default: the acting
@@ -249,19 +245,18 @@ class GameSession:
             )
         if observer is None:
             return None
-        beliefs = self.env._env.beliefs
-        lo = np.asarray(beliefs.res_lo[0, observer])
-        hi = np.asarray(beliefs.res_hi[0, observer])
+        lo = self._belief.res_lo[observer]
+        hi = self._belief.res_hi[observer]
         return BeliefModel(
             observer=observer,
             players=[
                 PlayerBeliefModel(
                     player=p,
                     res_lo=ResourceCounts(
-                        **{n: int(lo[p, i]) for i, n in enumerate(_RESOURCE_NAMES)}
+                        **{n: lo[p][i] for i, n in enumerate(_RESOURCE_NAMES)}
                     ),
                     res_hi=ResourceCounts(
-                        **{n: int(hi[p, i]) for i, n in enumerate(_RESOURCE_NAMES)}
+                        **{n: hi[p][i] for i, n in enumerate(_RESOURCE_NAMES)}
                     ),
                 )
                 for p in range(self.n_players)
@@ -271,13 +266,47 @@ class GameSession:
 
     # -- moves ------------------------------------------------------------
 
+    def _resolve(
+        self, action: ref.Action
+    ) -> tuple[ref.Action, int | None, int | None, int | None]:
+        """Sample a stochastic action's outcome from the RNG; returns the filled
+        action and the (dice, drawn, stolen) values to record."""
+        if isinstance(action, ref.Roll):
+            dice = ref.roll_dice(self._rng)
+            return ref.Roll(dice), dice, None, None
+        if isinstance(action, ref.BuyDevelopmentCard):
+            card = ref.draw_dev_card(self.game, self._rng)
+            return ref.BuyDevelopmentCard(card), None, int(card), None
+        if (
+            isinstance(action, ref.MoveRobber | ref.PlayKnight)
+            and action.victim is not None
+        ):
+            stolen = ref.steal(self.game, action.victim, self._rng)
+            return (
+                type(action)(action.tile, action.victim, stolen),
+                None,
+                None,
+                int(stolen),
+            )
+        return action, None, None, None
+
+    def _play(self, seat: int, flat: int, action: ref.Action) -> None:
+        """Resolve outcomes, apply, advance the belief, and log one move."""
+        before = copy.deepcopy(self.game)
+        resolved, dice, drawn, stolen = self._resolve(action)
+        self.game.apply(resolved)
+        self._belief.update(before, self.game, resolved)
+        self._moves.append(Move(seat, flat, dice, drawn, stolen))
+        self._log_move(seat, flat, dice)
+
     def apply(self, flat: int) -> None:
-        """Apply the acting human's chosen flat action."""
-        if flat not in self.legal_flat():
+        """Apply the acting seat's chosen flat action."""
+        if not 0 <= flat < N_FLAT:
+            raise IllegalActionError(f"action {flat} is out of range")
+        action = to_action(flat, self.game)
+        if not self.game.is_legal(action):
             raise IllegalActionError(f"action {flat} is not legal right now")
-        seat = self.acting_seat()
-        self.env.step(int(flat))
-        self._log_move(seat, int(flat))
+        self._play(self.acting_seat(), flat, action)
 
     def auto_step(self) -> int | None:
         """Play a uniformly-random legal move for the acting seat, whatever its
@@ -287,13 +316,10 @@ class GameSession:
         if self.terminal():
             return None
         legal = self.legal_flat()
-        if legal.size == 0:
+        if not legal:
             return None
-        seat = self.acting_seat()
-        self._key, k = jax.random.split(self._key)
-        flat = int(legal[int(jax.random.randint(k, (), 0, legal.size))])
-        self.env.step(flat)
-        self._log_move(seat, flat)
+        flat = self._rng.choice(legal)
+        self._play(self.acting_seat(), flat, to_action(flat, self.game))
         return flat
 
     # -- chat / log ---------------------------------------------------------
@@ -307,8 +333,8 @@ class GameSession:
         self._push_log("chat", player=player, text=text)
 
     def record(self) -> GameRecord:
-        """The game so far as a replayable ``settlrl_engine.record.GameRecord``
-        (seats noted in ``meta``; ``winner`` is None while still running)."""
+        """The game so far as a replayable :class:`GameRecord` (seats noted in
+        ``meta``; ``winner`` is None while still running)."""
         return GameRecord(
             seed=self.seed,
             n_players=self.n_players,
@@ -339,15 +365,9 @@ class GameSession:
         if len(self._log) > _LOG_CAP:
             del self._log[: len(self._log) - _LOG_CAP]
 
-    def _log_move(self, seat: int, flat: int) -> None:
+    def _log_move(self, seat: int, flat: int, dice: int | None) -> None:
         """Log a just-played move (and the win, once the game ends)."""
         action = decode_actions([flat])[0]
-        dice = (
-            int(self.env._env._state.dice_roll[0])
-            if action.type == "roll_dice"
-            else None
-        )
-        self._moves.append(Move(player=seat, flat=flat, dice=dice))
         text = f"rolled {dice}" if dice is not None else action.label
         self._push_log("move", player=seat, action_type=action.type, text=text)
         winner = self.winner()
@@ -358,37 +378,33 @@ class GameSession:
     # -- status -----------------------------------------------------------
 
     def winner(self) -> int | None:
-        """Winning seat once the game is over (None while it's still running)."""
-        if not self.terminal():
-            return None
-        # A win only happens on the winner's own turn, so the terminal state's
-        # current player is the winner (an off-turn player may also be at 10+).
-        return int(self.env._env._state.current_player[0])
+        """Winning seat once the game is over (None while it's still running).
+
+        A win only happens on the winner's own turn, so the terminal state's
+        current player is the winner.
+        """
+        return self.game.current_player if self.terminal() else None
 
     def status(self) -> GameStatusModel:
         """A snapshot of turn flow for the wire model."""
-        state = self.env._env._state
+        g = self.game
         terminal = self.terminal()
         acting = self.acting_seat()
-        partner = int(state.trade_partner[0])
-        trade = (
-            TradeOfferModel(
-                proposer=int(state.current_player[0]),
-                partner=partner,
-                # Render games play only the flat 1:1 propose rows, so each
-                # count vector holds exactly one card.
-                give=_RESOURCE_NAMES[int(np.argmax(state.trade_give[0]))],
-                receive=_RESOURCE_NAMES[int(np.argmax(state.trade_receive[0]))],
+        trade = None
+        if g.trade_partner is not None and g.trade_give and g.trade_receive:
+            # Render games play only the 1:1 propose rows: one card each side.
+            trade = TradeOfferModel(
+                proposer=g.current_player,
+                partner=g.trade_partner,
+                give=_RESOURCE_NAMES[g.trade_give.index(1)],
+                receive=_RESOURCE_NAMES[g.trade_receive.index(1)],
             )
-            if partner != NO_INDEX
-            else None
-        )
         return GameStatusModel(
-            phase=GamePhase(int(state.phase[0])).name.lower(),
-            current_player=int(state.current_player[0]),
+            phase=g.phase.value,
+            current_player=g.current_player,
             acting_player=acting,
-            dice_roll=int(state.dice_roll[0]),
-            has_rolled=bool(state.has_rolled[0]),
+            dice_roll=g.dice_roll,
+            has_rolled=g.has_rolled,
             your_turn=(not terminal) and self.seats[acting] == HUMAN,
             terminal=terminal,
             winner=self.winner(),

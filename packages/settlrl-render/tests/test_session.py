@@ -7,7 +7,7 @@ record export.
 """
 
 import pytest
-from settlrl_engine.record import GameRecord, replay
+from settlrl_render.game.record import GameRecord, replay
 from settlrl_render.game.session import HUMAN, GameSession
 
 _BOTS = frozenset({"random"})  # an accepted "remote" kind for these tests
@@ -81,7 +81,7 @@ def test_all_bot_game_waits_on_a_bot_and_plays_out() -> None:
 def test_two_player_session_seats_two() -> None:
     sess = GameSession(seed=0, n_players=2)
     assert sess.acting_seat() == 0
-    assert len(sess.board[1].player_resources[0]) == 2  # player axis = seats
+    assert len(sess.game.players) == 2  # seated player count
 
 
 def test_belief_serves_the_hand_seat() -> None:
