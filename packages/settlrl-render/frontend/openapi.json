@@ -1172,6 +1172,71 @@
      }
     }
    }
+  },
+  "/api/preview": {
+   "get": {
+    "summary": "Get Preview",
+    "description": "The board a new game would open on, for the map picker \u2014 no game is\ncreated. Terrain and ports depend only on the seed (not the placement).",
+    "operationId": "get_preview_api_preview_get",
+    "parameters": [
+     {
+      "name": "seed",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Seed"
+      }
+     },
+     {
+      "name": "n_players",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 4,
+       "title": "N Players"
+      }
+     },
+     {
+      "name": "number_placement",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "random",
+        "spiral"
+       ],
+       "type": "string",
+       "default": "random",
+       "title": "Number Placement"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BoardModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {

@@ -48,6 +48,20 @@ const adaptGame = (wire: GameWire): GameSnapshot => ({
   board: adaptBoard(wire.board),
 });
 
+// The board a new game would open on (no game created), for the map picker.
+export async function fetchPreview(
+  seed: number,
+  nPlayers: PlayerCount,
+  numberPlacement: NumberPlacement
+): Promise<Board> {
+  const q = new URLSearchParams({
+    seed: String(seed),
+    n_players: String(nPlayers),
+    number_placement: numberPlacement,
+  });
+  return adaptBoard(await api<Schemas["BoardModel"]>(`/api/preview?${q}`));
+}
+
 export async function fetchGame(gameId: string, tokens: SeatTokens): Promise<GameSnapshot> {
   return adaptGame(await api<GameWire>(`/api/games/${gameId}`, { headers: seatHeaders(tokens) }));
 }

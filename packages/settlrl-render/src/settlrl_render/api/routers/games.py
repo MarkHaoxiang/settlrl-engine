@@ -9,16 +9,19 @@ in ``session``, seat claims in ``games``, and what a requester may see in
 
 import asyncio
 from collections.abc import AsyncIterator
+from random import Random
 from typing import Annotated, Literal
 
 import anyio.to_thread
+import settlrl_reference as ref
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.responses import Response
 
+from settlrl_render.api.convert import board_to_model
 from settlrl_render.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
-from settlrl_render.api.models import GameModel, ReplayStateModel
+from settlrl_render.api.models import BoardModel, GameModel, ReplayStateModel
 from settlrl_render.api.routers.replay import load_replay
 from settlrl_render.api.views import game_model
 from settlrl_render.game.games import QueuePosition, RegistryFullError
@@ -121,6 +124,20 @@ def build(deps: Deps) -> APIRouter:
     router = APIRouter()
     registry, bots = deps.registry, deps.bots
     CurrentUser = Annotated[User | None, Depends(deps.auth.optional_user)]
+
+    @router.get("/api/preview")
+    def get_preview(
+        seed: int = 0,
+        n_players: int = 4,
+        number_placement: Literal["random", "spiral"] = "random",
+    ) -> BoardModel:
+        """The board a new game would open on, for the map picker — no game is
+        created. Terrain and ports depend only on the seed (not the placement)."""
+        if n_players not in (2, 3, 4):
+            raise HTTPException(status_code=422, detail="n_players must be 2-4")
+        layout = ref.random_layout(Random(seed), number_placement)
+        game = ref.Game.new(layout, ref.desert_tile(layout), n_players=n_players)
+        return board_to_model(game)
 
     @router.post("/api/games")
     async def post_create(

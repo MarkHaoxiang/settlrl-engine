@@ -181,6 +181,22 @@ def test_create_same_seed_reproduces_the_board(client: TestClient) -> None:
     assert a == b
 
 
+def test_preview_returns_a_board_without_creating_a_game(client: TestClient) -> None:
+    # The map picker: a board for the seed, no game created.
+    spiral = client.get(
+        "/api/preview", params={"seed": 5, "number_placement": "spiral"}
+    ).json()
+    assert len(spiral["tiles"]) == 19 and len(spiral["ports"]) == 9 and spiral["robber"]
+    # Same seed, the other placement: same terrain, the numbers move.
+    rand = client.get(
+        "/api/preview", params={"seed": 5, "number_placement": "random"}
+    ).json()
+    terrain = [t["terrain"] for t in spiral["tiles"]]
+    assert terrain == [t["terrain"] for t in rand["tiles"]]
+    assert [t["number"] for t in spiral["tiles"]] != [t["number"] for t in rand["tiles"]]
+    assert client.get("/api/preview", params={"n_players": 5}).status_code == 422
+
+
 @contextmanager
 def _live_server(app: FastAPI) -> Iterator[int]:
     """Run ``app`` on a real uvicorn server (ephemeral port), yielding the port.

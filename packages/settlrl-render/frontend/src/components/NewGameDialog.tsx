@@ -2,9 +2,10 @@
 // number placement, seed. Choosing Bot opens an in-dialog picker listing each
 // bot kind with a description and its tunable parameters.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   fetchBots,
+  fetchPreview,
   HUMAN,
   type BotParamValue,
   type BotSpec,
@@ -13,8 +14,9 @@ import {
   type PlayerCount,
   type SeatConfig,
 } from "../lib/game";
-import { playerName } from "../lib/boardData";
+import { type Board, playerName } from "../lib/boardData";
 import { buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
+import BoardView from "./BoardView";
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
@@ -114,6 +116,9 @@ export default function NewGameDialog({
   const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
   const [numberPlacement, setNumberPlacement] = useState<NumberPlacement>("random");
   const [seed, setSeed] = useState("");
+  // The map shown when the seed box is left blank; "🎲 New map" rerolls it.
+  const [randomSeed, setRandomSeed] = useState(() => Math.floor(Math.random() * 65536));
+  const [preview, setPreview] = useState<Board | null>(null);
   // With several human seats: all on this screen, or just yours (the others
   // join through the invite link).
   const [seating, setSeating] = useState<"hotseat" | "online">("hotseat");
@@ -157,6 +162,36 @@ export default function NewGameDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, pickerSeat]);
 
+  // The concrete seed the preview shows and Start uses: the typed one, else the
+  // current random map.
+  const typed = Number(seed);
+  const effectiveSeed = seed.trim() === "" || Number.isNaN(typed) ? randomSeed : typed;
+
+  // Keep a live board preview for the chosen seed / count / number placement.
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetchPreview(effectiveSeed, nPlayers, numberPlacement)
+        .then((b) => !cancelled && setPreview(b))
+        .catch(() => !cancelled && setPreview(null));
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [effectiveSeed, nPlayers, numberPlacement]);
+
+  // Just the ocean board (no bank / seats) for the picker.
+  const previewBoard = useMemo<Board | null>(
+    () => (preview ? { ...preview, bank: undefined, players: [] } : null),
+    [preview]
+  );
+
+  const reroll = () => {
+    setSeed("");
+    setRandomSeed(Math.floor(Math.random() * 65536));
+  };
+
   const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
 
   const setSeat = (i: number, seat: SeatConfig) =>
@@ -169,7 +204,7 @@ export default function NewGameDialog({
 
   const start = () => {
     onStart({
-      seed: seed === "" ? Math.floor(Math.random() * 65536) : Number(seed),
+      seed: effectiveSeed,  // the seed the preview showed
       nPlayers,
       numberPlacement,
       seats: seats.slice(0, nPlayers),
@@ -289,14 +324,34 @@ export default function NewGameDialog({
           onChange={setNumberPlacement}
         />
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={labelStyle}>Seed</span>
+          <span style={labelStyle}>Map</span>
+          <button
+            style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12 }}
+            onClick={reroll}
+            title="Generate a new random map"
+          >
+            🎲 New map
+          </button>
           <input
             type="number"
-            placeholder="random"
+            placeholder="seed"
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
-            style={{ ...buttonStyle, cursor: "text", width: 100, padding: "5px 10px", fontSize: 12 }}
+            title="Type a seed for a specific map, or leave blank and reroll"
+            style={{ ...buttonStyle, cursor: "text", width: 90, padding: "5px 10px", fontSize: 12 }}
           />
+        </div>
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: 200,
+            borderRadius: 8,
+            overflow: "hidden",
+            background: "#0D3B66",
+          }}
+        >
+          {previewBoard && <BoardView board={previewBoard} />}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button style={buttonStyle} onClick={onClose}>
