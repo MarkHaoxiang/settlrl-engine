@@ -14,6 +14,7 @@ import MaritimePopover from "../components/MaritimePopover";
 import NewGameDialog from "../components/NewGameDialog";
 import TradePopover from "../components/TradePopover";
 import TopBar from "../components/TopBar";
+import { BotIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import { createGame, joinGame, type GameAction, type GameSnapshot, type NewGameConfig } from "../lib/game";
@@ -608,6 +609,7 @@ export default function PlayView() {
                       background: PLAYER_COLORS[snapshot.bot_move.player] ?? "#888",
                     }}
                   />
+                  <BotIcon size={15} />
                   <span style={{ fontSize: 16 }}>{actionMeta(snapshot.bot_move.action.type).icon}</span>
                 </span>
               )}

@@ -17,6 +17,7 @@ import {
 import { type Board, playerName } from "../lib/boardData";
 import { buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
 import BoardView from "./BoardView";
+import { BotIcon, HumanIcon, MapIcon } from "./icons";
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
@@ -24,6 +25,16 @@ const labelStyle: React.CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: 1,
   width: 80,
+};
+
+// Seat Human/Bot buttons: an icon beside the label.
+const seatButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  padding: "5px 12px",
+  fontSize: 12,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
 };
 
 const botLabel = (kind: string) =>
@@ -243,7 +254,9 @@ export default function NewGameDialog({
             <button style={{ ...buttonStyle, padding: "4px 10px", fontSize: 12 }} onClick={() => setPickerSeat(null)}>
               ‹ Back
             </button>
-            <span style={{ fontSize: 16, fontWeight: 700 }}>{playerName(pickerSeat)}'s bot</span>
+            <span style={{ fontSize: 16, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <BotIcon size={17} /> {playerName(pickerSeat)}'s bot
+            </span>
           </div>
           {botNames.map((name) => {
             const spec = bots[name];
@@ -361,17 +374,17 @@ export default function NewGameDialog({
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={labelStyle}>{playerName(i)}</span>
               <button
-                style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12, ...(isHuman ? selectedStyle : {}) }}
+                style={{ ...seatButtonStyle, ...(isHuman ? selectedStyle : {}) }}
                 onClick={() => setSeat(i, { kind: HUMAN })}
               >
-                Human
+                <HumanIcon /> Human
               </button>
               <button
                 title="Choose and configure a bot"
-                style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12, ...(isHuman ? {} : selectedStyle) }}
+                style={{ ...seatButtonStyle, ...(isHuman ? {} : selectedStyle) }}
                 onClick={() => openPicker(i)}
               >
-                {isHuman ? "Bot" : `Bot · ${botLabel(seat.kind)}`}
+                <BotIcon /> {isHuman ? "Bot" : botLabel(seat.kind)}
               </button>
             </div>
           );
@@ -403,7 +416,7 @@ export default function NewGameDialog({
             onClick={() => setMapOpen(true)}
             title="Choose the map: seed and number layout"
           >
-            🗺️ <span style={{ opacity: 0.8 }}>{numberPlacement} · #{seed}</span>
+            <MapIcon /> <span style={{ opacity: 0.8 }}>{numberPlacement} · #{seed}</span>
           </button>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
