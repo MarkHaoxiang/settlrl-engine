@@ -26,3 +26,13 @@ uv sync
 ```
 
 Then see each package's README for usage.
+
+## Documentation
+
+A documentation site (hand-written guides + an API reference generated from the
+sources) is built with [MkDocs](https://www.mkdocs.org/):
+
+```bash
+uv run --group docs mkdocs serve   # live preview at http://127.0.0.1:8000
+uv run --group docs mkdocs build   # static site into ./site
+```

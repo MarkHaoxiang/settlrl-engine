@@ -39,6 +39,16 @@ dev = [
 cuda = [
     "jax[cuda13]>=0.7 ; sys_platform == 'linux'",
 ]
+# Documentation site (mkdocs build / serve). Opt-in (not a default group) so a
+# plain `uv sync` stays lean: `uv run --group docs mkdocs serve`. mkdocstrings
+# reads docstrings + signatures straight from the workspace sources.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    # mkdocstrings formats rendered signatures with ruff when it's available.
+    "ruff>=0.15.14",
+]
 
 [tool.uv]
 default-groups = ["dev", "cuda"]

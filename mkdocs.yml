@@ -1,0 +1,67 @@
+site_name: settlrl
+site_description: A fast, batched implementation of Settlrl for reinforcement learning and large-scale simulation.
+site_url: https://markhaoxiang.github.io/settlrl-engine/
+repo_url: https://github.com/MarkHaoxiang/settlrl-engine
+docs_dir: docs
+use_directory_urls: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          # Workspace sources; griffe reads docstrings + signatures statically.
+          paths:
+            - packages/settlrl-engine/src
+            - packages/settlrl-game/src
+            - packages/settlrl-agents/src
+            - packages/settlrl-app/src
+            - packages/settlrl-learn/src
+          options:
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            docstring_section_style: table
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - Getting started: guides/getting-started.md
+  - Reference:
+      - settlrl-engine: reference/engine.md
+      - settlrl-game: reference/game.md
+      - settlrl-agents: reference/agents.md
+      - settlrl-app: reference/app.md
+      - settlrl-learn: reference/learn.md
