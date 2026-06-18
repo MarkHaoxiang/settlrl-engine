@@ -1,6 +1,6 @@
 site_name: settlrl
 site_description: A fast, batched implementation of Settlrl for reinforcement learning and large-scale simulation.
-site_url: https://markhaoxiang.github.io/settlrl-engine/
+site_url: https://www.markhaoxiang.com/settlrl-engine/
 repo_url: https://github.com/MarkHaoxiang/settlrl-engine
 docs_dir: docs
 use_directory_urls: true
