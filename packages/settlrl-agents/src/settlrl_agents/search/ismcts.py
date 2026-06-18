@@ -1,44 +1,48 @@
-"""True Single-Observer ISMCTS over the engine (prototype, single-board).
+"""True Single-Observer ISMCTS over the engine, as one jitted on-device program.
 
 The mctx search (``search/__init__.py``) integrates the belief by re-sampling a
 world per simulation, but its *statistics* live on mctx's fixed dense action
 axis with visit-count selection and a root-only legality mask -- an action
 illegal under a given simulation's world is still a selectable edge that
-no-ops, and there are no availability counts. That is the half of ISMCTS mctx
-cannot express (Cowling, Powley & Whitehouse 2012; the Canopy reference builds a
-custom tree for exactly this reason).
+no-ops. That is the half of ISMCTS mctx cannot express (Cowling, Powley &
+Whitehouse 2012; the Canopy reference builds a custom tree for exactly this
+reason).
 
-This is that custom tree. Each simulation determinizes once (``sample_world``)
-and descends *forward*, stepping the engine so the legal set at every node comes
-from ``flat_available`` on the live determinized state -- selection therefore
-only ever considers actions legal in *this* world (true per-simulation legality,
-no no-op edges). Selection is PUCT with the prior renormalized over the legal
-set; the availability count (how often an action was legal here) is tracked per
-Cowling. The value frame is the same two-sided *paranoid* reduction the mctx
-search uses (searcher vs the table; exact zero-sum at 2p): every node stores the
+This is that custom tree, built to run like mctx does -- a single jitted XLA
+program over a **fixed-capacity arena** (pre-allocated node/edge arrays sized to
+``num_simulations + 1`` nodes), so the whole search stays on device with no
+host round-trips and ``vmap``s over lanes. Each simulation determinizes once
+(``sample_world``) and descends *forward*, stepping the engine so the legal set
+at every node comes from ``flat_available_for`` on the live determinized state --
+selection therefore only ever considers actions legal in *this* world (true
+per-simulation legality, no no-op edges). The descent is a ``while_loop`` that
+stops at the first unexpanded edge / terminal, so each simulation pays only its
+own depth of engine steps, not a fixed ``max_depth``.
+
+Selection is PUCT with the prior renormalized over the legal set and first-play
+urgency; the value frame is the same two-sided *paranoid* reduction the mctx
+search uses (searcher vs the table, exact zero-sum at 2p): every node stores the
 searcher-frame value and selects ``sign * Q + U`` with ``sign = +1`` at the
-searcher's nodes, ``-1`` at the opponents'.
-
-Prototype scope: a host-driven tree calling jitted single-board engine ops (not
-vmapped over lanes like mctx). It is built additively beside the mctx search so
-the two can be strength-compared before the mctx path is retired. The leaf and
-prior come from any :class:`ValueFunction` (the heuristic now; the learned AZ
-net once it ships).
+searcher's nodes, ``-1`` at the rest. The root prior is the one-step value sweep
+(lookahead); interior priors are greedy's tier table (a constant -- no
+per-expansion engine sweep). Leaf/prior value come from any
+:class:`ValueFunction`. Built additively beside the mctx search for a strength
+comparison before that path is retired.
 """
 
 from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float, Int
 from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_engine.board.state import BoardState, IntScalar, KeyScalar
+from settlrl_engine.board.state import BoardState, BoolScalar, IntScalar, KeyScalar
 from settlrl_engine.env import N_FLAT, flat_to_action
 from settlrl_engine.mechanics.action import action_available, apply_action
 from settlrl_engine.mechanics.common import agent_selection_single
@@ -56,162 +60,207 @@ __all__ = ["ismcts_move", "ismcts_weights"]
 _C_PUCT = 1.25  # PUCT exploration constant (interior + root)
 _FPU = 0.25  # first-play-urgency reduction: unvisited Q = node mean - this
 
-_Facts = tuple[Array, IntScalar, Array, Value]  # legal mask, mover, terminal, leaf v
-_Advance = tuple[BoardState, Array, IntScalar, Array, Value]
+_Mask = Float[Array, f"flat={N_FLAT}"]
+_NodeI = Int[Array, "node"]
+_NodeB = Bool[Array, "node"]
+_NodeF = Float[Array, "node"]
+_EdgeI = Int[Array, "node act"]
+_EdgeF = Float[Array, "node act"]
+_PathI = Int[Array, "depth"]
+
+
+class _Arena(NamedTuple):
+    """The fixed-capacity tree: ``node`` rows index up to ``num_simulations + 1``
+    nodes, ``act`` columns the flat action space. ``children`` is the child node
+    id per edge (-1 = unexpanded); ``size`` the nodes in use."""
+
+    mover: _NodeI
+    visits: _NodeF
+    children: _EdgeI
+    n: _EdgeF  # edge visit counts
+    w: _EdgeF  # edge value sums (searcher frame)
+    prior: _EdgeF
+    size: IntScalar
+
+
+class _Descent(NamedTuple):
+    """One simulation's forward walk; carried through the descent ``while_loop``.
+    ``exp_parent`` >= 0 marks the node a new leaf attaches to (the expansion)."""
+
+    state: BoardState
+    legal: _Mask
+    leaf: Value  # searcher-frame value to back up
+    cur: IntScalar
+    depth: IntScalar  # edges taken so far
+    path_node: _PathI
+    path_act: _PathI
+    done: BoolScalar
+    exp_parent: IntScalar
+    exp_act: IntScalar
+    exp_mover: IntScalar
+
+
+def _softmax_legal(logits: Array, legal: _Mask) -> _Mask:
+    """Prior over the legal actions (0 elsewhere)."""
+    masked = jnp.where(legal > 0, logits, -jnp.inf)
+    masked = masked - masked.max()
+    p = jnp.where(legal > 0, jnp.exp(masked), 0.0)
+    return p / jnp.maximum(p.sum(), 1e-9)
+
+
+def _puct(arena: _Arena, node: IntScalar, legal: _Mask, player: IntScalar) -> IntScalar:
+    """The PUCT pick among this determinization's legal actions. Prior
+    renormalized over the legal set; ``sign`` makes opponents minimize the
+    searcher value; unvisited actions take first-play-urgency Q = node mean minus
+    ``_FPU`` (so a visited action is no permanent head start over its siblings)."""
+    n, w, p = arena.n[node], arena.w[node], arena.prior[node]
+    visits = arena.visits[node]
+    sign = jnp.where(arena.mover[node] == player, 1.0, -1.0)
+    node_v = w.sum() / jnp.maximum(visits, 1.0)
+    fpu = node_v - _FPU * sign
+    q = jnp.where(n > 0, w / jnp.maximum(n, 1.0), fpu)
+    pp = p * legal
+    pp = pp / jnp.maximum(pp.sum(), 1e-9)
+    u = _C_PUCT * pp * jnp.sqrt(visits + 1.0) / (1.0 + n)
+    return jnp.argmax(jnp.where(legal > 0, sign * q + u, -jnp.inf)).astype(jnp.int32)
 
 
 @functools.lru_cache(maxsize=8)
-def _ops(
-    value: ValueFunction, value_scale: float, prior_scale: float
-) -> tuple[Callable[..., _Facts], Callable[..., _Advance], Callable[..., Array]]:
-    """The jitted single-board engine ops, **compiled once per ``value``** (the
-    cache is the fix for recompiling every move). ``facts`` reads a node's public
-    state + searcher-frame leaf value; ``advance`` fuses one step with the child's
-    facts (one host sync per descent edge, child state kept on device); ``prior``
-    is the one-step value sweep blended with greedy's tier table (the interior
-    prior, replaced by a learned head when ``value`` is one)."""
+def _tree_fn(
+    value: ValueFunction,
+    value_scale: float,
+    prior_scale: float,
+    num_simulations: int,
+    max_depth: int,
+) -> Callable[[KeyScalar, BoardLayout, BeliefView, IntScalar], _Mask]:
+    """A jitted SO-ISMCTS that returns the root edge-visit counts. Compiled once
+    per ``(value, ...)`` and ``vmap``-able over lanes."""
+    n_nodes = num_simulations + 1
 
-    @jax.jit
-    def facts(layout: BoardLayout, state: BoardState, player: IntScalar) -> _Facts:
-        legal = flat_available_for(layout, state)
+    def facts(
+        layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> tuple[_Mask, IntScalar, BoolScalar, Value]:
+        legal = flat_available_for(layout, state).astype(jnp.float32)
         term = _terminal(state)
         win = _winner(state) == player
         v = jnp.tanh(value(layout, state, player) / value_scale)
         leaf = jnp.where(term, jnp.where(win, 1.0, -1.0), v)
-        return legal, agent_selection_single(state), term, leaf
+        return legal, agent_selection_single(state).astype(jnp.int32), term, leaf
 
-    @jax.jit
-    def advance(
-        layout: BoardLayout, state: BoardState, action: IntScalar, player: IntScalar
-    ) -> _Advance:
+    def step(layout: BoardLayout, state: BoardState, action: IntScalar) -> BoardState:
         atype, aparams = flat_to_action(action)
         avail = action_available(layout, state, atype, aparams)
         nxt, _ = apply_action(layout, state, atype, aparams, avail)
-        return nxt, *facts(layout, nxt, player)
+        return nxt
 
-    @jax.jit
-    def prior(
-        layout: BoardLayout, state: BoardState, player: IntScalar, mask: FlatMask
-    ) -> Float[Array, f"flat={N_FLAT}"]:
-        # Soft prior logits: greedy's tier table (~2 nats apart by design) biased
-        # by the squashed one-step value. The raw value sweep as logits is far too
-        # peaked -- its softmax is ~one-hot, which starves PUCT of exploration.
+    def root_prior(
+        layout: BoardLayout, state: BoardState, player: IntScalar, legal: _Mask
+    ) -> _Mask:
         succ, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
-            layout, state, ROW_TYPE, ROW_PARAMS, mask
+            layout, state, ROW_TYPE, ROW_PARAMS, legal > 0
         )
         vals = jax.vmap(value, in_axes=(None, 0, None))(layout, succ, player)
-        return _TIER_LOGITS + jnp.tanh(vals / value_scale) / prior_scale
-
-    return facts, advance, prior
-
-
-def _softmax_legal(logits: np.ndarray, legal: np.ndarray) -> np.ndarray:
-    """Prior over the legal actions (0 elsewhere)."""
-    masked = np.where(legal > 0, logits, -np.inf)
-    masked -= masked.max()
-    p = np.where(legal > 0, np.exp(masked), 0.0)
-    return np.asarray(p / p.sum(), dtype=np.float64)
-
-
-@dataclass
-class _Node:
-    mover: int
-    terminal: bool
-    prior: np.ndarray  # (N_FLAT,) over legal actions, 0 elsewhere
-    children: dict[int, int] = field(default_factory=dict)
-    visits: int = 0
-    n: np.ndarray = field(default_factory=lambda: np.zeros(N_FLAT))  # edge visits
-    w: np.ndarray = field(default_factory=lambda: np.zeros(N_FLAT))  # searcher-frame
-    navail: np.ndarray = field(default_factory=lambda: np.zeros(N_FLAT))  # availability
-
-
-def _select(node: _Node, legal: np.ndarray, player: int) -> int:
-    """PUCT over the actions legal in this determinization. Prior renormalized
-    over the legal set; ``sign`` makes opponents minimize the searcher value.
-    Unvisited actions take first-play-urgency Q = the node's own mean value, so a
-    visited action's backed-up value is no permanent head start over unexplored
-    siblings (the fix for the search collapsing onto one action)."""
-    sign = 1.0 if node.mover == player else -1.0
-    node_v = node.w.sum() / max(node.visits, 1)  # searcher-frame node mean
-    fpu = node_v - _FPU * sign  # unvisited: node mean, pessimistic in mover frame
-    q = np.where(node.n > 0, node.w / np.maximum(node.n, 1), fpu)
-    p = node.prior * legal
-    psum = p.sum()
-    p = p / psum if psum > 0 else legal / max(int(legal.sum()), 1)
-    u = _C_PUCT * p * np.sqrt(node.visits + 1) / (1.0 + node.n)
-    score = np.where(legal, sign * q + u, -np.inf)
-    return int(np.argmax(score))
-
-
-def _run(
-    key: KeyScalar,
-    layout: BoardLayout,
-    view: BeliefView,
-    player: int,
-    root_mask: np.ndarray,
-    *,
-    num_simulations: int,
-    max_depth: int,
-    value: ValueFunction,
-    value_scale: float,
-    prior_scale: float,
-) -> np.ndarray:
-    """Grow one SO-ISMCTS tree; return the root edge-visit counts (the improved
-    policy, the AlphaZero target)."""
-    facts, advance, prior = _ops(value, value_scale, prior_scale)  # type: ignore[arg-type]
-    pj = jnp.int32(player)
-    keys = jax.random.split(key, num_simulations + 1)
-
-    def facts_h(state: BoardState) -> tuple[np.ndarray, int, bool, float]:
-        legal, mover, term, leaf = facts(layout, state, pj)
-        return np.asarray(legal), int(mover), bool(term), float(leaf)
-
-    def expand(mover: int, term: bool, state: BoardState, legal: np.ndarray) -> _Node:
-        p = (
-            np.zeros(N_FLAT)
-            if term
-            else _softmax_legal(
-                np.asarray(prior(layout, state, pj, jnp.asarray(legal))), legal
-            )
+        return _softmax_legal(
+            _TIER_LOGITS + jnp.tanh(vals / value_scale) / prior_scale, legal
         )
-        return _Node(mover=mover, terminal=term, prior=p)
 
-    # Root from one sampled world (its prior only seeds the first expansions;
-    # per-simulation determinization carries the rest).
-    root_state = sample_world(keys[0], view, pj)
-    r_legal, r_mover, r_term, _ = facts_h(root_state)
-    nodes = [expand(r_mover, r_term, root_state, r_legal)]
+    @jax.jit
+    def tree(
+        key: KeyScalar, layout: BoardLayout, view: BeliefView, player: IntScalar
+    ) -> _Mask:
+        player = player.astype(jnp.int32)
+        keys = jax.random.split(key, num_simulations + 1)
+        root_state = sample_world(keys[0], view, player)
+        r_legal, r_mover, _r_term, _ = facts(layout, root_state, player)
+        arena = _Arena(
+            mover=jnp.zeros((n_nodes,), jnp.int32).at[0].set(r_mover),
+            visits=jnp.zeros((n_nodes,), jnp.float32),
+            children=-jnp.ones((n_nodes, N_FLAT), jnp.int32),
+            n=jnp.zeros((n_nodes, N_FLAT), jnp.float32),
+            w=jnp.zeros((n_nodes, N_FLAT), jnp.float32),
+            prior=jnp.zeros((n_nodes, N_FLAT), jnp.float32)
+            .at[0]
+            .set(root_prior(layout, root_state, player, r_legal)),
+            size=jnp.int32(1),
+        )
 
-    for sim in range(num_simulations):
-        state = sample_world(keys[sim + 1], view, pj)
-        legal, _, term, leaf = facts_h(state)  # root facts under this world
-        path: list[tuple[int, int]] = []  # (node id, action)
-        node_id = 0
-        for _ in range(max_depth):
-            node = nodes[node_id]
-            if term or int(legal.sum()) == 0:
-                break
-            a = _select(node, legal, player)
-            node.navail[legal > 0] += 1
-            path.append((node_id, a))
-            state, legal_d, mover_d, term_d, leaf_d = advance(
-                layout, state, jnp.int32(a), pj
+        def simulate(s: IntScalar, arena: _Arena) -> _Arena:
+            state = sample_world(keys[s + 1], view, player)
+            legal, _, term, leaf = facts(layout, state, player)
+            d0 = _Descent(
+                state=state,
+                legal=legal,
+                leaf=leaf,
+                cur=jnp.int32(0),
+                depth=jnp.int32(0),
+                path_node=jnp.zeros((max_depth,), jnp.int32),
+                path_act=jnp.zeros((max_depth,), jnp.int32),
+                done=term | (legal.sum() == 0),  # nothing to search from the root
+                exp_parent=jnp.int32(-1),
+                exp_act=jnp.int32(0),
+                exp_mover=jnp.int32(0),
             )
-            legal, leaf, term = np.asarray(legal_d), float(leaf_d), bool(term_d)
-            if a in node.children:
-                node_id = node.children[a]
-                continue
-            nodes.append(expand(int(mover_d), term, state, legal))  # leaf: expand once
-            node.children[a] = len(nodes) - 1
-            break
 
-        for nid, a in path:  # backup the searcher-frame leaf value
-            n = nodes[nid]
-            n.visits += 1
-            n.n[a] += 1
-            n.w[a] += leaf
+            def cond(d: _Descent) -> BoolScalar:
+                return (~d.done) & (d.depth < max_depth)
 
-    return nodes[0].n.copy()
+            def body(d: _Descent) -> _Descent:
+                # `arena` (this sim's tree) is read-only during the descent. The
+                # current node is guaranteed non-terminal with a legal action.
+                cur0 = d.cur
+                a = _puct(arena, cur0, d.legal, player)
+                nstate = step(layout, d.state, a)
+                legal2, mover2, term2, leaf2 = facts(layout, nstate, player)
+                is_leaf = arena.children[cur0, a] < 0  # unexpanded edge -> expand
+                return _Descent(
+                    state=nstate,
+                    legal=legal2,
+                    leaf=leaf2,
+                    cur=jnp.where(is_leaf, cur0, arena.children[cur0, a]),
+                    depth=d.depth + 1,
+                    path_node=d.path_node.at[d.depth].set(cur0),
+                    path_act=d.path_act.at[d.depth].set(a),
+                    done=is_leaf | term2 | (legal2.sum() == 0),
+                    exp_parent=jnp.where(is_leaf, cur0, jnp.int32(-1)),
+                    exp_act=jnp.where(is_leaf, a, jnp.int32(0)),
+                    exp_mover=jnp.where(is_leaf, mover2, jnp.int32(0)),
+                )
+
+            d = jax.lax.while_loop(cond, body, d0)
+
+            # Expansion: attach the new leaf (guarded -- a sim that only revisited
+            # the existing tree to max_depth grows nothing).
+            grew = d.exp_parent >= 0
+            new_id = arena.size  # always <= n_nodes - 1 (<=1 node added per sim)
+            safe_parent = jnp.maximum(d.exp_parent, 0)
+            arena = arena._replace(
+                mover=arena.mover.at[new_id].set(
+                    jnp.where(grew, d.exp_mover, arena.mover[new_id])
+                ),
+                prior=arena.prior.at[new_id].set(
+                    jnp.where(grew, _softmax_legal(_TIER_LOGITS, d.legal), arena.prior[new_id])
+                ),
+                children=arena.children.at[safe_parent, d.exp_act].set(
+                    jnp.where(grew, new_id, arena.children[safe_parent, d.exp_act])
+                ),
+                size=arena.size + grew.astype(jnp.int32),
+            )
+
+            def backup(j: IntScalar, ar: _Arena) -> _Arena:
+                node, act = d.path_node[j], d.path_act[j]
+                use = (j < d.depth).astype(jnp.float32)
+                return ar._replace(
+                    visits=ar.visits.at[node].add(use),
+                    n=ar.n.at[node, act].add(use),
+                    w=ar.w.at[node, act].add(use * d.leaf),
+                )
+
+            return cast(_Arena, jax.lax.fori_loop(0, max_depth, backup, arena))
+
+        arena = cast(_Arena, jax.lax.fori_loop(0, num_simulations, simulate, arena))
+        return arena.n[0]
+
+    return tree
 
 
 def ismcts_weights(
@@ -229,14 +278,12 @@ def ismcts_weights(
 ) -> np.ndarray:
     """Root edge-visit distribution from one SO-ISMCTS tree (normalized over the
     legal actions) -- the improved policy / AlphaZero target."""
-    root_mask = np.asarray(mask)
-    counts = _run(
-        key, layout, view, int(player), root_mask,
-        num_simulations=num_simulations, max_depth=max_depth,
-        value=value, value_scale=value_scale, prior_scale=prior_scale,
-    )  # fmt: skip
+    tree = _tree_fn(value, value_scale, prior_scale, num_simulations, max_depth)  # type: ignore[arg-type]
+    counts = np.asarray(tree(key, layout, view, jnp.int32(player)))
+    legal = np.asarray(mask) > 0
+    counts = np.where(legal, counts, 0.0)
     total = counts.sum()
-    return counts / total if total > 0 else root_mask / max(int(root_mask.sum()), 1)
+    return counts / total if total > 0 else legal / max(int(legal.sum()), 1)
 
 
 def ismcts_move(

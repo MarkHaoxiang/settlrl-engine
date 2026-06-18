@@ -88,6 +88,44 @@ def test_visits_concentrate_above_uniform() -> None:
     assert int((w > 0).sum()) > 1  # but explores more than one action
 
 
+@pytest.mark.parametrize("steps", [2, 3, 40, 230])  # setup phase ... late game
+def test_move_legal_across_game_stages(steps: int) -> None:
+    # Edge cases: the setup phase (settle/road action types) and a near-end
+    # position exercise different legal sets than the mid-game.
+    layout, view, p, mask = _position(11, steps)
+    if mask.sum() == 0:
+        pytest.skip("no legal move (stalled lane)")
+    a = ismcts_move(
+        jax.random.key(11), layout, view, jnp.int32(p), jnp.asarray(mask),
+        value=heuristic_value, num_simulations=12,
+    )  # fmt: skip
+    assert mask[a] > 0
+
+
+def test_four_player_move_legal() -> None:
+    # The paranoid frame at 4 players (searcher vs three): still a legal move.
+    layout, view, p, mask = _position(2, steps=150, n_players=4)
+    if mask.sum() == 0:
+        pytest.skip("no legal move")
+    a = ismcts_move(
+        jax.random.key(2), layout, view, jnp.int32(p), jnp.asarray(mask),
+        value=heuristic_value, num_simulations=16,
+    )  # fmt: skip
+    assert mask[a] > 0
+
+
+def test_no_legal_actions_does_not_crash() -> None:
+    # Degenerate input (empty mask): no crash, weights fall back to all-zero,
+    # the move is the documented arbitrary index (the engine rejects it).
+    layout, view, p, mask = _position(7, steps=120)
+    empty = np.zeros_like(mask)
+    w = ismcts_weights(
+        jax.random.key(0), layout, view, jnp.int32(p), jnp.asarray(empty),
+        value=heuristic_value, num_simulations=8,
+    )  # fmt: skip
+    assert np.all(np.isfinite(w)) and float(w.sum()) == 0.0
+
+
 @pytest.mark.slow
 def test_self_play_completes_a_game() -> None:
     env = BatchedSettlrlEnv(batch_size=1, seed=4, n_players=2, track_beliefs=True)

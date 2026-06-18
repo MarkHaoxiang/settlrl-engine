@@ -245,31 +245,40 @@ Frame and tuning evidence (carried over; the search inherits all of it):
   value_scale 12/38 tie-or-lose to 20. Diagnose decision-level, not by ~20-game
   matches (SE ±11%); 4p evals need matched seeds or n ≥ 240.
 
-### `ismcts.py` — true SO-ISMCTS prototype (not yet a replacement)
+### `ismcts.py` — true SO-ISMCTS (the half mctx cannot express)
 
 The mctx search is *not* full ISMCTS: its statistics live on mctx's fixed dense
 action axis with a root-only legality mask, so an action illegal under a given
-simulation's world is still a selectable edge that no-ops, and there are no
-availability counts (the half mctx cannot express; Canopy builds a custom tree
-for it). `ismcts.py` is that custom tree — a host-driven Single-Observer ISMCTS:
-each simulation determinizes once (`sample_world`) and descends *forward*,
-stepping the engine so legality at every node comes from `flat_available_for` on
-the live determinized state (true per-simulation legality, no no-op edges); PUCT
-with the prior renormalized over the legal set + FPU, availability counts per
-Cowling, the same two-sided paranoid value frame. Leaf/prior from any
-`ValueFunction` (the learned AZ net later). Contracts tested in
-`tests/test_ismcts.py` (legal move, legal-supported visit distribution,
-reproducibility, concentration above uniform, game completion).
+simulation's world is still a selectable edge that no-ops (the half mctx cannot
+express; Canopy builds a custom tree for it). `ismcts.py` is that custom tree,
+written to run *like* mctx — **one jitted XLA program over a fixed-capacity
+arena** (`_Arena`: node/edge arrays sized to `num_simulations + 1`), so the whole
+search stays on device and `vmap`s over lanes. Each simulation determinizes once
+(`sample_world`) and descends *forward* through a `while_loop`, stepping the
+engine so legality at every node comes from `flat_available_for` on the live
+determinized state — true per-simulation legality, no no-op edges. The
+`while_loop` stops at the first unexpanded edge / terminal, so a simulation pays
+only its own depth of engine steps (not a fixed `max_depth` — the same dead-tail
+fix as the mctx replay). Selection is PUCT with the prior renormalized over the
+legal set + FPU; the two-sided paranoid value frame; root prior = the one-step
+value sweep, interior priors = greedy's tier table (a constant, no per-expansion
+sweep). Leaf/prior from any `ValueFunction` (the learned AZ net later). Contracts
+in `tests/test_ismcts.py` (legal move across setup/mid/late + 4p, legal-supported
+visit distribution, reproducibility, concentration above uniform, no-legal
+fallback, game completion).
 
-**Status: built and correct, but not a deletion candidate for the mctx path.**
-Two blockers. (1) *Speed*: the tree is host-driven (a device sync per node, not
-vmapped over lanes like mctx) — ~1.5 s (8 sims) to ~5 s (32 sims) per move on
-CPU vs mctx's ~9 ms, i.e. ~100–600× slower; replacing a 9 ms search with a 1.5 s
-one would be a regression even at strength parity. A vmapped/jitted fixed-
-capacity arena tree is the prerequisite. (2) *Validation*: parity needs n≥200
-seat-swapped matches; at host-driven speed a CPU game is ~minutes, so only a
-tiny directional comparison is feasible without a free GPU. Keep the mctx search
-until the vmapped rewrite clears a real parity gate.
+**Speed (the rewrite's point):** the host-driven first cut was ~1.5–5 s/move (a
+device sync per node); jitting the whole tree took it to **~5–6 ms/move on CPU
+(B=1), flat in sims** — on par with / faster than mctx's ~9 ms, ~500× over the
+host version. Capacity is exact: ≤1 node added per simulation, so `size` never
+exceeds `num_simulations + 1` and the new-node index never overflows.
+
+**Status:** correct + fast, *not yet adopted*. Before retiring the mctx path it
+needs a real strength gate — n≥200 seat-swapped vs `lookahead`/`mcts` (and the
+search isn't yet wired into `POLICIES`/`make_search`-style seams or `vmap`ped
+into self-play). Availability-count UCB (Cowling) is dropped for now in favour of
+standard PUCT visit counts; per-simulation legal filtering (the essential ISMCTS
+property) is kept. Keep `make_search` until the gate is cleared.
 
 ## planner/
 
