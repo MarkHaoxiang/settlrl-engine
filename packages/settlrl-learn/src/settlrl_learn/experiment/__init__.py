@@ -6,7 +6,7 @@ imported by the agents runtime, so ``import settlrl_agents`` does not pull the
 config dependencies.
 """
 
-from settlrl_agents.experiment.bookkeeping import Run, start_run
-from settlrl_agents.experiment.config import Config
+from settlrl_learn.experiment.bookkeeping import Run, start_run
+from settlrl_learn.experiment.config import Config
 
 __all__ = ["Config", "Run", "start_run"]

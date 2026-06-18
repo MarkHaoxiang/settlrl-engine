@@ -13,6 +13,11 @@ dependencies = [
     "jax[cpu]>=0.4.0",
     "jaxtyping>=0.3.10",
     "numpy>=1.26",
+    # the experiment lab harness (settlrl_learn.experiment) lives here now, so
+    # its config deps do too -- moved out of settlrl-agents to keep it web/play
+    # only. Imported by experiments, not by `import settlrl_learn`.
+    "pydantic>=2.13.4",
+    "omegaconf>=2.3.1",
 ]
 
 [build-system]

@@ -27,8 +27,8 @@ import sys
 from pathlib import Path
 
 from pydantic import Field, model_validator
-from settlrl_agents.experiment import Config, start_run
 from settlrl_agents.internal.feature_engineering import BoardFeatures
+from settlrl_learn.experiment import Config, start_run
 from value_fitting import HAND_WEIGHTS, run_experiment
 
 

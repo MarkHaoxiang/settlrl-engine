@@ -5,7 +5,7 @@ pydantic validates, so a mistyped knob fails before any GPU work. ``resolve``
 layers a framework's named *variant* and command-line ``key=value`` overrides
 onto its ``BASE`` mapping with OmegaConf (hydra's config engine: dotted paths,
 type coercion), then validates the merged mapping into the schema. The
-*validated* config is what :func:`~settlrl_agents.experiment.start_run` pins in
+*validated* config is what :func:`~settlrl_learn.experiment.start_run` pins in
 the run manifest, so reproduction starts from a checked object, not a loose dict.
 
 This is the "pydra" seam (pydantic + OmegaConf) kept beside ``start_run`` rather

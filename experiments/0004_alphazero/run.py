@@ -14,9 +14,9 @@ from typing import Literal
 
 import jax
 import wandb
-from settlrl_agents.experiment import Config, Run, start_run
 from settlrl_learn import init_az_params, save_az_params
 from settlrl_learn.alphazero import arena, learn
+from settlrl_learn.experiment import Config, Run, start_run
 from settlrl_learn.train_state import TrainState
 
 

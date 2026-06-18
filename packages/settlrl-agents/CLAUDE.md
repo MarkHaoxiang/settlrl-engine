@@ -24,13 +24,10 @@ helpers behind them: `rows.py` (the flat-table decode) and
 greedy's trade sense). Weights always live with an agent or in `value.py`;
 features never carry them.
 
-`experiment/` is the lab harness shared by every framework under `experiments/`
-(`Run`/`start_run` bookkeeping + the pydantic/OmegaConf `Config` base) — it
-lives here so no shared library sits under `experiments/`. It is *not* imported
-by the agents runtime (`__init__` doesn't touch it), so `import settlrl_agents`
-stays free of `pydantic`/`omegaconf`; those are agents deps only because this
-subpackage uses them. (If keeping the play-time lib leaner matters, this is the
-piece to relocate — e.g. to `settlrl-learn`.)
+The lab harness (`Run`/`start_run` bookkeeping + the pydantic/OmegaConf `Config`
+base) moved to `settlrl_learn.experiment` — it is a training-side concern, and
+relocating it keeps `settlrl-agents` (the play/serve library) free of
+`pydantic`/`omegaconf`. Experiments import it from there now.
 
 `service/` is the **one-bot SDK + service**. A service hosts a single `Bot`
 (`sdk.py`: subclass it, implement `act(view) -> MoveModel`; the framework tracks
@@ -45,8 +42,8 @@ tracked reference position to an engine board (`bridge.py`) and translates the
 chosen engine flat back to a `MoveModel`. The CLI `settlrl-bot-service --bot KIND`
 serves one. It's the `settlrl-app` game server's only source of bot moves
 (delegated over HTTP), kept here because it *is* the agents running. Behind the
-`[service]` optional extra (`fastapi` + `settlrl-game`) and, like `experiment/`,
-never imported by `__init__`, so `import settlrl_agents` stays free of `fastapi`
+`[service]` optional extra (`fastapi` + `settlrl-game`) and never imported by
+`__init__`, so `import settlrl_agents` stays free of `fastapi`
 (`sdk.py`/`app.py` themselves are JAX-free; only `bots.py` pulls the engine). The
 `bridge.py` dtype contract is exact: engine
 `BoardLayout`/`BoardState` arrays are `uint8` (jaxtyping-enforced under the test

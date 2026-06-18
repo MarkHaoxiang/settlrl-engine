@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from conftest import load_run
-from settlrl_agents.experiment import Run
+from settlrl_learn.experiment import Run
 
 
 def _verdict(run_dir: Path) -> str:

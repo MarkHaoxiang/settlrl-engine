@@ -5,6 +5,13 @@ Anything an agent needs at play time (the plain-JAX `mlp` forward, params as
 an ordinary pytree, `.npz` artifacts) is deliberately dependency-free so a
 trained model can ship without training libraries.
 
+`experiment/` is the lab harness for `experiments/` (`Run`/`start_run`
+bookkeeping + the pydantic/OmegaConf `Config` base) — moved here from
+settlrl-agents (it is a training-side concern; this keeps the play/serve
+library free of `pydantic`/`omegaconf`). *Not* imported by `__init__`, so
+`import settlrl_learn` stays free of those; `pydantic`/`omegaconf` are learn
+deps only because this subpackage uses them.
+
 - `features.py` — engineered blocks mirror the heuristic's terms (production,
   expansion, ports, awards): we know they carry signal, and a model that
   cannot beat the heuristic *from the heuristic's own inputs* is not worth

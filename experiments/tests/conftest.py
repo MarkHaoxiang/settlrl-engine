@@ -2,7 +2,7 @@
 
 Each ``NNNN_slug/`` is a script directory, not a package. The shared harness
 (``Run`` / ``start_run`` / ``Config``) is a normal import from
-``settlrl_agents.experiment``; what needs help is each framework's *same-dir*
+``settlrl_learn.experiment``; what needs help is each framework's *same-dir*
 helpers (``value_fitting`` / ``data`` / ``models`` / ...). ``load_run`` loads a
 ``run.py`` by path, so this conftest puts every framework directory on
 ``sys.path`` for those intra-framework imports to resolve.

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from settlrl_agents.cli import bench
-from settlrl_agents.experiment import Config, Run, start_run
+from settlrl_learn.experiment import Config, Run, start_run
 
 
 class BenchSmokeConfig(Config):

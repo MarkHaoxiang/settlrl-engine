@@ -2617,8 +2617,6 @@ dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
     { name = "mctx" },
-    { name = "omegaconf" },
-    { name = "pydantic" },
     { name = "settlrl-engine" },
 ]
 
@@ -2634,8 +2632,6 @@ requires-dist = [
     { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "mctx", specifier = ">=0.0.6" },
-    { name = "omegaconf", specifier = ">=2.3.1" },
-    { name = "pydantic", specifier = ">=2.13.4" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
     { name = "settlrl-game", marker = "extra == 'service'", editable = "packages/settlrl-game" },
 ]
@@ -2721,6 +2717,8 @@ dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
     { name = "numpy" },
+    { name = "omegaconf" },
+    { name = "pydantic" },
     { name = "settlrl-agents" },
     { name = "settlrl-engine" },
 ]
@@ -2730,6 +2728,8 @@ requires-dist = [
     { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "omegaconf", specifier = ">=2.3.1" },
+    { name = "pydantic", specifier = ">=2.13.4" },
     { name = "settlrl-agents", editable = "packages/settlrl-agents" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
 ]
