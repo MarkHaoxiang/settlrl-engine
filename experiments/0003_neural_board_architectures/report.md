@@ -134,6 +134,38 @@ Findings:
    game, so the signal must come from features, not vertex indices. The
    invariance survives every lever (attention, GraphNorm, global node, JK).
 
+### Multi-task (one shared trunk, a head per target)
+
+`ablate_multi` trains one trunk with four heads (win + heur + road + a new
+`turns`-to-end head) — the supervised rehearsal for the AZ value+policy net, and
+a test of whether one trunk serves local/global/structural targets at once.
+Held-out per head (vs the single-task scores above):
+
+| arch | win | road | heur | turns |
+| --- | --- | --- | --- | --- |
+| `mlp_engineered` | 0.81 | 0.81 | 0.98 | 0.52 |
+| `gn_base` | 0.77 | 0.94 | 0.96 | 0.36 |
+| `gn_global` | 0.75 | 0.82 | 0.94 | 0.40 |
+| `gn_gat` | 0.74 | 0.76 | 0.94 | 0.42 |
+
+- **Negative transfer onto the structural head.** Sharing the trunk degrades
+  `road` (gn_base 0.99→0.94, gn_global 0.98→0.82, gn_gat 0.86→0.76) while the
+  easy heads (heur, win) barely move — the structural signal competes for trunk
+  capacity and loses. The higher-capacity global/attention variants degrade
+  *more*, not less: their extra capacity is pulled toward the easy heads.
+- **Plain sum-MPNN is the most robust shared trunk.** `gn_base` loses the least
+  `road` and is the only arch whose `win` *improves* under multi-task
+  (0.738→0.766) — the structural auxiliary genuinely helps its value head.
+- `turns`-to-end is the one target where the engineered MLP clearly beats every
+  GNN (0.52 vs ≤0.47): a global tempo signal the hand-tuned race/VP terms carry
+  and the raw board does not.
+
+Caveat: equal loss weights, single seed — the negative transfer is partly a
+loss-balancing artefact (the easy heads dominate the gradient). Down-weighting
+heur/turns, or separate trunks, should protect `road`. The lesson for AZ stands:
+a single value+policy trunk wants plain sum-MPNN, with loss-balancing to keep
+the structural signal the policy needs.
+
 **Architecture recommendation (toward the AlphaZero value+policy net):**
 `gn_global` — sum-aggregation MPNN + a virtual global node + a
 count-preserving multi-aggregator readout + LayerNorm, **no attention, no

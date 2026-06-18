@@ -9,9 +9,11 @@ push for a learned value (settlrl-learn Stage 1).
 Tasks (labels from greedy self-play, cached): ``heuristic`` regresses the
 hand-tuned value (a *local* target); ``win`` predicts seat 0's game outcome (a
 *global* target); ``road`` regresses seat 0's longest-road trail length (a
-*structural* target the engineered vector cannot express). Each ``arch`` is
-trained and held-out-scored; ``arch=all`` sweeps the four baselines and ranks,
-``arch=a,b,c`` sweeps a named list (the GraphNet lever ablation).
+*structural* target the engineered vector cannot express); ``turns`` regresses
+snapshots-to-game-end; ``multi`` trains one shared trunk with a head per target
+(win + heur + road + turns). Each ``arch`` is trained and held-out-scored;
+``arch=all`` sweeps the four baselines and ranks, ``arch=a,b,c`` sweeps a named
+list (the GraphNet lever ablation).
 
     uv run python experiments/0003_neural_board_architectures/run.py [variant] [k=v ...]
 """
@@ -22,7 +24,7 @@ from pathlib import Path
 from data import generate, split
 from settlrl_agents.experiment import Config, Run, start_run
 from settlrl_learn.architectures import make_model
-from train import train
+from train import TASK_FIELDS, select_metric, train
 
 ARCHS = ("mlp_engineered", "mlp_flat", "deepset", "gnn")
 # The GraphNet ablation: the engineered baseline + legacy gnn + one preset per
@@ -68,6 +70,9 @@ VARIANTS: dict[str, dict[str, object]] = {
     "ablate_heuristic": {"task": "heuristic", "arch": ",".join(ABLATION)},
     "ablate_win": {"task": "win", "arch": ",".join(ABLATION)},
     "ablate_road": {"task": "road", "arch": ",".join(ABLATION)},
+    # Multi-task: one shared trunk, a head per target (win + heur + road + turns).
+    "multi": {"task": "multi", "arch": "all"},
+    "ablate_multi": {"task": "multi", "arch": ",".join(ABLATION)},
     "smoke": {
         "task": "heuristic",
         "arch": "all",
@@ -100,12 +105,13 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
             win_rate=float(ds.win.mean()))  # fmt: skip
 
     archs = ARCHS if cfg.arch == "all" else tuple(cfg.arch.split(","))
-    select = "auc" if cfg.task == "win" else "r2"
+    select = select_metric(cfg.task)  # e.g. "win_auc" / "road_r2" (primary head)
+    out_dim = len(TASK_FIELDS[cfg.task])  # multi-task trains one head per target
     results: dict[str, dict[str, float]] = {}
     for arch in archs:
         model = make_model(
             arch, jax.random.key(cfg.seed),
-            out_dim=1, width=cfg.width, depth=cfg.depth, layers=cfg.layers,
+            out_dim=out_dim, width=cfg.width, depth=cfg.depth, layers=cfg.layers,
         )  # fmt: skip
         sub = Run(run.dir / arch)
         sub.dir.mkdir(exist_ok=True)
@@ -117,7 +123,7 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     # Verdict: a raw-board representation is competitive with the hand-tuned
     # baseline (within 0.02 of it on the selection metric), or — no baseline in
     # the run — the best model clears a sanity floor.
-    floor = 0.55 if cfg.task == "win" else 0.5
+    floor = 0.55 if select.endswith("_auc") else 0.5
     key = f"best_{select}"
     learned = [a for a in archs if a != "mlp_engineered"]
     if "mlp_engineered" in results and learned:
