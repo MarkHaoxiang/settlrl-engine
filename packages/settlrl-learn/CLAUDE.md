@@ -43,6 +43,13 @@ trained model can ship without training libraries.
     vs `lookahead(heuristic)`, the Stage-1 gate), and the `learn` loop. Value
     target is pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a
     search that exposes root Q (see the Canopy reference below).
+  - `azgnn.py` — the AlphaZero loop with a **GNN trunk** (`AZGraphNet` = a
+    `graphnet.GraphNet` over `graph.board_sample` with value + policy heads,
+    experiment 0003's recommended `gn_global`). Mirrors `selfplay`/`alphazero`
+    for an equinox model: `make_az_gnn` adapts onto the search seams, `self_play`
+    records the board graph, and a small in-memory `learn` loop trains it (no
+    flashbax/orbax bit-exact resume yet — the flat-MLP path keeps that infra).
+    Experiment 0004's `net=gnn` variant composes it.
   - `train_state.py::TrainState` — the whole mutable run state (params,
     optimiser moments, replay buffer, iteration, best), orbax-serialised for
     **bit-exact resume**: `learn` rebuilds the static optimiser/buffer from

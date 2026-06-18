@@ -23,8 +23,11 @@ from settlrl_learn.train_state import TrainState
 class AlphaZeroConfig(Config):
     seed: int = 0
     # net
+    net: Literal["mlp", "gnn"] = "mlp"  # flat engineered MLP, or the board GNN
     width: int = 64
-    depth: int = 2  # trunk hidden layers
+    depth: int = 2  # trunk hidden layers (GNN: readout-head hidden layers)
+    layers: int = 3  # GNN message-passing layers (ignored by mlp)
+    gnn_preset: str = "gn_global"  # settlrl_learn.graphnet.PRESETS key
     # search
     num_simulations: int = 64
     max_num_considered_actions: int = 16
@@ -53,6 +56,34 @@ class AlphaZeroConfig(Config):
 
 VARIANTS: dict[str, dict[str, object]] = {
     "default": {},
+    # The experiment-0003 GNN (gn_global) as the value+policy trunk, small budget.
+    "gnn": {
+        "net": "gnn",
+        "width": 64,
+        "layers": 3,
+        "n_iterations": 8,
+        "selfplay_samples": 1024,
+        "selfplay_batch": 64,
+        "train_steps": 150,
+        "num_simulations": 32,
+        "arena_games": 40,
+        "arena_every": 2,
+    },
+    "gnn_smoke": {
+        "net": "gnn",
+        "width": 16,
+        "layers": 2,
+        "num_simulations": 4,
+        "max_num_considered_actions": 4,
+        "n_iterations": 1,
+        "selfplay_samples": 8,
+        "selfplay_batch": 4,
+        "train_steps": 2,
+        "batch_size": 4,
+        "arena_games": 4,
+        "arena_every": 1,
+        "wandb_mode": "disabled",
+    },
     "smoke": {
         "width": 16,
         "depth": 1,
@@ -72,7 +103,68 @@ VARIANTS: dict[str, dict[str, object]] = {
 }
 
 
+def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
+    """The board-GNN value+policy net (experiment 0003's recommendation) in a
+    small AlphaZero loop (in-memory replay; the flat-MLP path keeps the bit-exact
+    flashbax/orbax infra)."""
+    import equinox as eqx
+    from settlrl_learn import azgnn
+    from settlrl_learn.graphnet import PRESETS
+
+    base = PRESETS.get(cfg.gnn_preset, PRESETS["gn_global"])
+    netcfg = base._replace(width=cfg.width, layers=cfg.layers, head_depth=cfg.depth)
+    wb = wandb.init(
+        project=cfg.wandb_project, mode=cfg.wandb_mode, config=cfg.dump(),
+        reinit=True, dir=str(run.dir),
+    )  # fmt: skip
+    best = -1.0
+
+    def on_iter(i: int, metrics: dict[str, float], model: azgnn.AZGraphNet) -> None:
+        nonlocal best
+        run.log(iteration=i, **metrics)
+        wb.log({"iteration": i, **metrics}, step=i)
+        winrate = metrics.get("arena_winrate")
+        if winrate is not None and winrate > best:
+            best = winrate
+            eqx.tree_serialise_leaves(run.dir / "best.eqx", model)
+
+    try:
+        model = azgnn.learn(
+            cfg=netcfg,
+            n_iterations=cfg.n_iterations,
+            selfplay_samples=cfg.selfplay_samples,
+            selfplay_batch=cfg.selfplay_batch,
+            num_simulations=cfg.num_simulations,
+            max_num_considered_actions=cfg.max_num_considered_actions,
+            temperature=cfg.temperature,
+            buffer_max=cfg.buffer_max,
+            batch_size=cfg.batch_size,
+            train_steps=cfg.train_steps,
+            lr=cfg.lr,
+            weight_decay=cfg.weight_decay,
+            arena_games=cfg.arena_games,
+            arena_every=cfg.arena_every,
+            seed=cfg.seed,
+            checkpoint_dir=run.dir,
+            on_iter=on_iter,
+        )
+    finally:
+        wb.finish()
+
+    winrate = azgnn.arena(
+        model, n_games=cfg.arena_games, num_simulations=cfg.num_simulations,
+        max_num_considered_actions=cfg.max_num_considered_actions, seed=cfg.seed + 99,
+    )  # fmt: skip
+    verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
+    run.finish(
+        verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
+    )
+
+
 def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
+    if cfg.net == "gnn":
+        run_gnn_experiment(run, cfg)
+        return
     params = init_az_params(jax.random.key(cfg.seed), (cfg.width,) * cfg.depth)
 
     # Resume: restore the prior run's TrainState and continue its wandb run so
