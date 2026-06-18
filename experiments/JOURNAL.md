@@ -43,3 +43,12 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   `gn_global` (sum-MPNN + virtual global node + multi-aggregator readout +
   LayerNorm; no attention/GraphNorm/JK) — the robust all-rounder for the AZ
   value+policy net.
+- 0003 multi-task + road-reasoning probe (2026-06-18). Multi-task (shared trunk,
+  head per target win+heur+road+turns): negative transfer onto the structural
+  `road` head (gn_global 0.98→0.82) while easy heads hold; plain `gn_base` is the
+  most robust trunk and its win head *improves* (0.738→0.766) from the structural
+  auxiliary — a single AZ value+policy trunk wants sum-MPNN + loss-balancing.
+  Road probe (`road_probe.py`, controlled paths/branchy/broken mix): the GNN is
+  not edge-counting (on |count-longest|≥2 cases it predicts true longest 7.2 not
+  count 11.1) but is depth-limited as expected — 1 layer fails (R² 0.58), depth 2
+  →0.92, then plateaus; greedy road 0.99 was an easy near-simple-path artefact.
