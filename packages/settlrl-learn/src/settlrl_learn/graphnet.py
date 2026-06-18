@@ -168,36 +168,46 @@ class _Layer(eqx.Module):
         return h, g
 
 
-class GraphNet(eqx.Module):
+def _pool(readout: str, h: Float[Array, "v w"]) -> Array:
+    if readout == "mean":
+        return h.mean(0)
+    if readout == "sum":
+        return h.sum(0)
+    return jnp.concatenate([h.mean(0), h.max(0), h.sum(0)])  # multi (PNA-style)
+
+
+def readout_dim(cfg: GraphNetConfig) -> int:
+    """Width of ``GraphTrunk``'s pooled readout (before the trailing global g)."""
+    per_pool = cfg.width * (3 if cfg.readout == "multi" else 1)
+    return per_pool * (cfg.layers if cfg.jk else 1)
+
+
+class GraphTrunk(eqx.Module):
+    """The shared message-passing trunk: encode the board graph, run the layers,
+    and return the final per-node embeddings, the global vector, and the pooled
+    readout (multi-scale if ``jk``). Both :class:`GraphNet` (single head) and the
+    AlphaZero value+policy net build their heads on this."""
+
     node_enc: eqx.nn.Linear
     edge_enc: eqx.nn.Linear
     glob_enc: eqx.nn.Linear
     layers: tuple[_Layer, ...]
-    head: eqx.nn.MLP
     cfg: GraphNetConfig = eqx.field(static=True)
 
-    def __init__(self, key: KeyScalar, *, out_dim: int, cfg: GraphNetConfig) -> None:
+    def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
         from settlrl_learn.graph import EDGE_DIM, GLOBAL_DIM, NODE_DIM
 
         w = cfg.width
-        keys = jax.random.split(key, 4 + cfg.layers)
+        keys = jax.random.split(key, 3 + cfg.layers)
         self.node_enc = eqx.nn.Linear(NODE_DIM, w, key=keys[0])
         self.edge_enc = eqx.nn.Linear(EDGE_DIM, w, key=keys[1])
         self.glob_enc = eqx.nn.Linear(GLOBAL_DIM, w, key=keys[2])
-        self.layers = tuple(_Layer(keys[4 + i], cfg) for i in range(cfg.layers))
-        per_pool = w * (3 if cfg.readout == "multi" else 1)
-        pooled = per_pool * (cfg.layers if cfg.jk else 1)
-        self.head = eqx.nn.MLP(pooled + w, out_dim, w, cfg.head_depth, key=keys[3])
+        self.layers = tuple(_Layer(keys[3 + i], cfg) for i in range(cfg.layers))
         self.cfg = cfg
 
-    def _pool(self, h: Float[Array, "v w"]) -> Array:
-        if self.cfg.readout == "mean":
-            return h.mean(0)
-        if self.cfg.readout == "sum":
-            return h.sum(0)
-        return jnp.concatenate([h.mean(0), h.max(0), h.sum(0)])  # multi (PNA-style)
-
-    def __call__(self, s: Sample) -> Float[Array, "out"]:
+    def __call__(
+        self, s: Sample
+    ) -> tuple[Float[Array, "v w"], Float[Array, "w"], Array]:
         h = jax.vmap(self.node_enc)(s.nodes)
         # undirected edges are mirrored in `s.edges`; encode once, share per layer.
         e = jax.vmap(self.edge_enc)(s.edges)
@@ -206,8 +216,26 @@ class GraphNet(eqx.Module):
         for layer in self.layers:
             h, g = layer(h, e, g)
             if self.cfg.jk:
-                pools.append(self._pool(h))
-        readout = jnp.concatenate(pools) if self.cfg.jk else self._pool(h)
+                pools.append(_pool(self.cfg.readout, h))
+        readout = jnp.concatenate(pools) if self.cfg.jk else _pool(self.cfg.readout, h)
+        return h, g, readout
+
+
+class GraphNet(eqx.Module):
+    trunk: GraphTrunk
+    head: eqx.nn.MLP
+    cfg: GraphNetConfig = eqx.field(static=True)
+
+    def __init__(self, key: KeyScalar, *, out_dim: int, cfg: GraphNetConfig) -> None:
+        k_trunk, k_head = jax.random.split(key)
+        self.trunk = GraphTrunk(k_trunk, cfg)
+        self.head = eqx.nn.MLP(
+            readout_dim(cfg) + cfg.width, out_dim, cfg.width, cfg.head_depth, key=k_head
+        )
+        self.cfg = cfg
+
+    def __call__(self, s: Sample) -> Float[Array, "out"]:
+        _h, g, readout = self.trunk(s)
         return self.head(jnp.concatenate([readout, g]))
 
 

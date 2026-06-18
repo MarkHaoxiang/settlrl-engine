@@ -33,10 +33,11 @@ from settlrl_agents.policy import PolicyPrior
 from settlrl_agents.search import make_search, make_search_weights
 from settlrl_agents.value import Value, ValueFunction
 from settlrl_engine.belief import belief_view
-from settlrl_engine.board.layout import N_VERTICES, BoardLayout
+from settlrl_engine.board.layout import EDGE_V, N_VERTICES, TILE_V, BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT, BatchedSettlrlEnv, flat_to_action
 
+from settlrl_learn import action_layout as al
 from settlrl_learn.features import FEATURE_DIM
 from settlrl_learn.graph import (
     EDGE_DIM,
@@ -46,21 +47,69 @@ from settlrl_learn.graph import (
     Sample,
     board_sample,
 )
-from settlrl_learn.graphnet import PRESETS, GraphNet, GraphNetConfig
+from settlrl_learn.graphnet import PRESETS, GraphNetConfig, GraphTrunk, readout_dim
+
+# undirected-edge endpoints and tile corner-vertices, for the spatial heads.
+_EDGE_U, _EDGE_W = EDGE_V[:, 0], EDGE_V[:, 1]
+_TILE_V = jnp.asarray(TILE_V)
+_SCATTER = jnp.asarray(al.SCATTER)
+_TYPE_ID = jnp.asarray(al.TYPE_ID)
+
+
+class _FactoredPolicy(eqx.Module):
+    """A structure-aware policy head: spatial actions get their logit from the
+    matching board embedding (vertex / undirected-edge / tile), the rest from a
+    dense head, plus a per-type bias (the class-balance knob). Equivariant under
+    board symmetry (shared per-slot heads), invariant under player relabeling."""
+
+    vertex: eqx.nn.Linear  # node emb -> {setup-settle, settle, city}
+    edge: eqx.nn.Linear  # symmetric endpoint emb -> {setup-road, road}
+    tile: eqx.nn.Linear  # mean corner emb -> {robber, knight} x {no-steal, steal}
+    other: eqx.nn.MLP  # global ctx -> the non-spatial actions
+    type_bias: eqx.nn.Linear  # global ctx -> per-type bias
+
+    def __init__(self, key: Array, cfg: GraphNetConfig, ctx_dim: int) -> None:
+        w = cfg.width
+        ks = jax.random.split(key, 5)
+        self.vertex = eqx.nn.Linear(w, al.N_VCLASS, key=ks[0])
+        self.edge = eqx.nn.Linear(w, al.N_ECLASS, key=ks[1])
+        self.tile = eqx.nn.Linear(w, al.N_TCLASS, key=ks[2])
+        self.other = eqx.nn.MLP(ctx_dim, al.N_OTHER, w, cfg.head_depth, key=ks[3])
+        self.type_bias = eqx.nn.Linear(ctx_dim, al.N_TYPES, key=ks[4])
+
+    def __call__(
+        self, h: Float[Array, "v w"], ctx: Float[Array, "ctx"]
+    ) -> Float[Array, f"flat={N_FLAT}"]:
+        v = jax.vmap(self.vertex)(h)  # (V, N_VCLASS)
+        e = jax.vmap(self.edge)(h[_EDGE_U] + h[_EDGE_W])  # (E, N_ECLASS), symmetric
+        t = jax.vmap(self.tile)(h[_TILE_V].mean(axis=1))  # (T, N_TCLASS)
+        big = jnp.concatenate(
+            [v.reshape(-1), e.reshape(-1), t.reshape(-1), self.other(ctx)]
+        )
+        return big[_SCATTER] + self.type_bias(ctx)[_TYPE_ID]
 
 
 class AZGraphNet(eqx.Module):
-    """A GraphNet trunk over the board graph with a value + policy head: the
-    forward returns ``(value_logit, policy_logits)`` (``value_scale=2``)."""
+    """The board value+policy net: a shared :class:`GraphTrunk`, then the heads
+    **split right after message passing** -- a value head (pooled readout ->
+    win-prob logit, ``value_scale=2``) and the structure-factored policy head
+    (:class:`_FactoredPolicy`). Returns ``(value_logit, policy_logits)``."""
 
-    net: GraphNet
+    trunk: GraphTrunk
+    value: eqx.nn.MLP
+    policy: _FactoredPolicy
 
     def __init__(self, key: Array, cfg: GraphNetConfig) -> None:
-        self.net = GraphNet(key, out_dim=1 + N_FLAT, cfg=cfg)
+        kt, kv, kp = jax.random.split(key, 3)
+        ctx_dim = readout_dim(cfg) + cfg.width
+        self.trunk = GraphTrunk(kt, cfg)
+        self.value = eqx.nn.MLP(ctx_dim, 1, cfg.width, cfg.head_depth, key=kv)
+        self.policy = _FactoredPolicy(kp, cfg, ctx_dim)
 
     def __call__(self, s: Sample) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]:
-        out = self.net(s)
-        return out[0], out[1:]
+        h, g, readout = self.trunk(s)
+        ctx = jnp.concatenate([readout, g])
+        return self.value(ctx)[0], self.policy(h, ctx)
 
 
 def make_az_gnn(model: AZGraphNet) -> tuple[ValueFunction, PolicyPrior]:

@@ -21,6 +21,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
+from settlrl_agents.internal.rows import ROW_IDX, ROW_TARGET, ROW_TYPE, flat_row
 from settlrl_engine.board.layout import (
     N_EDGES,
     N_PORTS,
@@ -36,6 +37,7 @@ from settlrl_engine.board.layout import (
     vertex_index,
 )
 from settlrl_engine.board.state import BoardState
+from settlrl_engine.env import N_FLAT, ActionType
 
 Cube = tuple[int, int, int]
 _AxisOp = tuple[tuple[int, ...], int]  # (axis permutation, sign)
@@ -151,3 +153,26 @@ def relabel_players(state: BoardState, perm: np.ndarray) -> BoardState:
         longest_road_owner=remap_idx(state.longest_road_owner),
         largest_army_owner=remap_idx(state.largest_army_owner),
     )
+
+
+def action_permutation(sym: Symmetry) -> np.ndarray:
+    """The flat-action permutation induced by board symmetry ``sym``: an action's
+    image is the same action type at the symmetry-mapped vertex / edge / tile
+    (non-spatial actions map to themselves). For the policy *equivariance* test:
+    ``policy(apply_symmetry(board))[action_permutation(sym)] == policy(board)``."""
+    rt, ri, tg = np.asarray(ROW_TYPE), np.asarray(ROW_IDX), np.asarray(ROW_TARGET)
+    vt = {int(a) for a in (ActionType.SETUP_SETTLEMENT, ActionType.BUILD_SETTLEMENT,
+                           ActionType.BUILD_CITY)}  # fmt: skip
+    et = {int(ActionType.SETUP_ROAD), int(ActionType.BUILD_ROAD)}
+    tt = {int(ActionType.MOVE_ROBBER), int(ActionType.PLAY_KNIGHT)}
+    perm = np.arange(N_FLAT)
+    for a in range(N_FLAT):
+        t = int(rt[a])
+        slot = (
+            sym.vertices if t in vt else sym.edges if t in et else sym.tiles
+            if t in tt else None
+        )  # fmt: skip
+        if slot is not None:
+            perm[a] = flat_row(ActionType(t), int(slot[ri[a]]), int(tg[a]))
+    assert sorted(perm.tolist()) == list(range(N_FLAT)), "not a permutation"
+    return perm

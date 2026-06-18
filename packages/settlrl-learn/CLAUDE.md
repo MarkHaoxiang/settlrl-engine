@@ -50,9 +50,24 @@ deps only because this subpackage uses them.
     vs `lookahead(heuristic)`, the Stage-1 gate), and the `learn` loop. Value
     target is pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a
     search that exposes root Q (see the Canopy reference below).
-  - `azgnn.py` — the AlphaZero loop with a **GNN trunk** (`AZGraphNet` = a
-    `graphnet.GraphNet` over `graph.board_sample` with value + policy heads,
-    experiment 0003's recommended `gn_global`). Mirrors `selfplay`/`alphazero`
+  - `graphnet.py::GraphTrunk` — the shared message-passing trunk (encoders +
+    layers → per-node embeddings + global + pooled readout); `GraphNet` (single
+    head) and `azgnn.AZGraphNet` both build their heads on it.
+  - `action_layout.py` — the static map from the flat 662 action space to its
+    board structure (which actions are per-vertex / -edge / -tile vs. dense
+    "other"), and `SCATTER` to place a structure-factored head's compact logits
+    back into the flat vector. The robber/knight *victim* collapses to
+    no-steal/steal (the opponent-relative features can't individuate victims, so
+    a per-victim logit could not be player-relabel invariant).
+  - `azgnn.py` — the AlphaZero loop with a **GNN trunk** (`AZGraphNet` over
+    `graph.board_sample`). The value and policy heads **split right after the
+    trunk** (no shared head MLP). The policy is **structure-factored**: a shared
+    per-vertex / per-edge (symmetric endpoints) / per-tile (corner-vertex mean)
+    head emits spatial-action logits, a dense head the rest, plus a per-type bias
+    (class balance). Tests in `tests/test_architectures.py` enforce: value
+    invariant, policy *equivariant* under board symmetry (an action at v maps to
+    the action at σv — `action_permutation`), both invariant under player
+    relabeling. Mirrors `selfplay`/`alphazero`
     for an equinox model: `make_az_gnn` adapts onto the search seams, `self_play`
     records the board graph, and `learn` runs the loop over a flashbax on-device
     replay. The whole `GNNState` is **eqx-serialised** every iteration for

@@ -148,9 +148,13 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         nonlocal best
         run.log(iteration=i, **metrics)  # scalars -> metrics.jsonl
         log: dict[str, object] = {"iteration": i, **metrics}
-        # param distributions as wandb histograms (whole net + the value/policy
-        # readout head, where a collapse shows first).
-        for name, tree in (("params/all", model), ("params/head", model.net.head)):
+        # param distributions as wandb histograms (whole net + each head, where a
+        # collapse shows first).
+        for name, tree in (
+            ("params/all", model),
+            ("params/policy", model.policy),
+            ("params/value", model.value),
+        ):
             arrs = [
                 np.asarray(x).ravel()
                 for x in jax.tree.leaves(eqx.filter(tree, eqx.is_inexact_array))

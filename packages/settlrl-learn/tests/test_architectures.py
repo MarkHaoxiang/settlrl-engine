@@ -16,10 +16,17 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from _symmetry import apply_symmetry, board_symmetries, relabel_players
+from _symmetry import (
+    action_permutation,
+    apply_symmetry,
+    board_symmetries,
+    relabel_players,
+)
+from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_engine.board import Board
-from settlrl_engine.env import BatchedSettlrlEnv
+from settlrl_engine.env import ActionType, BatchedSettlrlEnv
 from settlrl_learn.architectures import DeepSetModel, GNNModel, MLPModel
+from settlrl_learn.azgnn import AZGraphNet
 from settlrl_learn.graph import board_sample
 from settlrl_learn.graphnet import PRESETS, GraphNet
 
@@ -120,3 +127,42 @@ def test_flat_mlp_is_not_symmetry_invariant() -> None:
         for l2, s2 in (apply_symmetry(layout, state, sym) for sym in board_symmetries())
     )
     assert moved > 1e-3
+
+
+def _aznet() -> AZGraphNet:
+    cfg = PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
+    return AZGraphNet(jax.random.key(0), cfg)
+
+
+def test_aznet_value_invariant_policy_equivariant_under_board_symmetry() -> None:
+    # The factored value+policy net: the value is invariant under a board
+    # symmetry, and the policy is *equivariant* -- a settlement-at-v action maps
+    # to settlement-at-(sigma v), road-at-e to road-at-(sigma e), robber-tile-t
+    # to sigma(t) -- so policy(sigma . board)[action_permutation] == policy(board).
+    layout, state = _mid_game(4)
+    net = _aznet()
+    p = jnp.int32(0)
+    vv, pp = net(board_sample(layout, state, p))
+    v0, pol0 = np.asarray(vv), np.asarray(pp)
+    for sym in board_symmetries():
+        l2, s2 = apply_symmetry(layout, state, sym)
+        v, pol = net(board_sample(l2, s2, p))
+        assert np.allclose(np.asarray(v), v0, atol=1e-3)  # value invariant
+        perm = action_permutation(sym)
+        assert np.allclose(np.asarray(pol)[perm], pol0, atol=1e-3)  # policy equivariant
+
+
+def test_aznet_value_and_policy_invariant_under_player_relabel() -> None:
+    layout, state = _mid_game(4)
+    net = _aznet()
+    vv, pp = net(board_sample(layout, state, jnp.int32(0)))
+    v0, pol0 = np.asarray(vv), np.asarray(pp)
+    perm = np.array([1, 2, 3, 0])
+    relabeled = board_sample(layout, relabel_players(state, perm), jnp.int32(perm[0]))
+    v, pol = net(relabeled)
+    assert np.allclose(np.asarray(v), v0, atol=1e-3)  # value invariant
+    # Spatial (vertex/edge/tile, with the robber victim collapsed to no-steal vs
+    # steal) and non-player-indexed actions are relabel-invariant; PROPOSE_TRADE's
+    # partner index inherits the opponent-collapse limitation, so it is excluded.
+    keep = np.asarray(ROW_TYPE) != int(ActionType.PROPOSE_TRADE)
+    assert np.allclose(np.asarray(pol)[keep], pol0[keep], atol=1e-3)
