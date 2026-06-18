@@ -126,6 +126,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     small AlphaZero loop (in-memory replay; the flat-MLP path keeps the bit-exact
     flashbax/orbax infra)."""
     import equinox as eqx
+    import numpy as np
+
     from settlrl_learn import azgnn
     from settlrl_learn.graphnet import PRESETS
 
@@ -143,8 +145,18 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
     def on_iter(i: int, metrics: dict[str, float], model: azgnn.AZGraphNet) -> None:
         nonlocal best
-        run.log(iteration=i, **metrics)
-        wb.log({"iteration": i, **metrics}, step=i)
+        run.log(iteration=i, **metrics)  # scalars -> metrics.jsonl
+        log: dict[str, object] = {"iteration": i, **metrics}
+        # param distributions as wandb histograms (whole net + the value/policy
+        # readout head, where a collapse shows first).
+        for name, tree in (("params/all", model), ("params/head", model.net.head)):
+            arrs = [
+                np.asarray(x).ravel()
+                for x in jax.tree.leaves(eqx.filter(tree, eqx.is_inexact_array))
+            ]
+            if arrs:
+                log[name] = wandb.Histogram(np.concatenate(arrs))  # type: ignore[arg-type]
+        wb.log(log, step=i)
         winrate = metrics.get("arena_winrate")
         if winrate is not None and winrate > best:
             best = winrate

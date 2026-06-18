@@ -16,6 +16,7 @@ A training-side module (equinox/jraph/optax/flashbax): not imported by the root.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple, cast
@@ -336,25 +337,43 @@ def learn(
             m, s, pol, val
         )
         updates, st = opt.update(grads, st, eqx.filter(m, eqx.is_inexact_array))
-        return eqx.apply_updates(m, updates), st, loss, aux
+        return (
+            eqx.apply_updates(m, updates), st, loss, aux,
+            optax.global_norm(grads), optax.global_norm(updates),
+        )  # fmt: skip
 
     @eqx.filter_jit
     def evaluate_net(m: Any, s: Sample, pol: Array, val: Array) -> dict[str, Array]:
         vs, logits = jax.vmap(m)(s)
         logp = jax.nn.log_softmax(logits, axis=-1)
+        p = jnp.exp(logp)
         return {
             "val_policy_loss": -jnp.mean(jnp.sum(pol * logp, axis=-1)),
             "val_value_loss": jnp.mean(jax.nn.softplus(vs) - val * vs),
             "val_value_acc": jnp.mean((vs > 0).astype(jnp.float32) == val),
+            # policy-head health: entropy (collapse -> ~0) vs uniform log(N_FLAT).
+            "policy_entropy": -jnp.mean(jnp.sum(p * logp, axis=-1)),
+            "policy_top_prob": jnp.mean(jnp.max(p, axis=-1)),
+            # value-head health: logit spread + mean predicted P(win) (~0.5 sane).
+            "value_logit_mean": jnp.mean(vs),
+            "value_logit_std": jnp.std(vs),
+            "pred_winrate": jnp.mean(jax.nn.sigmoid(vs)),
+            "value_label_mean": jnp.mean(val),
         }
+
+    @eqx.filter_jit
+    def _param_norm(m: Any) -> Array:
+        return optax.global_norm(eqx.filter(m, eqx.is_inexact_array))
 
     ev: GNNSamples | None = None
     for i in range(int(state.iteration), n_iterations):
+        t0 = time.perf_counter()
         fresh = self_play(
             model, n_samples=selfplay_samples, num_simulations=num_simulations,
             max_num_considered_actions=max_num_considered_actions,
             batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
         )  # fmt: skip
+        t_selfplay = time.perf_counter() - t0
         # hold out a never-trained eval slice (reproducible per iteration), buffer
         # the rest into flashbax.
         nf = fresh.value.shape[0]
@@ -368,26 +387,47 @@ def learn(
             if reuse <= 0
             else max(1, int(reuse * fr.value.shape[0] / batch_size))
         )
-        metrics: dict[str, float] = {"samples": float(nf), "train_steps": float(steps)}
+        # entropy of the search policy *targets* (degenerate targets -> the net
+        # learns a degenerate policy): the diagnostic alongside the net's own
+        # policy_entropy.
+        tp = jnp.asarray(fr.policy)
+        target_entropy = float(
+            -jnp.mean(jnp.sum(tp * jnp.log(jnp.clip(tp, 1e-9, 1.0)), axis=-1))
+        )
+        metrics: dict[str, float] = {
+            "samples": float(nf), "train_steps": float(steps),
+            "buffer_size": float(buf_state.current_index) if hasattr(buf_state, "current_index") else float("nan"),
+            "lr": float(lr), "target_entropy": target_entropy,
+            "param_norm": float(_param_norm(model)), "t_selfplay": t_selfplay,
+        }  # fmt: skip
         key = jax.random.key(seed + 10_000 + i)
+        t1 = time.perf_counter()
         if bool(buffer.can_sample(buf_state)):
+            gnorms, unorms = [], []
             for _ in range(steps):
                 key, k = jax.random.split(key)
                 b = buffer.sample(buf_state, k).experience
                 s = Sample(
                     b.nodes, b.edges, b.glob, jnp.zeros((batch_size, FEATURE_DIM))
                 )
-                model, opt_state, loss, aux = step(
+                model, opt_state, loss, aux, gnorm, unorm = step(
                     model, opt_state, s, b.policy, b.value
                 )
+                gnorms.append(float(gnorm))
+                unorms.append(float(unorm))
             metrics["loss"] = float(loss)
+            metrics["grad_norm"] = float(np.mean(gnorms))
+            metrics["grad_norm_max"] = float(np.max(gnorms))
+            metrics["update_norm"] = float(np.mean(unorms))
             metrics.update({k2: float(v) for k2, v in aux.items()})
+        metrics["t_train"] = time.perf_counter() - t1
         if ev.value.shape[0] >= batch_size:
             vm = evaluate_net(
                 model, _to_sample(ev), jnp.asarray(ev.policy), jnp.asarray(ev.value)
             )
             metrics.update({k2: float(v) for k2, v in vm.items()})
         if arena_games and (i + 1) % arena_every == 0:
+            t2 = time.perf_counter()
             winrate = arena(
                 model, opponent="lookahead", n_games=arena_games,
                 num_simulations=num_simulations,
@@ -401,6 +441,7 @@ def learn(
                 max_num_considered_actions=max_num_considered_actions,
                 seed=seed + 30_000 + i,
             )  # fmt: skip
+            metrics["t_arena"] = time.perf_counter() - t2
             best = max(best, winrate)
         if ckpt is not None and (i + 1) % checkpoint_every == 0:
             save_gnn_state(
