@@ -272,7 +272,14 @@ def make_search_weights(
         k_root, k_gate, k_search = jax.random.split(key, 3)
 
         def replay(rng: KeyScalar, path: _Path) -> BoardState:
-            """The parent node's state, replaying ``path`` under a fresh world."""
+            """The parent node's state, replaying ``path`` under a fresh world.
+
+            Looped to the path's *own* depth, not ``max_depth``: at ~32 sims the
+            tree is a few plies, so replaying the fixed ``max_depth`` history spent
+            most steps on masked no-ops (a no-op ``apply_action`` still runs the
+            full transition). The body still guards ``i < depth``, so the dynamic
+            bound is output-identical -- it just skips the dead tail.
+            """
             world = jax.vmap(sample_world, in_axes=(0, None, None))(
                 jax.random.split(rng, 1), view, player
             )
@@ -284,7 +291,8 @@ def make_search_weights(
                 nxt, _ = jax.vmap(apply_action)(layout_b, state, atype, aparams, avail)
                 return nxt
 
-            return cast(BoardState, jax.lax.fori_loop(0, max_depth, step, world))
+            depth = jnp.minimum(path.depth.reshape(()), max_depth)
+            return cast(BoardState, jax.lax.fori_loop(0, depth, step, world))
 
         def recurrent_fn(
             params: None, rng: KeyScalar, action: Array, embedding: _Path

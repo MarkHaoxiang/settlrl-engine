@@ -197,8 +197,14 @@ at no strength cost:
   64 worlds `0.307` — more worlds doesn't help), and ~ties at 2p (belief ~exact
   there). Shipping it is the principled-but-not-stronger choice on record; the
   lever remains the leaf (experiment 0003 / settlrl-learn). Cost: one
-  `sample_world` + up to `max_depth` engine steps per simulation, markedly
-  slower than the old frozen-world search at equal sims.
+  `sample_world` (cheap — 0.05 ms; the dynamic resource deal is not the
+  bottleneck) + the **leaf's own depth** of engine steps per simulation. The
+  replay loop is bounded by the path depth, not `max_depth`: at ~32 sims the
+  tree is a few plies, so replaying the fixed `max_depth=12` history spent ~58%
+  of the move on masked-no-op `apply_action`s (a no-op transition still runs).
+  Bounding it is output-identical (the body already guards `i < depth`, and the
+  skipped tail consumes no RNG) and ~1.8× faster (B=1 CPU: 16.4 → 9.2 ms at the
+  mcts default; latency now near-flat in `max_depth`, so the cap is ~free).
 
 `num_simulations=0` is the **lookahead** special case: no tree, just the masked
 argmax of the root one-step value sweep over `num_trees` sampled worlds. It is
