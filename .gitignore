@@ -18,6 +18,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# ...but the web frontend's source lib/ is real source, not a Python build dir.
+!packages/settlrl-app/frontend/src/lib/
 parts/
 sdist/
 var/

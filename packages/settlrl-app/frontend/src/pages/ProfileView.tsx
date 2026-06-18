@@ -3,8 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import MyGames from "../components/MyGames";
 import ThemeToggle from "../components/ThemeToggle";
-import { currentUser, gameHistory, type AuthUser, type PastGame } from "../lib/auth";
+import { currentUser, type AuthUser } from "../lib/auth";
 import { downloadRecord } from "../lib/game";
+import { useHistory, type PastGame } from "../lib/queries";
 import { loadReplayFromGame } from "../lib/replay";
 import { LINK, buttonStyle, panelStyle, smallButtonStyle } from "../lib/ui";
 
@@ -18,7 +19,7 @@ const outcome = (g: PastGame) =>
 export default function ProfileView() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checked, setChecked] = useState(false);
-  const [past, setPast] = useState<PastGame[]>([]);
+  const past = useHistory(user).data ?? [];
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,10 +28,6 @@ export default function ProfileView() {
       setChecked(true);
     });
   }, []);
-  useEffect(() => {
-    if (user) void gameHistory().then(setPast);
-    else setPast([]);
-  }, [user]);
 
   const replay = async (id: string) => {
     await loadReplayFromGame(id);

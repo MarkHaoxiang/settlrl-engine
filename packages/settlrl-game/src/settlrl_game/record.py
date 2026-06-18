@@ -9,11 +9,13 @@ reconstruct the exact position. JSON round-trips for persistence.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import field
 from random import Random
 from typing import Literal
+
+from pydantic import TypeAdapter
+from pydantic.dataclasses import dataclass
 
 import settlrl_game.reference as ref
 from settlrl_game.actions import to_action
@@ -42,34 +44,22 @@ class Move:
 class GameRecord:
     seed: int
     n_players: int
-    number_placement: str
+    number_placement: str = "random"
     moves: tuple[Move, ...] = ()
     winner: int | None = None
     meta: dict[str, object] = field(default_factory=dict)
 
     def to_json(self) -> str:
-        return json.dumps(
-            {
-                "seed": self.seed,
-                "n_players": self.n_players,
-                "number_placement": self.number_placement,
-                "moves": [asdict(m) for m in self.moves],
-                "winner": self.winner,
-                "meta": self.meta,
-            }
-        )
+        return _ADAPTER.dump_json(self).decode()
 
     @classmethod
     def from_json(cls, text: str) -> GameRecord:
-        d = json.loads(text)
-        return cls(
-            seed=d["seed"],
-            n_players=d["n_players"],
-            number_placement=d.get("number_placement", "random"),
-            moves=tuple(Move(**m) for m in d.get("moves", [])),
-            winner=d.get("winner"),
-            meta=d.get("meta", {}),
-        )
+        """Parse a record, raising ``pydantic.ValidationError`` (a ``ValueError``)
+        on a malformed one."""
+        return _ADAPTER.validate_json(text)
+
+
+_ADAPTER: TypeAdapter[GameRecord] = TypeAdapter(GameRecord)
 
 
 def initial_game(record: GameRecord) -> ref.Game:

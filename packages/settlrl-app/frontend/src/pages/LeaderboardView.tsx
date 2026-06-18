@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, type AuthUser } from "../lib/auth";
-import { leaderboard, type LeaderboardEntry } from "../lib/leaderboard";
+import { useLeaderboard, type LeaderboardEntry } from "../lib/queries";
 import { ACCENT, DIVIDER, LINK, panelStyle, selectedStyle, smallButtonStyle } from "../lib/ui";
 
 const winRate = (e: LeaderboardEntry) =>
@@ -58,12 +58,11 @@ function Ladder({ rows }: { rows: LeaderboardEntry[] }) {
 
 export default function LeaderboardView() {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [bucket, setBucket] = useState<number | null>(null);
+  const entries = useLeaderboard().data ?? [];
 
   useEffect(() => {
     void currentUser().then(setUser);
-    void leaderboard().then(setEntries);
   }, []);
 
   // The player-count buckets that actually have ratings, ascending.

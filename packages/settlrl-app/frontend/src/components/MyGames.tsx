@@ -1,16 +1,12 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { myGames, type AuthUser, type MyGame } from "../lib/auth";
+import { type AuthUser } from "../lib/auth";
+import { useMyGames } from "../lib/queries";
 import { LINK, panelStyle } from "../lib/ui";
 
 // The signed-in user's in-progress games, so they can resume on any device
 // (seats follow the account). Hidden when logged out or when there are none.
 export default function MyGames({ user }: { user: AuthUser | null }) {
-  const [games, setGames] = useState<MyGame[]>([]);
-  useEffect(() => {
-    if (user) void myGames().then(setGames);
-    else setGames([]);
-  }, [user]);
+  const games = useMyGames(user).data ?? [];
 
   if (games.length === 0) return null;
   return (

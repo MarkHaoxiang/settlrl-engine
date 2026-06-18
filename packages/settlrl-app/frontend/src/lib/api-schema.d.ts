@@ -109,9 +109,9 @@ export interface paths {
         };
         /**
          * Get Events
-         * @description Server-sent events: the requester's snapshot now, then again on
-         *     every state change (moves, bot plays, chat, joins). Comment lines
-         *     keep idle connections alive.
+         * @description Server-sent events: the requester's snapshot now, then again on every
+         *     state change (moves, bot plays, chat, joins). ``EventSourceResponse``
+         *     adds the SSE framing, keepalive pings, and client-disconnect teardown.
          */
         get: operations["get_events_api_games__game_id__events_get"];
         put?: never;

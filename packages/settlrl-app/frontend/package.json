@@ -11,8 +11,10 @@
     "e2e": "node e2e/multiplayer.mjs"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
     "@use-gesture/react": "^10.3.1",
     "eventsource-parser": "^3.1.0",
+    "openapi-fetch": "^0.17.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.16.0"

@@ -310,7 +310,7 @@
   "/api/games/{game_id}/events": {
    "get": {
     "summary": "Get Events",
-    "description": "Server-sent events: the requester's snapshot now, then again on\nevery state change (moves, bot plays, chat, joins). Comment lines\nkeep idle connections alive.",
+    "description": "Server-sent events: the requester's snapshot now, then again on every\nstate change (moves, bot plays, chat, joins). ``EventSourceResponse``\nadds the SSE framing, keepalive pings, and client-disconnect teardown.",
     "operationId": "get_events_api_games__game_id__events_get",
     "security": [
      {

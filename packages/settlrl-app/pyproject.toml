@@ -12,6 +12,9 @@ dependencies = [
     # remote bot service (settlrl-agents[service]) over HTTP.
     "settlrl-game",
     "fastapi[standard]>=0.115.0",
+    # SSE framing + keepalive pings + client-disconnect handling for the game
+    # event stream, so the endpoint doesn't hand-roll any of it.
+    "sse-starlette>=2.1.0",
     # Accounts + the single async storage layer: fastapi-users on async
     # SQLAlchemy (it bundles password hashing, so we don't hand-roll it).
     "fastapi-users[sqlalchemy]>=13.0.0",

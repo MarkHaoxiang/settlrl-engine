@@ -7,7 +7,6 @@ in ``session``, seat claims in ``games``, and what a requester may see in
 ``views``.
 """
 
-import asyncio
 from collections.abc import AsyncIterator
 from random import Random
 from typing import Annotated, Literal
@@ -15,12 +14,12 @@ from typing import Annotated, Literal
 import anyio.to_thread
 import settlrl_game.reference as ref
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from settlrl_game.convert import board_to_model
 from settlrl_game.models import BoardModel, GameModel, ReplayStateModel
 from settlrl_game.record import GameRecord
 from settlrl_game.session import HUMAN, GameSession, IllegalActionError
+from sse_starlette.sse import EventSourceResponse
 from starlette.responses import Response
 
 from settlrl_app.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
@@ -215,10 +214,10 @@ def build(deps: Deps) -> APIRouter:
     @router.get("/api/games/{game_id}/events")
     async def get_events(
         game_id: str, user: CurrentUser = None, x_seat_tokens: SeatTokens = None
-    ) -> StreamingResponse:
-        """Server-sent events: the requester's snapshot now, then again on
-        every state change (moves, bot plays, chat, joins). Comment lines
-        keep idle connections alive."""
+    ) -> EventSourceResponse:
+        """Server-sent events: the requester's snapshot now, then again on every
+        state change (moves, bot plays, chat, joins). ``EventSourceResponse``
+        adds the SSE framing, keepalive pings, and client-disconnect teardown."""
         handle = deps.handle_of(game_id)
         seat_tokens = tokens(x_seat_tokens)
         user_id = uid(user)
@@ -236,16 +235,13 @@ def build(deps: Deps) -> APIRouter:
                             handle, handle.owned_seats(seat_tokens, user_id)
                         ).model_dump_json()
                     else:
-                        body = None  # idle: fall through to a keepalive
+                        body = None
                 if body is not None:
-                    yield f"data: {body}\n\n"
-                    continue
-                try:
-                    await asyncio.wait_for(changed.wait(), timeout=15.0)
-                except TimeoutError:
-                    yield ": keepalive\n\n"
+                    yield body  # EventSourceResponse wraps it as a `data:` event
+                else:
+                    await changed.wait()  # idle: pings come from EventSourceResponse
 
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return EventSourceResponse(stream(), ping=15)
 
     @router.post("/api/games/{game_id}/chat")
     async def post_chat(

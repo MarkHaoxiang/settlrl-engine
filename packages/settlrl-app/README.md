@@ -325,7 +325,9 @@ packages/settlrl-app/
     └── src/
         ├── App.tsx          # Routes: menu, /play, /help, /profile, /leaderboard, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
-        ├── lib/api.ts        # JSON fetch wrapper (ApiError)
+        ├── lib/api.ts        # JSON fetch wrapper (ApiError) + the SSE reader
+        ├── lib/client.ts     # Typed REST client (openapi-fetch) from the schema, auth-injecting
+        ├── lib/queries.ts    # React Query hooks for the read endpoints (me/games, history, leaderboard)
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard
         ├── lib/api-schema.d.ts # Wire types generated from openapi.json (do not edit)
         ├── lib/game.ts       # Live-game API client (/api/game*)
