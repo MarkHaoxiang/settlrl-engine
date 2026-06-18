@@ -71,6 +71,22 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_games": 40,
         "arena_every": 3,
     },
+    # A genuinely larger run: more iterations + deeper search (sharper policy
+    # targets) to test whether the loop bootstraps past 0 arena. Checkpointed
+    # every 2 iters (resume via resume_from=<run dir>).
+    "gnn_large": {
+        "net": "gnn",
+        "width": 64,
+        "layers": 3,
+        "n_iterations": 24,
+        "selfplay_samples": 1536,
+        "selfplay_batch": 96,
+        "num_simulations": 48,
+        "reuse": 2.5,
+        "arena_games": 48,
+        "arena_every": 4,
+        "checkpoint_every": 2,
+    },
     "gnn_smoke": {
         "net": "gnn",
         "width": 16,
