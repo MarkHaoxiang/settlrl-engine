@@ -129,12 +129,13 @@ def make_az_gnn(model: AZGraphNet) -> tuple[ValueFunction, PolicyPrior]:
 
 class GNNSamples(NamedTuple):
     """Self-play positions: the board graph (nodes/edges/glob), the search's
-    improved policy, and the acting seat's eventual win (1) / loss (0)."""
+    improved policy, the legality mask, and the acting seat's win (1) / loss (0)."""
 
     nodes: np.ndarray
     edges: np.ndarray
     glob: np.ndarray
     policy: np.ndarray
+    mask: np.ndarray
     value: np.ndarray
 
 
@@ -187,11 +188,9 @@ def self_play(
         batch_size=batch_size, seed=seed, reward="sparse",
         n_players=n_players, track_beliefs=True,
     )  # fmt: skip
-    pending: list[list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]]] = [
-        [] for _ in range(batch_size)
-    ]
+    pending: list[list[tuple[Any, ...]]] = [[] for _ in range(batch_size)]
     out: dict[str, list[np.ndarray]] = {
-        k: [] for k in ("nodes", "edges", "glob", "pol")
+        k: [] for k in ("nodes", "edges", "glob", "pol", "mask")
     }
     vals: list[float] = []
     key = jax.random.key(seed)
@@ -213,36 +212,44 @@ def self_play(
         n_np, e_np, g_np = (
             np.asarray(s.nodes), np.asarray(s.edges), np.asarray(s.glob),
         )  # fmt: skip
-        w_np, sel_np = np.asarray(weights), np.asarray(sel)
+        w_np, sel_np, m_np = np.asarray(weights), np.asarray(sel), np.asarray(mask)
         for lane in range(batch_size):
-            pending[lane].append(
-                (n_np[lane], e_np[lane], g_np[lane], w_np[lane], int(sel_np[lane]))
-            )
+            row = (n_np[lane], e_np[lane], g_np[lane], w_np[lane], m_np[lane])
+            pending[lane].append((*row, int(sel_np[lane])))
 
         env.step(*flat_to_action(move))
         rewards = np.asarray(env.rewards)
         for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)).tolist():
-            for n_l, e_l, g_l, w_l, seat in pending[lane]:
+            for n_l, e_l, g_l, w_l, m_l, seat in pending[lane]:
                 out["nodes"].append(n_l)
                 out["edges"].append(e_l)
                 out["glob"].append(g_l)
                 out["pol"].append(w_l)
-                vals.append(float(rewards[lane, seat] > 0))
+                out["mask"].append(m_l)
+                vals.append(float(rewards[lane, int(seat)] > 0))
             pending[lane] = []
 
     return GNNSamples(
         np.stack(out["nodes"]), np.stack(out["edges"]), np.stack(out["glob"]),
-        np.stack(out["pol"]), np.asarray(vals, np.float32),
+        np.stack(out["pol"]), np.stack(out["mask"]), np.asarray(vals, np.float32),
     )  # fmt: skip
 
 
+def _masked_logp(logits: Array, mask: Array) -> Array:
+    """log-softmax over the legal actions only (illegal -> log-prob 0 weight)."""
+    return jax.nn.log_softmax(jnp.where(mask > 0, logits, -jnp.inf), axis=-1)
+
+
 def az_gnn_loss(
-    model: AZGraphNet, sample: Sample, policy: Array, value: Array
+    model: AZGraphNet, sample: Sample, policy: Array, value: Array, mask: Array
 ) -> tuple[Float[Array, ""], dict[str, Float[Array, ""]]]:
-    """Policy cross-entropy (against the search target) + value logistic loss."""
+    """Policy cross-entropy (against the search target, over *legal* actions) +
+    value logistic loss. The softmax is masked to the legal set so the net never
+    spends capacity on per-position illegality (the search masks at play time)."""
     vs, logits = jax.vmap(model)(sample)
-    logp = jax.nn.log_softmax(logits, axis=-1)
-    policy_loss = -jnp.mean(jnp.sum(policy * logp, axis=-1))
+    logp = _masked_logp(logits, mask)
+    # guard 0 * -inf on illegal slots (target is 0 there anyway).
+    policy_loss = -jnp.mean(jnp.sum(jnp.where(mask > 0, policy * logp, 0.0), axis=-1))
     value_loss = jnp.mean(jax.nn.softplus(vs) - value * vs)
     return policy_loss + value_loss, {
         "policy_loss": policy_loss,
@@ -279,13 +286,14 @@ def arena(
 
 
 class _Item(NamedTuple):
-    """One replay item (the board graph + policy + value), for the flashbax
-    on-device buffer."""
+    """One replay item (the board graph + policy + mask + value), for the
+    flashbax on-device buffer."""
 
     nodes: Array
     edges: Array
     glob: Array
     policy: Array
+    mask: Array
     value: Array
 
 
@@ -294,6 +302,7 @@ def _empty_item() -> _Item:
         jnp.zeros((N_VERTICES, NODE_DIM), jnp.float32),
         jnp.zeros((N_DIR_EDGES, EDGE_DIM), jnp.float32),
         jnp.zeros((GLOBAL_DIM,), jnp.float32),
+        jnp.zeros((N_FLAT,), jnp.float32),
         jnp.zeros((N_FLAT,), jnp.float32),
         jnp.float32(0.0),
     )
@@ -305,6 +314,7 @@ def _add(buffer: Any, state: Any, s: GNNSamples) -> Any:
         jnp.asarray(s.edges, jnp.float32),
         jnp.asarray(s.glob, jnp.float32),
         jnp.asarray(s.policy, jnp.float32),
+        jnp.asarray(s.mask, jnp.float32),
         jnp.asarray(s.value, jnp.float32),
     )
     return buffer.add(state, item)
@@ -383,9 +393,9 @@ def learn(
     ckpt = Path(checkpoint_dir) / "gnnstate.eqx" if checkpoint_dir else None
 
     @eqx.filter_jit
-    def step(m: Any, st: Any, s: Sample, pol: Array, val: Array) -> Any:
+    def step(m: Any, st: Any, s: Sample, pol: Array, val: Array, msk: Array) -> Any:
         (loss, aux), grads = eqx.filter_value_and_grad(az_gnn_loss, has_aux=True)(
-            m, s, pol, val
+            m, s, pol, val, msk
         )
         updates, st = opt.update(grads, st, eqx.filter(m, eqx.is_inexact_array))
         return (
@@ -394,16 +404,21 @@ def learn(
         )  # fmt: skip
 
     @eqx.filter_jit
-    def evaluate_net(m: Any, s: Sample, pol: Array, val: Array) -> dict[str, Array]:
+    def evaluate_net(
+        m: Any, s: Sample, pol: Array, val: Array, msk: Array
+    ) -> dict[str, Array]:
         vs, logits = jax.vmap(m)(s)
-        logp = jax.nn.log_softmax(logits, axis=-1)
-        p = jnp.exp(logp)
+        logp = _masked_logp(logits, msk)  # over legal actions only
+        p = jnp.where(msk > 0, jnp.exp(logp), 0.0)
+        legal = jnp.where(msk > 0, p * logp, 0.0)
         return {
-            "val_policy_loss": -jnp.mean(jnp.sum(pol * logp, axis=-1)),
+            "val_policy_loss": -jnp.mean(
+                jnp.sum(jnp.where(msk > 0, pol * logp, 0.0), -1)
+            ),
             "val_value_loss": jnp.mean(jax.nn.softplus(vs) - val * vs),
             "val_value_acc": jnp.mean((vs > 0).astype(jnp.float32) == val),
-            # policy-head health: entropy (collapse -> ~0) vs uniform log(N_FLAT).
-            "policy_entropy": -jnp.mean(jnp.sum(p * logp, axis=-1)),
+            # policy-head health: legal-set entropy (collapse -> ~0) + top prob.
+            "policy_entropy": -jnp.mean(jnp.sum(legal, axis=-1)),
             "policy_top_prob": jnp.mean(jnp.max(p, axis=-1)),
             # value-head health: logit spread + mean predicted P(win) (~0.5 sane).
             "value_logit_mean": jnp.mean(vs),
@@ -462,7 +477,7 @@ def learn(
                     b.nodes, b.edges, b.glob, jnp.zeros((batch_size, FEATURE_DIM))
                 )
                 model, opt_state, loss, aux, gnorm, unorm = step(
-                    model, opt_state, s, b.policy, b.value
+                    model, opt_state, s, b.policy, b.value, b.mask
                 )
                 gnorms.append(float(gnorm))
                 unorms.append(float(unorm))
@@ -474,8 +489,9 @@ def learn(
         metrics["t_train"] = time.perf_counter() - t1
         if ev.value.shape[0] >= batch_size:
             vm = evaluate_net(
-                model, _to_sample(ev), jnp.asarray(ev.policy), jnp.asarray(ev.value)
-            )
+                model, _to_sample(ev), jnp.asarray(ev.policy),
+                jnp.asarray(ev.value), jnp.asarray(ev.mask),
+            )  # fmt: skip
             metrics.update({k2: float(v) for k2, v in vm.items()})
         if arena_games and (i + 1) % arena_every == 0:
             t2 = time.perf_counter()

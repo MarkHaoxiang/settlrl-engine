@@ -24,9 +24,9 @@ from _symmetry import (
 )
 from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_engine.board import Board
-from settlrl_engine.env import ActionType, BatchedSettlrlEnv
+from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
 from settlrl_learn.architectures import DeepSetModel, GNNModel, MLPModel
-from settlrl_learn.azgnn import AZGraphNet
+from settlrl_learn.azgnn import AZGraphNet, az_gnn_loss
 from settlrl_learn.graph import board_sample
 from settlrl_learn.graphnet import PRESETS, GraphNet
 
@@ -166,3 +166,37 @@ def test_aznet_value_and_policy_invariant_under_player_relabel() -> None:
     # partner index inherits the opponent-collapse limitation, so it is excluded.
     keep = np.asarray(ROW_TYPE) != int(ActionType.PROPOSE_TRADE)
     assert np.allclose(np.asarray(pol)[keep], pol0[keep], atol=1e-3)
+
+
+def test_aznet_runs_on_random_play_boards() -> None:
+    # Fast net check (no MCTS): drive the board with a random policy and run the
+    # net forward -- correct shapes, finite values.
+    net = _aznet()
+    env = BatchedSettlrlEnv(batch_size=8, n_players=2, seed=0)
+    fwd = jax.jit(jax.vmap(lambda lo, st, p: net(board_sample(lo, st, p))))
+    key = jax.random.key(0)
+    for _ in range(40):
+        key, k = jax.random.split(key)
+        env.step(*env.random_actions(k))
+        lo, st = env.board
+        v, pol = fwd(lo, st, env.agent_selection)
+        assert v.shape == (8,) and pol.shape == (8, N_FLAT)
+        assert bool(jnp.isfinite(v).all()) and bool(jnp.isfinite(pol).all())
+
+
+def test_az_gnn_loss_masked_is_finite() -> None:
+    # The masked policy CE must stay finite (no 0 * -inf on illegal slots) for a
+    # legal-supported target -- checked on real random-play boards + their masks.
+    net = _aznet()
+    env = BatchedSettlrlEnv(batch_size=4, n_players=2, seed=1)
+    key = jax.random.key(0)
+    for _ in range(25):
+        key, k = jax.random.split(key)
+        env.step(*env.random_actions(k))
+    lo, st = env.board
+    mask = jnp.asarray(env.flat_mask(), jnp.float32)  # (4, N_FLAT)
+    samples = jax.vmap(board_sample)(lo, st, env.agent_selection)
+    target = mask / jnp.clip(mask.sum(-1, keepdims=True), 1.0)  # uniform over legal
+    loss, aux = az_gnn_loss(net, samples, target, jnp.zeros(4), mask)
+    assert bool(jnp.isfinite(loss))
+    assert all(bool(jnp.isfinite(v)) for v in aux.values())
