@@ -37,6 +37,8 @@ class AlphaZeroConfig(Config):
     selfplay_samples: int = 2048
     selfplay_batch: int = 64
     train_steps: int = 200
+    reuse: float = 0.0  # GNN: updates/iter = reuse*fresh/batch (0 -> fixed train_steps)
+    eval_frac: float = 0.1  # GNN: held-out fraction for the val_* metrics
     batch_size: int = 256
     buffer_max: int = 50_000
     buffer_min: int = 512
@@ -61,13 +63,13 @@ VARIANTS: dict[str, dict[str, object]] = {
         "net": "gnn",
         "width": 64,
         "layers": 3,
-        "n_iterations": 8,
+        "n_iterations": 12,
         "selfplay_samples": 1024,
         "selfplay_batch": 64,
-        "train_steps": 150,
+        "reuse": 3.0,  # ~12 updates/iter, not 150 -> the value head can't memorize
         "num_simulations": 32,
         "arena_games": 40,
-        "arena_every": 2,
+        "arena_every": 3,
     },
     "gnn_smoke": {
         "net": "gnn",
@@ -140,6 +142,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             buffer_max=cfg.buffer_max,
             batch_size=cfg.batch_size,
             train_steps=cfg.train_steps,
+            reuse=cfg.reuse,
+            eval_frac=cfg.eval_frac,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,

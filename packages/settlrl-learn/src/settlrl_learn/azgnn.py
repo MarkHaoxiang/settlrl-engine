@@ -90,9 +90,7 @@ def _to_sample(b: GNNSamples) -> Sample:
     )
 
 
-def _sample_moves(
-    key: Array, weights: Array, mask: Array, temperature: float
-) -> Array:
+def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -> Array:
     if temperature <= 0.0:
         return jnp.argmax(jnp.where(mask, weights, -jnp.inf), axis=-1)
     logits = jnp.where(mask, jnp.log(jnp.clip(weights, 1e-8)) / temperature, -jnp.inf)
@@ -132,7 +130,9 @@ def self_play(
     pending: list[list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]]] = [
         [] for _ in range(batch_size)
     ]
-    out: dict[str, list[np.ndarray]] = {k: [] for k in ("nodes", "edges", "glob", "pol")}
+    out: dict[str, list[np.ndarray]] = {
+        k: [] for k in ("nodes", "edges", "glob", "pol")
+    }
     vals: list[float] = []
     key = jax.random.key(seed)
 
@@ -210,7 +210,9 @@ def arena(
     base = POLICIES["lookahead"]
     half = max(1, n_games // 2)
     r1 = evaluate([net_spec, base], n_episodes=half, batch_size=batch_size, seed=seed)
-    r2 = evaluate([base, net_spec], n_episodes=half, batch_size=batch_size, seed=seed + 1)
+    r2 = evaluate(
+        [base, net_spec], n_episodes=half, batch_size=batch_size, seed=seed + 1
+    )
     return float(r1.wins[0] + r2.wins[1]) / max(int(r1.episodes + r2.episodes), 1)
 
 
@@ -226,6 +228,8 @@ def learn(
     buffer_max: int = 50_000,
     batch_size: int = 256,
     train_steps: int = 200,
+    reuse: float = 0.0,
+    eval_frac: float = 0.1,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
     arena_games: int = 0,
@@ -236,7 +240,14 @@ def learn(
 ) -> AZGraphNet:
     """A small AlphaZero loop over an :class:`AZGraphNet`: each iteration
     self-plays, grows an in-memory replay, and trains; every ``arena_every`` it
-    scores vs. ``lookahead(heuristic)``. Returns the final net."""
+    scores vs. ``lookahead(heuristic)``. Returns the final net.
+
+    ``reuse`` > 0 caps the updates per iteration at ``reuse * fresh / batch_size``
+    (the AlphaZero sample-reuse factor) instead of a fixed ``train_steps`` -- the
+    fix for value-head overfitting on a small early replay. A held-out
+    ``eval_frac`` of each iteration's fresh positions (never trained) gives the
+    ``val_*`` metrics, including ``val_value_acc`` (does the value generalize, or
+    just memorize)."""
     model = AZGraphNet(jax.random.key(seed), cfg)
     opt = optax.adamw(lr, weight_decay=weight_decay)
     opt_state = opt.init(eqx.filter(model, eqx.is_inexact_array))
@@ -249,7 +260,18 @@ def learn(
         updates, st = opt.update(grads, st, eqx.filter(m, eqx.is_inexact_array))
         return eqx.apply_updates(m, updates), st, loss, aux
 
+    @eqx.filter_jit
+    def evaluate_net(m: Any, s: Sample, pol: Array, val: Array) -> dict[str, Array]:
+        vs, logits = jax.vmap(m)(s)
+        logp = jax.nn.log_softmax(logits, axis=-1)
+        return {
+            "val_policy_loss": -jnp.mean(jnp.sum(pol * logp, axis=-1)),
+            "val_value_loss": jnp.mean(jax.nn.softplus(vs) - val * vs),
+            "val_value_acc": jnp.mean((vs > 0).astype(jnp.float32) == val),
+        }
+
     buf: GNNSamples | None = None
+    ev: GNNSamples | None = None
     rng = np.random.default_rng(seed)
     for i in range(n_iterations):
         fresh = self_play(
@@ -257,10 +279,21 @@ def learn(
             max_num_considered_actions=max_num_considered_actions,
             batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
         )  # fmt: skip
-        buf = fresh if buf is None else _concat(buf, fresh, buffer_max)
+        # hold out a never-trained eval slice, then buffer the rest.
+        nf = fresh.value.shape[0]
+        perm = rng.permutation(nf)
+        n_ev = int(nf * eval_frac)
+        fr, fe = _index(fresh, perm[n_ev:]), _index(fresh, perm[:n_ev])
+        buf = fr if buf is None else _concat(buf, fr, buffer_max)
+        ev = fe if ev is None else _concat(ev, fe, 8192)
         n = buf.value.shape[0]
-        metrics: dict[str, float] = {"samples": float(fresh.value.shape[0])}
-        for _ in range(train_steps):
+        steps = (
+            train_steps
+            if reuse <= 0
+            else max(1, int(reuse * fr.value.shape[0] / batch_size))
+        )
+        metrics: dict[str, float] = {"samples": float(nf), "train_steps": float(steps)}
+        for _ in range(steps):
             idx = rng.integers(0, n, batch_size)
             mb = _index(buf, idx)
             model, opt_state, loss, aux = step(
@@ -269,6 +302,11 @@ def learn(
             )  # fmt: skip
         metrics["loss"] = float(loss)
         metrics.update({k: float(v) for k, v in aux.items()})
+        if ev.value.shape[0] >= batch_size:
+            vm = evaluate_net(
+                model, _to_sample(ev), jnp.asarray(ev.policy), jnp.asarray(ev.value)
+            )
+            metrics.update({k: float(v) for k, v in vm.items()})
         if arena_games and (i + 1) % arena_every == 0:
             metrics["arena_winrate"] = arena(
                 model, n_games=arena_games, num_simulations=num_simulations,
