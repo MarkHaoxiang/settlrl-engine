@@ -166,6 +166,36 @@ heur/turns, or separate trunks, should protect `road`. The lesson for AZ stands:
 a single value+policy trunk wants plain sum-MPNN, with loss-balancing to keep
 the structural signal the policy needs.
 
+### Does the GNN reason about longest road, or just count edges? (`road_probe.py`)
+
+Longest road is a longest-trail problem (NP-hard in general, classically hard for
+a depth-limited GNN), so R² 0.99 on the greedy `road` target was suspicious. The
+probe builds a *controlled* mix — near-simple paths, branchy bushes, and
+opponent-broken trails, edge counts 3..15 — and trains `gn_base` at several
+depths. The discriminating cases are where **edge-count ≠ longest-road** (45% of
+the set; there the mean count is 11.1 but the true longest road is 7.2): a net
+that merely counts edges would predict ~11.
+
+| depth | R² all | R² hard | pred(hard) | true(hard) | count(hard) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 0.81 | 0.58 | 8.0 | 7.2 | 11.1 |
+| 2 | 0.97 | 0.92 | 7.0 | 7.2 | 11.1 |
+| 3 | 0.98 | 0.94 | 7.4 | 7.2 | 11.1 |
+| 5 | 0.98 | 0.94 | 7.3 | 7.2 | 11.1 |
+
+- **It is not edge-counting.** On the hard subset the predictions track the true
+  longest road (7.0–7.4), not the edge count (11.1) — real path/break reasoning.
+- **But it is depth-limited, as the BFS intuition predicts.** A 1-layer GNN
+  fails on the hard cases (R² 0.58, predictions drifting toward the count at 8.0):
+  one hop cannot reason about a trail, so it falls back to counting. The jump is
+  at **depth 2** (0.58→0.92), then it plateaus — the receptive field has to span
+  the trail, and depth 2–3 suffices for this board's ~5 diameter (a larger board
+  would demand more depth).
+- The greedy `road` 0.99 was thus partly an easy-distribution artefact (greedy
+  roads are near-simple paths of mean length 3.4, where count≈longest and even a
+  shallow net wins); on a genuinely hard mix the capability is real but needs
+  depth ≥ 2.
+
 **Architecture recommendation (toward the AlphaZero value+policy net):**
 `gn_global` — sum-aggregation MPNN + a virtual global node + a
 count-preserving multi-aggregator readout + LayerNorm, **no attention, no
