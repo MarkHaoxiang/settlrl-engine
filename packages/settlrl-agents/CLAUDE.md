@@ -245,6 +245,32 @@ Frame and tuning evidence (carried over; the search inherits all of it):
   value_scale 12/38 tie-or-lose to 20. Diagnose decision-level, not by ~20-game
   matches (SE ±11%); 4p evals need matched seeds or n ≥ 240.
 
+### `ismcts.py` — true SO-ISMCTS prototype (not yet a replacement)
+
+The mctx search is *not* full ISMCTS: its statistics live on mctx's fixed dense
+action axis with a root-only legality mask, so an action illegal under a given
+simulation's world is still a selectable edge that no-ops, and there are no
+availability counts (the half mctx cannot express; Canopy builds a custom tree
+for it). `ismcts.py` is that custom tree — a host-driven Single-Observer ISMCTS:
+each simulation determinizes once (`sample_world`) and descends *forward*,
+stepping the engine so legality at every node comes from `flat_available_for` on
+the live determinized state (true per-simulation legality, no no-op edges); PUCT
+with the prior renormalized over the legal set + FPU, availability counts per
+Cowling, the same two-sided paranoid value frame. Leaf/prior from any
+`ValueFunction` (the learned AZ net later). Contracts tested in
+`tests/test_ismcts.py` (legal move, legal-supported visit distribution,
+reproducibility, concentration above uniform, game completion).
+
+**Status: built and correct, but not a deletion candidate for the mctx path.**
+Two blockers. (1) *Speed*: the tree is host-driven (a device sync per node, not
+vmapped over lanes like mctx) — ~1.5 s (8 sims) to ~5 s (32 sims) per move on
+CPU vs mctx's ~9 ms, i.e. ~100–600× slower; replacing a 9 ms search with a 1.5 s
+one would be a regression even at strength parity. A vmapped/jitted fixed-
+capacity arena tree is the prerequisite. (2) *Validation*: parity needs n≥200
+seat-swapped matches; at host-driven speed a CPU game is ~minutes, so only a
+tiny directional comparison is feasible without a free GPU. Keep the mctx search
+until the vmapped rewrite clears a real parity gate.
+
 ## planner/
 
 The stateful decision-tree class: per-game plain-Python agents whose
