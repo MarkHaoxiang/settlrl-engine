@@ -89,6 +89,28 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_every": 4,
         "checkpoint_every": 2,
     },
+    # The real run: shallow-but-wide self-play. The search is the per-move
+    # *latency* (sequential sim expansions) and the batch is *throughput*
+    # (vmapped lanes), so we cut sims + considered actions and push the batch
+    # far up to saturate the GPU -- noisier per-position targets, but many more
+    # diverse games per iteration to average over.
+    "gnn_run": {
+        "net": "gnn",
+        "width": 96,
+        "layers": 4,
+        "n_iterations": 40,
+        "selfplay_samples": 4096,
+        "selfplay_batch": 256,
+        "num_simulations": 24,
+        "max_num_considered_actions": 8,
+        "reuse": 2.0,
+        "batch_size": 512,
+        "arena_games": 64,
+        "arena_every": 4,
+        "arena_batch": 256,
+        "arena_sims": 24,
+        "checkpoint_every": 2,
+    },
     "gnn_smoke": {
         "net": "gnn",
         "width": 16,
