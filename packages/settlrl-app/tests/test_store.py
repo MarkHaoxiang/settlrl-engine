@@ -11,10 +11,11 @@ from pathlib import Path
 import pytest
 from _helpers import bot_registry
 from fastapi.testclient import TestClient
-from settlrl_app.game.games import GameRegistry
+from settlrl_app.game.games import GameRegistry, _rebuild_handle
 from settlrl_app.server import create_app
 from settlrl_app.storage.db import Database
 from settlrl_app.storage.store import GameStore
+from settlrl_game.convert import board_to_model
 from settlrl_game.session import GameSession, GameSetup
 
 
@@ -158,6 +159,39 @@ def test_history_is_capped_to_the_newest(
 
     ids, kept = asyncio.run(scenario())
     assert len(kept) == 1 and kept[0] in ids  # pruned to the cap
+
+
+def test_restore_is_faithful_for_a_random_fallback_game(tmp_path: Path) -> None:
+    """A game advanced by the random fallback (``auto_step`` draws the seed RNG to
+    *pick* moves, not just resolve them) must still rebuild to the same state —
+    restore re-applies the stored outcomes rather than re-sampling."""
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object]]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(store=store)
+        h = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
+        # Play well past the opening so several rolls (stochastic) are journalled,
+        # but stop before the end so the game restores as live.
+        for _ in range(25):
+            if h.session.auto_step() is None:
+                break
+            h.bump()
+        before = board_to_model(h.session.game).model_dump()
+        await store.aclose()
+        (header, events) = next(
+            (hdr, ev) for hdr, ev in await store.load() if hdr["id"] == h.id
+        )
+        restored = _rebuild_handle(store, header, events)
+        assert restored is not None
+        after = board_to_model(restored.session.game).model_dump()
+        await db.dispose()
+        return before, after
+
+    before, after = asyncio.run(scenario())
+    assert before == after  # identical, not a re-sampled divergence
 
 
 def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:

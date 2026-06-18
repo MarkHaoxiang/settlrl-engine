@@ -27,6 +27,7 @@ from typing import cast
 
 import anyio.to_thread
 from settlrl_game.models import BotMoveModel
+from settlrl_game.record import Move
 from settlrl_game.session import HUMAN, GameSession, GameSetup
 
 from settlrl_app.storage.store import GameJournal, GameStore
@@ -363,7 +364,17 @@ def _replay_event(
     """Apply one journalled event back onto the rebuilding game."""
     match event.get("t"):
         case "move":
-            session.apply(cast(int, event["flat"]))
+            # Re-apply with the stored outcome, not a re-sampled one, so a game
+            # that used the random fallback rebuilds to the same state.
+            session.apply_recorded(
+                Move(
+                    player=cast(int, event["player"]),
+                    flat=cast(int, event["flat"]),
+                    dice=cast("int | None", event.get("dice")),
+                    drawn=cast("int | None", event.get("drawn")),
+                    stolen=cast("int | None", event.get("stolen")),
+                )
+            )
         case "chat":
             session.add_chat(
                 cast("int | None", event.get("player")), str(event["text"])

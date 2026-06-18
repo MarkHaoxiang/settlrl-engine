@@ -267,14 +267,44 @@ class GameSession:
             )
         return action, None, None, None
 
-    def _play(self, seat: int, flat: int, action: ref.Action) -> None:
-        """Resolve outcomes, apply, advance the belief, and log one move."""
+    def _apply_resolved(
+        self,
+        seat: int,
+        flat: int,
+        resolved: ref.Action,
+        dice: int | None,
+        drawn: int | None,
+        stolen: int | None,
+    ) -> None:
+        """Apply an already-resolved action, advance the belief, and log it."""
         before = copy.deepcopy(self.game)
-        resolved, dice, drawn, stolen = self._resolve(action)
         self.game.apply(resolved)
         self._belief.update(before, self.game, resolved)
         self._moves.append(Move(seat, flat, dice, drawn, stolen))
         self._log_move(seat, flat, dice)
+
+    def _play(self, seat: int, flat: int, action: ref.Action) -> None:
+        """Resolve outcomes (sampling the RNG), apply, advance belief, log."""
+        resolved, dice, drawn, stolen = self._resolve(action)
+        self._apply_resolved(seat, flat, resolved, dice, drawn, stolen)
+
+    def _recorded_outcome(self, action: ref.Action, move: Move) -> ref.Action | None:
+        """``action`` with ``move``'s stored stochastic outcome injected, or None
+        when a needed outcome is missing (a legacy journal: re-sample instead)."""
+        if isinstance(action, ref.Roll):
+            return None if move.dice is None else ref.Roll(move.dice)
+        if isinstance(action, ref.BuyDevelopmentCard):
+            if move.drawn is None:
+                return None
+            return ref.BuyDevelopmentCard(ref.DevCard(move.drawn))
+        if (
+            isinstance(action, ref.MoveRobber | ref.PlayKnight)
+            and action.victim is not None
+        ):
+            if move.stolen is None:
+                return None
+            return type(action)(action.tile, action.victim, ref.Resource(move.stolen))
+        return action  # non-stochastic: no outcome needed
 
     def apply(self, flat: int) -> None:
         """Apply the acting seat's chosen flat action."""
@@ -284,6 +314,25 @@ class GameSession:
         if not self.game.is_legal(action):
             raise IllegalActionError(f"action {flat} is not legal right now")
         self._play(self.acting_seat(), flat, action)
+
+    def apply_recorded(self, move: Move) -> None:
+        """Re-apply a journalled move, reusing its stored stochastic outcome so a
+        rebuilt game does not re-sample the seed — which would diverge for any
+        game that used a random fallback (:meth:`auto_step`). Falls back to
+        sampling for a legacy move that carries no outcome."""
+        if not 0 <= move.flat < N_FLAT:
+            raise IllegalActionError(f"action {move.flat} is out of range")
+        action = to_action(move.flat, self.game)
+        if not self.game.is_legal(action):
+            raise IllegalActionError(f"action {move.flat} is not legal right now")
+        seat = self.acting_seat()
+        resolved = self._recorded_outcome(action, move)
+        if resolved is None:
+            self._play(seat, move.flat, action)
+        else:
+            self._apply_resolved(
+                seat, move.flat, resolved, move.dice, move.drawn, move.stolen
+            )
 
     def auto_step(self) -> int | None:
         """Play a uniformly-random legal move for the acting seat, whatever its
