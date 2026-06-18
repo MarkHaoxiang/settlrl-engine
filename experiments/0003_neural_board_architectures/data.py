@@ -132,7 +132,7 @@ def _collect(cfg: dict) -> Dataset:
 
 def generate(cfg: dict) -> Dataset:
     """Collect (or load from ``runs/_cache``) the supervised dataset for ``cfg``."""
-    path = _CACHE / f"{_key(cfg)}-v3.npz"  # -v3: added `road`, `turns` labels
+    path = _CACHE / f"{_key(cfg)}-v4.npz"  # -v4: richer per-opponent globals
     if path.exists():
         with np.load(path) as d:
             samples = Sample(d["nodes"], d["edges"], d["glob"], d["engineered"])

@@ -3,9 +3,13 @@
 The board graph has fixed topology (54 vertices, 72 edges; the senders/receivers
 never change shape), so a sample carries only per-node, per-edge and global
 *features* -- the static incidence lives here as module constants. Perspective is
-one player: ownership and the global player summary are relative (own vs. the
-best opponent), so the same featurization serves any seat. Computed on the true
-board (this measures representation capacity, not belief handling).
+one player: node/edge ownership is relative (empty / mine / other -- a board
+element has one owner, so "other" is complete there), and the global player
+summary pairs the perspective player's own quantities with a *symmetric* summary
+of the opponent multiset (sum / max / spread of their VP, hand, dev, knights,
+roads) -- invariant to relabeling the opponents, so the same featurization
+serves any seat. Computed on the true board (this measures representation
+capacity, not belief handling).
 
 Three readouts of the same position are produced per sample so architectures can
 be compared on a level field:
@@ -129,27 +133,40 @@ def _global_features(
     players = jnp.arange(state.n_players)
     vps = jax.vmap(lambda q: player_total_vp(state, q))(players).astype(jnp.float32)
     hands = state.player_resources.astype(jnp.float32).sum(axis=1)
-    other = players != p
-    opp_max_vp = jnp.max(jnp.where(other, vps, -jnp.inf))
-    opp_hand = jnp.sum(jnp.where(other, hands, 0.0))
+    devs = state.dev_hand.astype(jnp.float32).sum(axis=1)
+    knights = state.knights_played.astype(jnp.float32)
+    roads = jnp.zeros((state.n_players + 1,), jnp.float32).at[state.edge_road].add(1.0)
+    roads = roads[1:]  # drop the "empty" bucket -> per-player road count
+    per_player = jnp.stack([vps, hands, devs, knights, roads])  # (5, P)
 
-    scalars = jnp.asarray(
+    # Own values, then a symmetric summary of the opponent *multiset* (sum, max,
+    # spread) per quantity: invariant to relabeling the opponents, and -- unlike
+    # the old (max-VP, total-hand) pair -- it distinguishes "one strong + one
+    # weak" from "two medium" opponents, and adds their dev/knight/road context.
+    opp = players != p
+    own = per_player[:, p]
+    opp_sum = jnp.sum(jnp.where(opp, per_player, 0.0), axis=1)
+    opp_max = jnp.max(jnp.where(opp, per_player, -jnp.inf), axis=1)
+    opp_min = jnp.min(jnp.where(opp, per_player, jnp.inf), axis=1)
+    opp_summary = jnp.concatenate([opp_sum, opp_max, opp_max - opp_min])  # (15,)
+
+    scalars = jnp.concatenate(
         [
-            state.dev_deck.astype(jnp.float32).sum(),
-            state.has_rolled.astype(jnp.float32),
-            tile_pips(layout.tile_number)[state.robber],
-            vps[p],
-            hands[p],
-            state.dev_hand[p].astype(jnp.float32).sum(),
-            state.knights_played[p].astype(jnp.float32),
-            (state.longest_road_owner == p).astype(jnp.float32),
-            (state.largest_army_owner == p).astype(jnp.float32),
-            (state.current_player.astype(jnp.int32) == p).astype(jnp.float32),
-            opp_max_vp,
-            opp_hand,
-            jnp.float32(state.n_players),
-        ],
-        dtype=jnp.float32,
+            jnp.asarray(
+                [
+                    state.dev_deck.astype(jnp.float32).sum(),
+                    state.has_rolled.astype(jnp.float32),
+                    tile_pips(layout.tile_number)[state.robber],
+                    (state.longest_road_owner == p).astype(jnp.float32),
+                    (state.largest_army_owner == p).astype(jnp.float32),
+                    (state.current_player.astype(jnp.int32) == p).astype(jnp.float32),
+                    jnp.float32(state.n_players),
+                ],
+                dtype=jnp.float32,
+            ),
+            own,  # (5,) own vp/hand/dev/knights/roads
+            opp_summary,  # (15,) symmetric opponent-multiset summary
+        ]
     )
     return jnp.concatenate([bank, scalars, phase])
 
