@@ -273,12 +273,23 @@ device sync per node); jitting the whole tree took it to **~5–6 ms/move on CPU
 host version. Capacity is exact: ≤1 node added per simulation, so `size` never
 exceeds `num_simulations + 1` and the new-node index never overflows.
 
-**Status:** correct + fast, *not yet adopted*. Before retiring the mctx path it
-needs a real strength gate — n≥200 seat-swapped vs `lookahead`/`mcts` (and the
-search isn't yet wired into `POLICIES`/`make_search`-style seams or `vmap`ped
-into self-play). Availability-count UCB (Cowling) is dropped for now in favour of
-standard PUCT visit counts; per-simulation legal filtering (the essential ISMCTS
-property) is kept. Keep `make_search` until the gate is cleared.
+**Strength: correct but sim-inefficient — below parity, do not adopt yet.**
+2p seat-swapped (n=40, CPU): ISMCTS(32) wins **0.325 ± 0.074 vs lookahead** and
+**0.400 ± 0.077 vs mcts(32)** — i.e. it plays *below* even the 1-ply sweep at an
+equal sim budget, where the tuned mctx search beats lookahead ~0.57. It is not a
+bug: strength climbs monotonically with budget (vs lookahead: 0.21 at 32 sims →
+0.37 at 128, n=19), so the search works, it is just far less *simulation-
+efficient* than mctx's Gumbel sequential-halving (which guarantees coverage of
+the root candidates at low budgets; PUCT + argmax-visits over ~19 actions at 32
+sims is noisy). The roll-EV leaf was strength-neutral here (rolls rarely the
+leaf). The gap to parity is **root action selection**, not dice handling or the
+frame — closing it means porting Gumbel-style root selection (sequential halving)
+and/or an argmax-Q root move plus a `c_puct`/`max_depth`/FPU sweep (the same
+tuning arc the mctx search needed). Availability-count UCB (Cowling) is also
+dropped for now in favour of plain PUCT visit counts; per-simulation legal
+filtering (the essential ISMCTS property) is kept. The search isn't wired into
+`POLICIES`/`make_search` seams or `vmap`ped into self-play yet. **Keep
+`make_search` until ISMCTS clears a real strength gate.**
 
 ## planner/
 
