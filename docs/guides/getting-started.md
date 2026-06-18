@@ -29,3 +29,25 @@ The **Reference** section is generated from the workspace sources by
 [mkdocstrings](https://mkdocstrings.github.io/). To document something new, add a
 `::: dotted.module.path` directive to the relevant `docs/reference/*.md` page;
 write narrative pages as plain Markdown under `docs/`.
+
+## Hosting
+
+The site is served as static files (the `mkdocs build` output) by the VPS's
+Caddy. Build, sync the output, and let Caddy serve it under a path:
+
+```bash
+uv run --group docs mkdocs build        # writes ./site
+rsync -a --delete site/ <vps>:/srv/settlrl-engine/site/
+```
+
+```caddy
+# inside the existing www.markhaoxiang.com site block
+handle_path /settlrl-engine/* {
+    root * /srv/settlrl-engine/site
+    file_server
+}
+```
+
+`handle_path` strips the prefix so files resolve against the build root; pages
+use relative links, so the docs work under any path. `site_url` in `mkdocs.yml`
+is set to the served URL (canonical links / sitemap only).
