@@ -115,6 +115,10 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
     base = PRESETS.get(cfg.gnn_preset, PRESETS["gn_global"])
     netcfg = base._replace(width=cfg.width, layers=cfg.layers, head_depth=cfg.depth)
+    resume = None
+    if cfg.resume_from:
+        prior = Path(cfg.resume_from) / "gnnstate.eqx"
+        resume = prior if prior.exists() else None
     wb = wandb.init(
         project=cfg.wandb_project, mode=cfg.wandb_mode, config=cfg.dump(),
         reinit=True, dir=str(run.dir),
@@ -150,6 +154,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             arena_every=cfg.arena_every,
             seed=cfg.seed,
             checkpoint_dir=run.dir,
+            checkpoint_every=cfg.checkpoint_every,
+            resume_from=resume,
             on_iter=on_iter,
         )
     finally:

@@ -47,9 +47,14 @@ trained model can ship without training libraries.
     `graphnet.GraphNet` over `graph.board_sample` with value + policy heads,
     experiment 0003's recommended `gn_global`). Mirrors `selfplay`/`alphazero`
     for an equinox model: `make_az_gnn` adapts onto the search seams, `self_play`
-    records the board graph, and a small in-memory `learn` loop trains it (no
-    flashbax/orbax bit-exact resume yet — the flat-MLP path keeps that infra).
-    Experiment 0004's `net=gnn` variant composes it.
+    records the board graph, and `learn` runs the loop over a flashbax on-device
+    replay. The whole `GNNState` is **eqx-serialised** every iteration for
+    bit-exact resume (eqx's native serialiser fits the equinox model where
+    orbax's pure-array assumption does not; the per-iteration RNG is a pure
+    function of `seed` and the iteration index). `reuse` caps updates/iter at the
+    AZ sample-reuse factor (the value-overfit fix), and a held-out `eval_frac`
+    gives the `val_value_acc` generalization metric. Experiment 0004's `net=gnn`
+    variant composes it.
   - `train_state.py::TrainState` — the whole mutable run state (params,
     optimiser moments, replay buffer, iteration, best), orbax-serialised for
     **bit-exact resume**: `learn` rebuilds the static optimiser/buffer from

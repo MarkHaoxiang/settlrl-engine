@@ -6,10 +6,12 @@ module mirrors :mod:`settlrl_learn.selfplay` + :mod:`settlrl_learn.alphazero` fo
 an equinox :class:`~settlrl_learn.graphnet.GraphNet` with a shared trunk feeding
 a value head (win-prob logit, ``value_scale=2``) and an ``N_FLAT`` policy head.
 
-A small proof-of-concept loop: an in-memory replay (no flashbax/orbax bit-exact
-resume yet), self-play -> train -> periodic arena vs ``lookahead(heuristic)``.
+Self-play -> a flashbax on-device replay -> train -> periodic arena vs
+``lookahead(heuristic)``. The whole :class:`GNNState` is eqx-serialised every
+iteration for bit-exact resume (eqx's native serialiser fits the equinox model,
+where orbax's pure-array assumption does not).
 
-A training-side module (equinox/jraph/optax): not imported by the package root.
+A training-side module (equinox/jraph/optax/flashbax): not imported by the root.
 """
 
 from __future__ import annotations
@@ -19,22 +21,30 @@ from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 import equinox as eqx
+import flashbax as fbx
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 from settlrl_agents import POLICIES, BeliefSpec, evaluate
 from settlrl_agents.policy import PolicyPrior
 from settlrl_agents.search import make_search, make_search_weights
 from settlrl_agents.value import Value, ValueFunction
 from settlrl_engine.belief import belief_view
-from settlrl_engine.board.layout import BoardLayout
+from settlrl_engine.board.layout import N_VERTICES, BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT, BatchedSettlrlEnv, flat_to_action
 
 from settlrl_learn.features import FEATURE_DIM
-from settlrl_learn.graph import Sample, board_sample
+from settlrl_learn.graph import (
+    EDGE_DIM,
+    GLOBAL_DIM,
+    N_DIR_EDGES,
+    NODE_DIM,
+    Sample,
+    board_sample,
+)
 from settlrl_learn.graphnet import PRESETS, GraphNet, GraphNetConfig
 
 
@@ -216,6 +226,58 @@ def arena(
     return float(r1.wins[0] + r2.wins[1]) / max(int(r1.episodes + r2.episodes), 1)
 
 
+class _Item(NamedTuple):
+    """One replay item (the board graph + policy + value), for the flashbax
+    on-device buffer."""
+
+    nodes: Array
+    edges: Array
+    glob: Array
+    policy: Array
+    value: Array
+
+
+def _empty_item() -> _Item:
+    return _Item(
+        jnp.zeros((N_VERTICES, NODE_DIM), jnp.float32),
+        jnp.zeros((N_DIR_EDGES, EDGE_DIM), jnp.float32),
+        jnp.zeros((GLOBAL_DIM,), jnp.float32),
+        jnp.zeros((N_FLAT,), jnp.float32),
+        jnp.float32(0.0),
+    )
+
+
+def _add(buffer: Any, state: Any, s: GNNSamples) -> Any:
+    item = _Item(
+        jnp.asarray(s.nodes, jnp.float32),
+        jnp.asarray(s.edges, jnp.float32),
+        jnp.asarray(s.glob, jnp.float32),
+        jnp.asarray(s.policy, jnp.float32),
+        jnp.asarray(s.value, jnp.float32),
+    )
+    return buffer.add(state, item)
+
+
+class GNNState(NamedTuple):
+    """The whole mutable run state, eqx-serialised for resume (the per-iteration
+    RNG is a pure function of ``seed`` and the iteration index, so a resumed run
+    continues bit-identically)."""
+
+    model: AZGraphNet
+    opt_state: optax.OptState
+    buffer_state: Any  # flashbax buffer state pytree
+    iteration: Int[Array, ""]
+    best: Float[Array, ""]
+
+
+def save_gnn_state(path: str | Path, state: GNNState) -> None:
+    eqx.tree_serialise_leaves(Path(path), state)
+
+
+def load_gnn_state(path: str | Path, template: GNNState) -> GNNState:
+    return cast(GNNState, eqx.tree_deserialise_leaves(Path(path), template))
+
+
 def learn(
     *,
     cfg: GraphNetConfig,
@@ -236,21 +298,35 @@ def learn(
     arena_every: int = 1,
     seed: int = 0,
     checkpoint_dir: str | Path | None = None,
+    checkpoint_every: int = 1,
+    resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], AZGraphNet], None] | None = None,
 ) -> AZGraphNet:
-    """A small AlphaZero loop over an :class:`AZGraphNet`: each iteration
-    self-plays, grows an in-memory replay, and trains; every ``arena_every`` it
-    scores vs. ``lookahead(heuristic)``. Returns the final net.
+    """An AlphaZero loop over an :class:`AZGraphNet`: each iteration self-plays,
+    fills a flashbax on-device replay, and trains; every ``arena_every`` it scores
+    vs. ``lookahead(heuristic)``. The full :class:`GNNState` is checkpointed to
+    ``checkpoint_dir`` every ``checkpoint_every`` iterations, and ``resume_from``
+    (a prior ``gnnstate.eqx``) continues it bit-exactly.
 
     ``reuse`` > 0 caps the updates per iteration at ``reuse * fresh / batch_size``
     (the AlphaZero sample-reuse factor) instead of a fixed ``train_steps`` -- the
     fix for value-head overfitting on a small early replay. A held-out
-    ``eval_frac`` of each iteration's fresh positions (never trained) gives the
-    ``val_*`` metrics, including ``val_value_acc`` (does the value generalize, or
-    just memorize)."""
-    model = AZGraphNet(jax.random.key(seed), cfg)
+    ``eval_frac`` of each iteration's fresh positions (never trained, not
+    checkpointed) gives the ``val_*`` metrics, including ``val_value_acc``."""
     opt = optax.adamw(lr, weight_decay=weight_decay)
-    opt_state = opt.init(eqx.filter(model, eqx.is_inexact_array))
+    buffer = fbx.make_item_buffer(
+        max_length=buffer_max, min_length=batch_size,
+        sample_batch_size=batch_size, add_batches=True,
+    )  # fmt: skip
+    model0 = AZGraphNet(jax.random.key(seed), cfg)
+    fresh_state = GNNState(
+        model0, opt.init(eqx.filter(model0, eqx.is_inexact_array)),
+        buffer.init(_empty_item()), jnp.int32(0), jnp.float32(-1.0),
+    )  # fmt: skip
+    state = load_gnn_state(resume_from, fresh_state) if resume_from else fresh_state
+    model, opt_state, buf_state = state.model, state.opt_state, state.buffer_state
+    best = float(state.best)
+    ckpt = Path(checkpoint_dir) / "gnnstate.eqx" if checkpoint_dir else None
 
     @eqx.filter_jit
     def step(m: Any, st: Any, s: Sample, pol: Array, val: Array) -> Any:
@@ -270,51 +346,60 @@ def learn(
             "val_value_acc": jnp.mean((vs > 0).astype(jnp.float32) == val),
         }
 
-    buf: GNNSamples | None = None
     ev: GNNSamples | None = None
-    rng = np.random.default_rng(seed)
-    for i in range(n_iterations):
+    for i in range(int(state.iteration), n_iterations):
         fresh = self_play(
             model, n_samples=selfplay_samples, num_simulations=num_simulations,
             max_num_considered_actions=max_num_considered_actions,
             batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
         )  # fmt: skip
-        # hold out a never-trained eval slice, then buffer the rest.
+        # hold out a never-trained eval slice (reproducible per iteration), buffer
+        # the rest into flashbax.
         nf = fresh.value.shape[0]
-        perm = rng.permutation(nf)
+        perm = np.random.default_rng(seed + 50_000 + i).permutation(nf)
         n_ev = int(nf * eval_frac)
         fr, fe = _index(fresh, perm[n_ev:]), _index(fresh, perm[:n_ev])
-        buf = fr if buf is None else _concat(buf, fr, buffer_max)
+        buf_state = _add(buffer, buf_state, fr)
         ev = fe if ev is None else _concat(ev, fe, 8192)
-        n = buf.value.shape[0]
         steps = (
             train_steps
             if reuse <= 0
             else max(1, int(reuse * fr.value.shape[0] / batch_size))
         )
         metrics: dict[str, float] = {"samples": float(nf), "train_steps": float(steps)}
-        for _ in range(steps):
-            idx = rng.integers(0, n, batch_size)
-            mb = _index(buf, idx)
-            model, opt_state, loss, aux = step(
-                model, opt_state, _to_sample(mb),
-                jnp.asarray(mb.policy), jnp.asarray(mb.value),
-            )  # fmt: skip
-        metrics["loss"] = float(loss)
-        metrics.update({k: float(v) for k, v in aux.items()})
+        key = jax.random.key(seed + 10_000 + i)
+        if bool(buffer.can_sample(buf_state)):
+            for _ in range(steps):
+                key, k = jax.random.split(key)
+                b = buffer.sample(buf_state, k).experience
+                s = Sample(
+                    b.nodes, b.edges, b.glob, jnp.zeros((batch_size, FEATURE_DIM))
+                )
+                model, opt_state, loss, aux = step(
+                    model, opt_state, s, b.policy, b.value
+                )
+            metrics["loss"] = float(loss)
+            metrics.update({k2: float(v) for k2, v in aux.items()})
         if ev.value.shape[0] >= batch_size:
             vm = evaluate_net(
                 model, _to_sample(ev), jnp.asarray(ev.policy), jnp.asarray(ev.value)
             )
-            metrics.update({k: float(v) for k, v in vm.items()})
+            metrics.update({k2: float(v) for k2, v in vm.items()})
         if arena_games and (i + 1) % arena_every == 0:
-            metrics["arena_winrate"] = arena(
+            winrate = arena(
                 model, n_games=arena_games, num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
                 seed=seed + 20_000 + i,
             )  # fmt: skip
-        if checkpoint_dir is not None:
-            eqx.tree_serialise_leaves(Path(checkpoint_dir) / "model.eqx", model)
+            metrics["arena_winrate"] = winrate
+            best = max(best, winrate)
+        if ckpt is not None and (i + 1) % checkpoint_every == 0:
+            save_gnn_state(
+                ckpt,
+                GNNState(
+                    model, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best)
+                ),
+            )
         if on_iter is not None:
             on_iter(i, metrics, model)
     return model
@@ -329,4 +414,14 @@ def _index(b: GNNSamples, idx: np.ndarray) -> GNNSamples:
     return cast(GNNSamples, jax.tree.map(lambda x: x[idx], b))
 
 
-__all__ = ["PRESETS", "AZGraphNet", "GNNSamples", "arena", "learn", "self_play"]
+__all__ = [
+    "PRESETS",
+    "AZGraphNet",
+    "GNNSamples",
+    "GNNState",
+    "arena",
+    "learn",
+    "load_gnn_state",
+    "save_gnn_state",
+    "self_play",
+]
