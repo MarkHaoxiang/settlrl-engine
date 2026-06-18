@@ -102,6 +102,9 @@ class GameHandle:
         self.closed = False
         # Crash-recovery journal (None when persistence is off).
         self.journal: GameJournal | None = None
+        # Set once the game's end has been journalled, so the finish hook in
+        # bump fires exactly once (later chat / no-op bumps don't re-mark it).
+        self._finished = False
 
     def touch(self) -> None:
         self.touched = time.monotonic()
@@ -119,7 +122,17 @@ class GameHandle:
         self.version += 1
         if self.journal is not None:
             self.journal.sync_moves(self.session.moves)
+            if not self._finished and self.session.terminal():
+                self._finished = True
+                self.journal.finish(time.time(), self.session.winner(), self._owners())
         self._wake()
+
+    def _owners(self) -> dict[str, list[int]]:
+        """Account user-id -> the seats it holds (for the finished-game history)."""
+        owners: dict[str, list[int]] = {}
+        for seat, user_id in self.claim_users.items():
+            owners.setdefault(user_id, []).append(seat)
+        return owners
 
     def human_seats(self) -> list[int]:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
@@ -284,7 +297,9 @@ class GameRegistry:
             victim._wake()  # the game is gone; just wake its SSE/driver to exit
             if victim.journal is not None:
                 victim.journal.close()
-            if self._store is not None:
+            # Finished games stay in the store as replayable history; only drop
+            # abandoned / unstarted ones being reclaimed.
+            if self._store is not None and not victim.session.terminal():
                 self._store.remove(victim.id)
 
 
@@ -298,11 +313,12 @@ async def restore_games(registry: GameRegistry, store: GameStore) -> None:
             registry._insert(handle)
 
 
-def _rebuild_handle(
-    store: GameStore, header: dict[str, object], events: list[dict[str, object]]
-) -> GameHandle | None:
-    """Reconstruct one game from its header and event log, or None if it can't
-    be replayed (a corrupt file is dropped rather than failing the boot)."""
+def _replay_session(
+    header: dict[str, object], events: list[dict[str, object]]
+) -> tuple[GameSession, dict[int, str], dict[int, str]] | None:
+    """Replay a stored game's header + event log into a ``(session, claims,
+    claim_users)``, or None if it can't be replayed (a corrupt record is dropped
+    rather than crashing the caller)."""
     claims: dict[int, str] = {}
     claim_users: dict[int, str] = {}
     try:
@@ -310,16 +326,24 @@ def _rebuild_handle(
         # The game's bot kinds are whatever it was created with; accept them as
         # external so it restores even before its remote provider is re-registered
         # (until then the driver plays those seats with the random fallback).
-        external = frozenset(
-            s if isinstance(s, str) else str(s.get("kind", ""))
-            for s in setup.seats
-            if (s if isinstance(s, str) else s.get("kind")) != HUMAN
-        )
+        external = frozenset(s for s in setup.seats if s != HUMAN)
         session = GameSession.from_setup(setup, external_kinds=external)
         for event in events:
             _replay_event(session, claims, claim_users, event)
     except (KeyError, ValueError, TypeError):
         return None
+    return session, claims, claim_users
+
+
+def _rebuild_handle(
+    store: GameStore, header: dict[str, object], events: list[dict[str, object]]
+) -> GameHandle | None:
+    """Reconstruct one live game from its header and event log, or None if it
+    can't be replayed."""
+    rebuilt = _replay_session(header, events)
+    if rebuilt is None:
+        return None
+    session, claims, claim_users = rebuilt
     game_id = str(header["id"])
     handle = GameHandle(game_id, session)
     handle.claims = claims

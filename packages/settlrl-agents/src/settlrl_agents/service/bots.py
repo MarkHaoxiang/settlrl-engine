@@ -1,151 +1,97 @@
-"""Bot seats: the settlrl-agents registry adapted to a single game.
+"""The bundled engine-backed bots, each a :class:`Bot` over a settlrl-agents policy.
 
-``POLICIES`` is settlrl-agents' registry (name -> ``AgentSpec``); a spec's class
-declares which protocol its policy speaks (``ObservationSpec`` /
-``BeliefSpec``) and the seat counts it supports. A spec is a policy *family*:
-its scalar build parameters (int / float / bool keyword arguments of
-``spec.make``) are exposed as per-seat knobs — :func:`bot_catalog` describes
-them to the client and :func:`bot_act` builds (and caches) the configured
-policy. :func:`bot_act` hides the protocol dispatch: it slices the single
-game out of the single-game env and calls the policy through the
-right protocol (belief seats read the env's honest ``belief_view``, so the
-env must be built with ``track_beliefs=True`` when any are seated).
+The framework replays a game into a :class:`~settlrl_game.session.GameSession`; an
+``EngineBot`` bridges that session to a single-game engine env so the JAX policy can
+observe and choose, then translates the chosen engine action back to a structured
+move. Only the non-stateful, fully-observable-or-belief policies in ``POLICIES`` are
+seatable this way (one move is a pure function of the position).
 """
 
-import inspect
-from collections.abc import Mapping
+from __future__ import annotations
+
 from typing import cast
 
 import jax
 import jax.numpy as jnp
-from settlrl_engine.board.state import KeyScalar
-from settlrl_engine.env import BatchedSettlrlEnv, Observation
+from settlrl_engine.env import Observation
+from settlrl_game.actions import move_for_flat
+from settlrl_game.botproto import MoveModel
 
-from settlrl_agents import POLICIES, AgentSpec, BeliefSpec, ObservationSpec
-from settlrl_agents.policy import BeliefPolicy, Policy, StatefulPolicy
+from settlrl_agents import POLICIES, BeliefSpec, ObservationSpec
+from settlrl_agents.policy import BeliefPolicy, Policy
+from settlrl_agents.service.bridge import engine_env, game_flat
+from settlrl_agents.service.sdk import Bot, GameView
 
-__all__ = [
-    "POLICIES",
-    "AgentSpec",
-    "BeliefSpec",
-    "bot_act",
-    "bot_catalog",
-    "coerce_params",
-]
+__all__ = ["BUNDLED", "EngineBot", "make_bot"]
 
-Knob = int | float | bool
-"""A configurable scalar build parameter of a bot family."""
+# The kinds the bundled service can host (the seatable, non-stateful policies).
+BUNDLED = ["random", "greedy", "lookahead", "mcts"]
 
-# Configured policies, jitted once per (kind, params) across sessions.
-_ACTS: dict[tuple[str, tuple[tuple[str, Knob], ...]], Policy | BeliefPolicy] = {}
-
-
-def _knobs(
-    spec: AgentSpec[Policy] | AgentSpec[BeliefPolicy] | AgentSpec[StatefulPolicy],
-) -> dict[str, Knob]:
-    """The family's scalar build parameters and their effective defaults."""
-    out: dict[str, Knob] = {}
-    for name, param in inspect.signature(spec.make).parameters.items():
-        default = spec.defaults.get(name, param.default)
-        if isinstance(default, bool | int | float):
-            out[name] = default
-    return out
-
-
-# Short user-facing blurbs for the new-game bot picker. Kept here (the UI
-# adapter) rather than on the settlrl-agents policies; a kind without a blurb
-# just shows none.
-_DESCRIPTIONS: dict[str, str] = {
+_TITLES = {
+    "random": "Random",
+    "greedy": "Greedy",
+    "lookahead": "Lookahead",
+    "mcts": "MCTS",
+}
+# Short user-facing blurbs for the new-game bot picker.
+_DESCRIPTIONS = {
     "random": "Plays a random legal move — the gentle baseline.",
     "greedy": "Grabs the best move it can see right now; fast, no planning ahead.",
     "lookahead": "Looks a move ahead and weighs trades — a solid intermediate.",
-    "mcts": "Monte-Carlo tree search: the strongest, but slower. "
-    "Raise the simulation budget for tougher play.",
+    "mcts": "Monte-Carlo tree search: the strongest, but slower.",
 }
 
-
-def bot_catalog() -> dict[str, dict[str, object]]:
-    """Every bot kind with its supported seat counts, configurable knobs, and a
-    short description.
-
-    Shape: ``{kind: {"counts": [2, ...], "description": str, "params": {name:
-    {"type": "int" | "float" | "bool", "default": value}}}}``.
-    """
-    catalog: dict[str, dict[str, object]] = {}
-    for name, spec in POLICIES.items():
-        # Stateful families need one live agent per (session, seat) — a seam
-        # the per-move bot_act doesn't have — so they are not offered.
-        if not isinstance(spec, ObservationSpec | BeliefSpec):
-            continue
-        params = {
-            k: {
-                "type": "bool"
-                if isinstance(v, bool)
-                else "int"
-                if isinstance(v, int)
-                else "float",
-                "default": v,
-            }
-            for k, v in _knobs(spec).items()
-        }
-        catalog[name] = {
-            "counts": sorted(spec.n_players),
-            "description": _DESCRIPTIONS.get(name, ""),
-            "params": params,
-        }
-    return catalog
+# Configured policies, jitted once per kind across games.
+_ACTS: dict[str, Policy | BeliefPolicy] = {}
 
 
-def coerce_params(kind: str, params: Mapping[str, object]) -> dict[str, Knob]:
-    """Validate seat ``params`` against ``kind``'s knobs; returns typed values.
-
-    Raises ``ValueError`` on an unknown knob or a value of the wrong shape.
-    """
-    knobs = _knobs(POLICIES[kind])
-    unknown = sorted(set(params) - set(knobs))
-    if unknown:
-        raise ValueError(f"unknown {kind} parameter(s): {', '.join(unknown)}")
-    out: dict[str, Knob] = {}
-    for name, value in params.items():
-        default = knobs[name]
-        if isinstance(default, bool):
-            if not isinstance(value, bool):
-                raise ValueError(f"{kind}.{name} expects a bool, got {value!r}")
-            out[name] = value
-        elif not isinstance(value, int | float) or isinstance(value, bool):
-            raise ValueError(f"{kind}.{name} expects a number, got {value!r}")
-        elif isinstance(default, int):
-            out[name] = int(value)
-        else:
-            out[name] = float(value)
-    return out
-
-
-def _policy(kind: str, params: Mapping[str, Knob]) -> Policy | BeliefPolicy:
-    key = (kind, tuple(sorted(params.items())))
-    if key not in _ACTS:
+def _policy(kind: str) -> Policy | BeliefPolicy:
+    if kind not in _ACTS:
         spec = POLICIES[kind]
         if not isinstance(spec, ObservationSpec | BeliefSpec):
             raise ValueError(f"bot kind {kind!r} is not seatable (stateful family)")
-        built = spec.make(**{**spec.defaults, **params}) if params else spec.policy
-        _ACTS[key] = jax.jit(built)
-    return _ACTS[key]
+        _ACTS[kind] = jax.jit(spec.policy)
+    return _ACTS[kind]
 
 
-def bot_act(
-    kind: str,
-    params: Mapping[str, Knob],
-    key: KeyScalar,
-    benv: BatchedSettlrlEnv,
-    seat: int,
-) -> int:
-    """One move for ``seat`` from bot ``kind`` built at ``params`` (validated
-    knob overrides; empty for the family's defaults)."""
-    act = _policy(kind, params)
+def _engine_move(kind: str, view: GameView) -> MoveModel:
+    """The move ``kind`` plays in ``view``: reason on an engine env bridged from
+    the reference game, then translate the chosen action back to a structured move.
+    """
+    session, seat = view.session, view.seat
+    benv = engine_env(session.game, session.belief_state)
+    # Reproducible per position, independent of the bridged env's own key.
+    key = jax.random.fold_in(jax.random.key(0), len(session.moves_flat()))
+    act = _policy(kind)
     mask = benv.flat_mask()[0]
     if isinstance(POLICIES[kind], ObservationSpec):
         obs = cast(Observation, jax.tree.map(lambda x: x[0], benv.observe(seat)))
-        return int(cast(Policy, act)(key, obs, mask))
-    layout = jax.tree.map(lambda x: x[0], benv.board[0])
-    view = jax.tree.map(lambda x: x[0], benv.belief_view(seat))
-    return int(cast(BeliefPolicy, act)(key, layout, view, jnp.int32(seat), mask))
+        engine_flat = int(cast(Policy, act)(key, obs, mask))
+    else:
+        layout = jax.tree.map(lambda x: x[0], benv.board[0])
+        belief = jax.tree.map(lambda x: x[0], benv.belief_view(seat))
+        engine_flat = int(
+            cast(BeliefPolicy, act)(key, layout, belief, jnp.int32(seat), mask)
+        )
+    return move_for_flat(game_flat(engine_flat))
+
+
+class EngineBot(Bot):
+    """A bundled bot wrapping the settlrl-agents policy named ``kind``."""
+
+    def __init__(self, kind: str) -> None:
+        spec = POLICIES[kind]
+        if not isinstance(spec, ObservationSpec | BeliefSpec):
+            raise ValueError(f"bot kind {kind!r} is not seatable (stateful family)")
+        self.name = kind
+        self.title = _TITLES.get(kind, kind.title())
+        self.description = _DESCRIPTIONS.get(kind, "")
+        self.counts = sorted(spec.n_players)
+
+    def act(self, view: GameView) -> MoveModel:
+        return _engine_move(self.name, view)
+
+
+def make_bot(kind: str) -> Bot:
+    """The bundled bot for ``kind`` (one of :data:`BUNDLED`)."""
+    return EngineBot(kind)

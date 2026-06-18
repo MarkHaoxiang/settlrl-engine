@@ -8,12 +8,12 @@ import {
 import type { AuthUser } from "../lib/auth";
 import { buttonStyle, panelStyle, smallButtonStyle } from "../lib/ui";
 
-// Admin-only panel for managing the remote bot services whose kinds become the
-// seatable bots. Hidden unless the signed-in user is a superuser. Registrations
-// live in the server's memory, so they need re-adding after a server restart.
+// Admin-only panel for managing the remote bot services that become the
+// seatable bots (one bot per service). Hidden unless the signed-in user is a
+// superuser. Registrations live in the server's memory, so they need re-adding
+// after a server restart.
 export default function BotProviders({ user }: { user: AuthUser | null }) {
   const [providers, setProviders] = useState<BotProvider[]>([]);
-  const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -30,9 +30,8 @@ export default function BotProviders({ user }: { user: AuthUser | null }) {
     setBusy(true);
     setError(null);
     try {
-      await registerBotProvider(name.trim(), baseUrl.trim());
+      await registerBotProvider(baseUrl.trim());
       setProviders(await listBotProviders());
-      setName("");
       setBaseUrl("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -52,7 +51,7 @@ export default function BotProviders({ user }: { user: AuthUser | null }) {
   };
 
   const inputStyle: React.CSSProperties = { ...panelStyle, padding: "8px 10px", fontSize: 13 };
-  const canAdd = name.trim() !== "" && baseUrl.trim() !== "" && !busy;
+  const canAdd = baseUrl.trim() !== "" && !busy;
   return (
     <div style={{ ...panelStyle, padding: "16px 20px", borderRadius: 12, minWidth: 300 }}>
       <div
@@ -79,8 +78,6 @@ export default function BotProviders({ user }: { user: AuthUser | null }) {
           >
             <span style={{ flex: 1 }}>
               <b>{p.name}</b> <span style={{ opacity: 0.6 }}>{p.base_url}</span>
-              <br />
-              <span style={{ opacity: 0.6 }}>{p.kinds.join(", ")}</span>
             </span>
             <button style={smallButtonStyle} onClick={() => void remove(p.name)}>
               Remove
@@ -89,12 +86,6 @@ export default function BotProviders({ user }: { user: AuthUser | null }) {
         ))}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <input
-          style={inputStyle}
-          placeholder="name (e.g. local)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
         <input
           style={inputStyle}
           placeholder="base URL (e.g. http://localhost:8100)"

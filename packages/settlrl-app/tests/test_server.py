@@ -439,7 +439,7 @@ def test_get_bots_lists_policies(client: TestClient) -> None:
     body = client.get("/api/bots").json()
     assert "random" in body and body["random"]["description"]
     assert all(
-        "counts" in spec and "params" in spec and "description" in spec
+        "counts" in spec and "title" in spec and "description" in spec
         for spec in body.values()
     )
 

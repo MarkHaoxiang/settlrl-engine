@@ -78,6 +78,23 @@ export async function myGames(): Promise<MyGame[]> {
   return resp && resp.ok ? ((await resp.json()) as MyGame[]) : [];
 }
 
+export interface PastGame {
+  id: string;
+  seats: number[];
+  n_players: number;
+  winner: number | null;
+  finished_at: number;
+}
+
+// The signed-in user's finished games (newest first); empty when logged out or
+// on any error.
+export async function gameHistory(): Promise<PastGame[]> {
+  const resp = await fetch(API_BASE + "/api/me/history", {
+    headers: authHeader(),
+  }).catch(() => null);
+  return resp && resp.ok ? ((await resp.json()) as PastGame[]) : [];
+}
+
 // The signed-in user for the stored token, or null (clearing a dead token).
 export async function currentUser(): Promise<AuthUser | null> {
   const token = authToken();

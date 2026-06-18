@@ -1,6 +1,6 @@
-// Admin client (/api/admin/*): registering the remote bot services whose kinds
-// form the seatable-bot catalog. Every call carries the bearer token; the
-// server gates these on the superuser flag (403 otherwise).
+// Admin client (/api/admin/*): registering the remote bot services that form
+// the seatable-bot catalog (one bot per service). Every call carries the bearer
+// token; the server gates these on the superuser flag (403 otherwise).
 
 import { API_BASE, ApiError, api } from "./api";
 import { authHeader } from "./auth";
@@ -8,18 +8,17 @@ import { authHeader } from "./auth";
 export interface BotProvider {
   name: string;
   base_url: string;
-  kinds: string[];
 }
 
 export async function listBotProviders(): Promise<BotProvider[]> {
   return api<BotProvider[]>("/api/admin/bot-providers", { headers: authHeader() });
 }
 
-export async function registerBotProvider(name: string, baseUrl: string): Promise<BotProvider> {
+export async function registerBotProvider(baseUrl: string): Promise<BotProvider> {
   return api<BotProvider>("/api/admin/bot-providers", {
     method: "POST",
     headers: authHeader(),
-    body: JSON.stringify({ name, base_url: baseUrl }),
+    body: JSON.stringify({ base_url: baseUrl }),
   });
 }
 

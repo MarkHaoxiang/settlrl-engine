@@ -45,10 +45,10 @@ with no tab open, and every move animates.
 
 ## Development
 
-The quickest start is the dev launcher, which boots the API, a bot service, and
-the frontend together, pre-registers an admin account (`dev@example.com` /
-`devpassword`), and registers the bot service so bots are seatable on first
-load. Ctrl-C stops everything.
+The quickest start is the dev launcher, which boots the API, a couple of one-bot
+services, and the frontend together, pre-registers an admin account
+(`dev@example.com` / `devpassword`), and registers the bot services so bots are
+seatable on first load. Ctrl-C stops everything.
 
 ```bash
 ./packages/settlrl-app/dev.sh
@@ -169,32 +169,40 @@ resume your games (`GET /api/me/games`) — on any device without carrying the
 token. Send the bearer token alongside (or instead of) `X-Seat-Tokens`; each
 snapshot's `your_seats` lists the seats the requester owns either way.
 
+**Profile and history.** The account link opens the **profile** page
+(`/profile`): your in-progress games plus a history of finished ones
+(`GET /api/me/history`), each replayable or downloadable by id. Finished games
+are kept in the store (a capped, replayable archive) rather than discarded, so
+their record is served even after the live game is evicted — the same record the
+end-of-game screen's **Download replay** button saves.
+
 ## Bot services
 
 The game server runs **no** agent code in-process. A seat's bot moves are
-computed by a separate **bot service** — the agents' move-serving app
-(`settlrl-agents[service]`), deployed and scaled apart from the game server.
-It is small and stateless, speaking a standardized two-call API:
+computed by a separate **bot service** — each service hosts **one bot**
+(`settlrl-agents[service]`), deployed and scaled apart from the game server. It
+speaks a standardized, structured two-call API:
 
-- `GET /catalog` — the bot kinds it offers (same shape as `GET /api/bots`).
-- `POST /act` — given a game's setup and its flat moves so far, it replays them
-  on a reference game and returns the acting seat's chosen flat action. The
-  agent reasons on an engine board bridged from that reference position; no
-  observation crosses the wire, so the two sides only agree on the (stable)
-  setup + flat action indexing.
+- `GET /info` — the bot's identity (`{ name, title, description, counts }`).
+- `POST /act` — given a game's setup and the moves the service has not seen yet
+  (structured `MoveModel`s in board coordinates, the tail after a `base` cursor),
+  it advances the game it is tracking and returns the acting seat's chosen move.
+  When the service is behind/ahead it answers `409 { resync, have }` and the
+  request is replayed from there. No engine indices cross the wire — only the
+  (stable) setup and the coordinate action shapes.
 
 ```bash
-BOT_PORT=8100 uv run --package settlrl-agents settlrl-bot-service
+BOT_PORT=8100 uv run --package settlrl-agents settlrl-bot-service --bot greedy
 ```
 
-An **admin** registers a service at runtime; its kinds join the catalog and can
-be seated:
+An **admin** registers a service by base URL at runtime; its bot self-identifies
+via `GET /info` and joins the catalog under its own name:
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/admin/bot-providers` | List registered remote bot services (admin) |
-| `POST /api/admin/bot-providers` | Register one `{ "name", "base_url" }` (admin); `400` if unreachable or a kind clashes |
-| `DELETE /api/admin/bot-providers/{name}` | Unregister one (admin) |
+| `GET /api/admin/bot-providers` | List registered bot services (admin) |
+| `POST /api/admin/bot-providers` | Register one `{ "base_url" }` (admin); `400` if unreachable |
+| `DELETE /api/admin/bot-providers/{name}` | Unregister one by bot name (admin) |
 
 `GET /api/bots` is empty until a service is registered, and every bot move is
 delegated over the API. A remote service that is slow or fails (or an abandoned
@@ -241,14 +249,15 @@ BASE=http://localhost:8000 npm run e2e
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
 | `GET /api/games/{id}/events` | Server-sent events: the requester's snapshot immediately, then again on every change (`bot_move` carries the server-paced bot play just made) |
 | `POST /api/games/{id}/chat` | Append a chat message `{ "text", "player"?: <owned seat> }` (no seat: spectator) |
-| `GET /api/games/{id}/record` | The finished game as a replayable `GameRecord` transcript (`409` while running: a record reconstructs hidden hands) |
-| `POST /api/games/{id}/replay` | Load a finished game for replay (`409` while running) |
+| `GET /api/games/{id}/record` | The finished game as a replayable `GameRecord` transcript — served for past games too, rebuilt from the store (`409` while running; `404` if unknown) |
+| `POST /api/games/{id}/replay` | Load a finished game for replay — a past game too (`409` while running; `404` if unknown) |
 | `POST /api/replay` | Load a game record (the record JSON) for replay; returns the opening state. `422` if malformed |
 | `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board). `404` until a replay is loaded |
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
 | `GET /api/bots` | Bot kinds available for seats (built-in + registered remote services), each with the player counts it supports and its configurable parameters |
 | `POST /api/auth/register` · `/login` · `/logout` · `GET /api/users/me` | Optional accounts (OAuth2 password flow; see [Accounts](#accounts)) |
 | `GET /api/me/games` | The signed-in user's live games — seats follow the account across devices |
+| `GET /api/me/history` | The signed-in user's finished games (newest first) — replayable / downloadable by id |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
@@ -297,7 +306,7 @@ packages/settlrl-app/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /help, /replay
+        ├── App.tsx          # Routes: menu, /play, /help, /profile, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError)
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard

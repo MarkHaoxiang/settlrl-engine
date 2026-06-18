@@ -8,6 +8,7 @@ import asyncio
 import time
 from pathlib import Path
 
+import pytest
 from _helpers import bot_registry
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry
@@ -17,12 +18,20 @@ from settlrl_app.storage.store import GameStore
 from settlrl_game.session import GameSession, GameSetup
 
 
+def _play_out(session: GameSession) -> None:
+    """Random legal moves until the game ends (a fast terminal position)."""
+    for _ in range(50_000):
+        if session.auto_step() is None:
+            return
+    raise AssertionError("game did not terminate")
+
+
 def test_game_setup_round_trips_through_a_dict() -> None:
     setup = GameSetup(
         seed=3,
         n_players=2,
         number_placement="spiral",
-        seats=["human", {"kind": "random", "params": {}}],
+        seats=["human", "random"],
     )
     # from_dict ignores the journal's framing keys (id, t).
     assert GameSetup.from_dict({**setup.to_dict(), "id": "x", "t": "header"}) == setup
@@ -92,6 +101,63 @@ def test_eviction_drops_the_game_from_the_store(tmp_path: Path) -> None:
 
     a_id, b_id, stored = asyncio.run(scenario())
     assert a_id not in stored and b_id in stored
+
+
+def test_finished_game_is_kept_as_history_not_restored(tmp_path: Path) -> None:
+    async def scenario() -> tuple[str, int | None, set[str], list[object]]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(max_games=1, store=store)
+        h = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
+        h.claim(0, user_id="acc-1")  # an account owns seat 0
+        _play_out(h.session)
+        h.bump()  # journals the moves and fires the finish hook
+        # At cap=1, creating another game evicts the finished one from the
+        # registry — but it stays in the store as history.
+        reg.create(GameSession(seed=1, n_players=2, seats=["human", "human"]))
+        await store.aclose()
+        winner = h.session.winner()
+        live = {str(hdr["id"]) for hdr, _ in await store.load()}
+        history = await store.history()
+        rec = await store.finished_record(h.id)
+        await db.dispose()
+        # Rebuilt from the journalled outcomes (no re-sampling), so it is faithful
+        # even though this game was played out via the random fallback.
+        assert rec is not None and rec.winner == winner and len(rec.moves) > 0
+        return h.id, winner, live, list(history)
+
+    gid, winner, live, history = asyncio.run(scenario())
+    assert gid not in live  # finished games are not restored as live games
+    assert [g.id for g in history] == [gid]  # but kept as history
+    assert history[0].owners == {"acc-1": [0]} and history[0].winner == winner
+
+
+def test_history_is_capped_to_the_newest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("settlrl_app.storage.store._HISTORY_CAP", 1)
+
+    async def scenario() -> tuple[list[str], list[str]]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(max_games=10, store=store)
+        ids = []
+        for seed in (0, 1):
+            h = reg.create(GameSession(seed=seed, n_players=2, seats=["human"] * 2))
+            _play_out(h.session)
+            h.bump()
+            ids.append(h.id)
+        await store.aclose()
+        kept = [g.id for g in await store.history()]
+        await db.dispose()
+        return ids, kept
+
+    ids, kept = asyncio.run(scenario())
+    assert len(kept) == 1 and kept[0] in ids  # pruned to the cap
 
 
 def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:

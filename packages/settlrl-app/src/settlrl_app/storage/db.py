@@ -22,7 +22,7 @@ from typing import Any
 import fastapi_users.db  # noqa: F401
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
-from sqlalchemy import JSON, ForeignKey, Integer, String
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.pool import StaticPool
@@ -41,12 +41,21 @@ class AccessToken(SQLAlchemyBaseAccessTokenTableUUID, Base):
 
 
 class GameRow(Base):
-    """A persisted game's immutable header (its setup)."""
+    """A persisted game's immutable header (its setup).
+
+    ``finished_at`` is null while the game is live and a wall-clock timestamp once
+    it ends — finished rows are kept as a replayable history (live rows are
+    restored into the registry on boot; finished ones are not). ``winner`` is the
+    winning seat; ``owners`` maps an account's user-id to the seats it held (so a
+    user's history needs no event scan). All three are null while unfinished."""
 
     __tablename__ = "game"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     header: Mapped[dict[str, Any]] = mapped_column(JSON)
+    finished_at: Mapped[float | None] = mapped_column(Float, default=None, index=True)
+    winner: Mapped[int | None] = mapped_column(Integer, default=None)
+    owners: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
 
 class GameEvent(Base):

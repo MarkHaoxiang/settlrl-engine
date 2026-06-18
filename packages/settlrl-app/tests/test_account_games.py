@@ -5,7 +5,9 @@ token — so they are recognised on any device (and can list their games) withou
 carrying the token around. These drive that through the routes.
 """
 
+import random
 import tempfile
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -115,6 +117,57 @@ def test_join_ties_the_seat_to_the_account(client: TestClient) -> None:
     ]
     snap = client.get(f"/api/games/{game}", headers=_bearer(b)).json()
     assert snap["your_seats"] == [seat]
+
+
+def test_finished_owned_game_appears_in_history_and_record_is_served() -> None:
+    """A finished game the account owns a seat in shows up in /api/me/history and
+    its record is still downloadable — for the owner only."""
+    rng = random.Random(0)
+    with (
+        tempfile.TemporaryDirectory() as state_dir,
+        TestClient(
+            create_app(state_dir=state_dir, bot_delay=0.0, providers=bot_registry())
+        ) as client,
+    ):
+        h = _bearer(_token(client, "h@example.com"))
+        game = client.post(
+            "/api/games",
+            json={"seed": 3, "n_players": 2, "seats": ["human", "random"]},
+            headers=h,
+        ).json()["id"]
+
+        # Play the human seat (random legal moves) while the driver plays the
+        # bot, until the game ends.
+        for _ in range(6000):
+            snap = client.get(f"/api/games/{game}", headers=h).json()
+            if snap["status"]["terminal"]:
+                break
+            if snap["status"]["your_turn"] and snap["actions"]:
+                flat = rng.choice(snap["actions"])["flat"]
+                client.post(f"/api/games/{game}/action", json={"flat": flat}, headers=h)
+            else:
+                time.sleep(0.01)  # the bot's turn — let the driver advance it
+        assert client.get(f"/api/games/{game}", headers=h).json()["status"]["terminal"]
+
+        # The finish is journalled write-behind; poll until history reflects it.
+        hist: list[dict[str, object]] = []
+        for _ in range(100):
+            hist = client.get("/api/me/history", headers=h).json()
+            if hist:
+                break
+            time.sleep(0.02)
+        assert [g["id"] for g in hist] == [game]
+        assert hist[0]["seats"] == [0] and hist[0]["winner"] in (0, 1)
+        assert hist[0]["n_players"] == 2
+
+        # Another user sees no history, and it requires sign-in.
+        other = _bearer(_token(client, "o@example.com"))
+        assert client.get("/api/me/history", headers=other).json() == []
+        assert client.get("/api/me/history").status_code == 401
+
+        # The record + replay are served for the finished game.
+        assert client.get(f"/api/games/{game}/record").status_code == 200
+        assert client.post(f"/api/games/{game}/replay").status_code == 200
 
 
 def test_account_seat_ownership_survives_a_restart() -> None:

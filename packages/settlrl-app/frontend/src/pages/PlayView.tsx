@@ -624,6 +624,7 @@ export default function PlayView() {
             board={board}
             winner={status.winner ?? null}
             mySeats={mySeats}
+            gameId={gameId}
             onNewGame={() => setConfiguring(true)}
             onDismiss={() => setEndDismissed(true)}
           />

@@ -32,13 +32,8 @@ from settlrl_game.models import (
 )
 from settlrl_game.record import GameRecord, Move
 
-# A seat assignment: "human", a bot kind, or a configured bot
-# {"kind": name, "params": {knob: value}}.
-SeatLike = str | Mapping[str, object]
-
-# A configurable scalar build parameter of a bot family (passed through to the
-# remote provider, which validates and plays it).
-Knob = int | float | bool
+# A seat assignment: "human" (hotseat) or a remote bot kind.
+SeatLike = str
 
 # Seat kind for a human-controlled seat; every other kind names a remote bot.
 HUMAN = "human"
@@ -132,11 +127,9 @@ class GameSession:
 
         ``n_players`` changes the seat count (None keeps it); ``seats`` assigns
         every seat (None means all human) and must have ``n_players`` entries,
-        each ``"human"`` or ``{"kind": name, "params": {...}}`` (a bare kind
-        string is shorthand). Every non-human kind is a remote bot from
-        ``external_kinds`` — the kinds a registered provider serves; their
-        params are stored verbatim (the provider validates and plays them; the
-        server runs no bots). ``external_kinds`` None keeps the current set.
+        each ``"human"`` or a remote bot kind. Every non-human kind must be in
+        ``external_kinds`` — the kinds registered providers serve; the server
+        runs no bots itself. ``external_kinds`` None keeps the current set.
         ``number_placement`` lays the number tokens: ``"random"`` shuffles them,
         ``"spiral"`` follows the rulebook spiral (terrain / ports are unchanged).
         """
@@ -148,28 +141,10 @@ class GameSession:
             seats = [HUMAN] * self.n_players
         if len(seats) != self.n_players:
             raise ValueError(f"expected {self.n_players} seats, got {len(seats)}")
-        kinds: list[str] = []
-        all_params: list[dict[str, Knob]] = []
-        for entry in seats:
-            if isinstance(entry, str):
-                kind, raw = entry, {}
-            else:
-                kind = str(entry.get("kind", ""))
-                raw_params = entry.get("params") or {}
-                if not isinstance(raw_params, Mapping):
-                    raise ValueError(f"seat params must be a mapping: {raw_params!r}")
-                raw = dict(raw_params)
-            kinds.append(kind)
-            if kind == HUMAN:
-                if raw:
-                    raise ValueError("a human seat takes no params")
-                all_params.append({})
-            elif kind in self._external_kinds:
-                all_params.append(dict(raw))
-            else:
+        for kind in seats:
+            if kind != HUMAN and kind not in self._external_kinds:
                 raise ValueError(f"unknown seat kind: {kind!r}")
-        self.seats: list[str] = kinds
-        self.seat_params: list[dict[str, Knob]] = all_params
+        self.seats: list[str] = list(seats)
         self.seed = seed
         self.number_placement: Literal["random", "spiral"] = number_placement
         # One seeded RNG drives the board and every later stochastic outcome, so
@@ -221,15 +196,10 @@ class GameSession:
 
     @property
     def setup(self) -> GameSetup:
-        """This game's reconstructable setup (seat params fold back into the
-        ``{"kind", "params"}`` form ``reset`` accepts)."""
-        seats: list[SeatLike] = [
-            kind
-            if kind == HUMAN or not params
-            else {"kind": kind, "params": dict(params)}
-            for kind, params in zip(self.seats, self.seat_params, strict=True)
-        ]
-        return GameSetup(self.seed, self.n_players, self.number_placement, seats)
+        """This game's reconstructable setup."""
+        return GameSetup(
+            self.seed, self.n_players, self.number_placement, list(self.seats)
+        )
 
     def terminal(self) -> bool:
         return self.game.phase is ref.Phase.GAME_OVER
@@ -348,7 +318,7 @@ class GameSession:
             number_placement=self.number_placement,
             moves=tuple(self._moves),
             winner=self.winner(),
-            meta={"seats": self.seats, "seat_params": self.seat_params},
+            meta={"seats": self.seats},
         )
 
     def _push_log(

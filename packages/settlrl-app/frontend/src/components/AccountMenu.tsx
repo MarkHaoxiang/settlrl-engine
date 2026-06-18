@@ -15,10 +15,10 @@ export default function AccountMenu({
   if (user) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-        <span style={{ opacity: 0.8 }}>
+        <Link to="/profile" style={{ color: LINK, opacity: 0.8 }}>
           {user.email}
           {user.is_superuser ? " · admin" : ""}
-        </span>
+        </Link>
         <button style={smallButtonStyle} onClick={() => void logout().then(() => onUser(null))}>
           Log out
         </button>

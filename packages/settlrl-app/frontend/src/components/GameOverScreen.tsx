@@ -3,6 +3,7 @@
 
 import type { Board, Player } from "../lib/boardData";
 import { PLAYER_COLORS, playerName } from "../lib/boardData";
+import { downloadRecord } from "../lib/game";
 import { ACCENT, DIVIDER, buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
 
 // Final victory points: building points + the two awards + victory-point dev
@@ -18,12 +19,14 @@ export default function GameOverScreen({
   board,
   winner,
   mySeats,
+  gameId,
   onNewGame,
   onDismiss,
 }: {
   board: Board;
   winner: number | null;
   mySeats: number[];
+  gameId?: string;
   onNewGame: () => void;
   onDismiss: () => void;
 }) {
@@ -87,6 +90,11 @@ export default function GameOverScreen({
           <button style={buttonStyle} onClick={onDismiss}>
             View board
           </button>
+          {gameId && (
+            <button style={buttonStyle} onClick={() => void downloadRecord(gameId)}>
+              Download replay
+            </button>
+          )}
           <button style={{ ...buttonStyle, ...selectedStyle }} onClick={onNewGame}>
             New game
           </button>

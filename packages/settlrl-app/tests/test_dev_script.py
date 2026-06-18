@@ -13,7 +13,8 @@ from pathlib import Path
 import tomllib
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from settlrl_agents.service.app import create_bot_app
+from settlrl_agents.service.app import create_app as create_bot_app
+from settlrl_agents.service.bots import make_bot
 from settlrl_app.game.games import GameRegistry
 from settlrl_app.server import create_app
 
@@ -60,7 +61,7 @@ def test_dev_script_endpoints_still_exist() -> None:
     ):
         assert path in text, f"dev.sh no longer calls {path}"
         assert path in served, f"the server no longer serves {path}"
-    assert "/catalog" in text and "/catalog" in _paths(create_bot_app())
+    assert "/info" in text and "/info" in _paths(create_bot_app(make_bot("greedy")))
 
 
 def test_dev_script_seeds_an_admin() -> None:

@@ -61,14 +61,20 @@ def test_auto_step_drives_a_game_to_a_winner() -> None:
 def test_external_bot_kinds_are_accepted_and_stored() -> None:
     sess = GameSession(
         seed=0,
-        seats=[HUMAN, {"kind": "random", "params": {"depth": 2}}, "random", "random"],
+        seats=[HUMAN, "random", "random", "random"],
         external_kinds=_BOTS,
     )
     assert sess.status().seats == [HUMAN, "random", "random", "random"]
-    # Params are stored verbatim (the provider validates them) and fold back
-    # into the reconstructable setup.
-    assert sess.setup.seats[1] == {"kind": "random", "params": {"depth": 2}}
+    # The seats fold back into the reconstructable setup.
+    assert sess.setup.seats == [HUMAN, "random", "random", "random"]
     assert sess.status().your_turn  # seat 0 (human) opens
+
+
+def test_unknown_seat_kind_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown seat kind"):
+        GameSession(
+            seed=0, n_players=2, seats=["human", "clever"], external_kinds=_BOTS
+        )
 
 
 def test_all_bot_game_waits_on_a_bot_and_plays_out() -> None:
@@ -150,7 +156,7 @@ def test_record_exports_a_replayable_game() -> None:
     _drive_to_completion(sess)
     rec = sess.record()
     assert rec.winner == sess.status().winner
-    assert rec.meta == {"seats": ["random", "random"], "seat_params": [{}, {}]}
+    assert rec.meta == {"seats": ["random", "random"]}
     assert len(rec.moves) > 10  # the full trace, not the capped log
     # The JSON roundtrips and the engine replays it without complaint.
     rec2 = GameRecord.from_json(rec.to_json())

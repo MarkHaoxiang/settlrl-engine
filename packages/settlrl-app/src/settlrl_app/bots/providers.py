@@ -1,32 +1,31 @@
 """Bot providers: the remote bot services that compute a seat's moves.
 
-The game server runs no bot policies itself. A **remote** provider is a separate
-bot service (:mod:`settlrl_agents.service.app`) reached over HTTP, so the
-agent-running code is deployed and scaled apart from the game server; an admin
-registers one at runtime and its bot kinds form the catalog.
+The game server runs no bot policies itself. Each registered provider is a
+separate **one-bot** service (:mod:`settlrl_agents.service`) reached over HTTP, so
+the agent-running code is deployed and scaled apart from the game server; an admin
+registers one by base URL and its bot's ``name`` becomes a seatable kind.
 
-The wire contract is deliberately small and engine-version-stable: a move is
-requested by sending the game's setup plus its flat move list so far (the same
-data a ``settlrl_engine.record`` carries) and the service replays them and
-returns the chosen flat action — no engine observation pytree crosses the wire,
-so the two sides only have to agree on the (stable) record format and the flat
-action indexing.
+The wire is structured and incremental (:mod:`settlrl_game.botproto`): a move is
+requested by sending only the moves the service has not seen yet — those after the
+``base`` cursor this provider keeps per game — as :class:`MoveModel`s in board
+coordinates; the service applies them to the game it tracks and returns the chosen
+move. If the service has fallen behind/ahead (a restart), it answers ``409`` with
+the move count it actually holds and the request is replayed from there.
 
-:class:`ProviderRegistry` maps each bot kind to the service that serves it. It is
-mutated and read only on the event loop (admin routes, the driver), so it needs
-no lock.
+:class:`ProviderRegistry` maps each bot kind (the service's bot name) to its
+provider. It is mutated and read only on the event loop, so it needs no lock.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 
 import httpx
-from settlrl_game.botproto import ActRequest, ActResponse
+from settlrl_game.actions import flat_for_move, move_for_flat
+from settlrl_game.botproto import ActRequest, ActResponse, BotInfo
 
 __all__ = [
-    "ActRequest",
-    "ActResponse",
     "ProviderRegistry",
     "RemoteBotError",
     "RemoteBotProvider",
@@ -37,77 +36,102 @@ class RemoteBotError(Exception):
     """A remote bot service was unreachable or answered unusably."""
 
 
-# HTTP timeout (seconds) for the catalog fetch and each move request, applied as
-# the client's default. A move request is awaited on the driver's turn, so it is
-# kept short — a slow service falls back to a local random move rather than
-# stalling the game.
+# HTTP timeout (seconds) for the info fetch and each move request, applied as the
+# client's default. A move request is awaited on the driver's turn, so it is kept
+# short — a slow service falls back to a local random move rather than stalling.
 _DEFAULT_TIMEOUT = 5.0
+
+# Per-provider cap on tracked per-game cursors; past it the oldest are dropped (a
+# dropped cursor just costs one resync round-trip on that game's next move).
+_CURSOR_CAP = 256
 
 
 class RemoteBotProvider:
-    """A registered remote bot service and the kinds it offers."""
+    """A registered remote bot service and the single bot it offers."""
 
-    def __init__(
-        self,
-        name: str,
-        base_url: str,
-        catalog: dict[str, dict[str, object]],
-        client: httpx.AsyncClient,
-    ) -> None:
-        self.name = name
+    def __init__(self, base_url: str, info: BotInfo, client: httpx.AsyncClient) -> None:
         self.base_url = base_url.rstrip("/")
-        self._catalog = catalog
+        self.info = info
         self._client = client
+        # game_id -> move count the service is assumed to already hold.
+        self._sent: OrderedDict[str, int] = OrderedDict()
 
     @classmethod
     async def connect(
-        cls, name: str, base_url: str, client: httpx.AsyncClient
+        cls, base_url: str, client: httpx.AsyncClient
     ) -> RemoteBotProvider:
-        """Fetch a service's catalog to register it (raising
+        """Fetch a service's :class:`BotInfo` to register it (raising
         :class:`RemoteBotError` if it can't be reached or speaks nonsense)."""
-        url = base_url.rstrip("/") + "/catalog"
+        url = base_url.rstrip("/") + "/info"
         try:
             resp = await client.get(url)
             resp.raise_for_status()
-            catalog = resp.json()
-        except (httpx.HTTPError, ValueError) as exc:
+            info = BotInfo(**resp.json())
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise RemoteBotError(
                 f"cannot reach bot service at {base_url}: {exc}"
             ) from exc
-        if not isinstance(catalog, dict) or not all(
-            isinstance(k, str) and isinstance(v, dict) for k, v in catalog.items()
-        ):
-            raise RemoteBotError(f"bot service at {base_url} returned a bad catalog")
-        return cls(name, base_url, catalog, client)
+        if not info.name:
+            raise RemoteBotError(f"bot service at {base_url} reported no name")
+        return cls(base_url, info, client)
 
     @property
-    def kinds(self) -> set[str]:
-        return set(self._catalog)
+    def name(self) -> str:
+        return self.info.name
 
     def catalog(self) -> dict[str, dict[str, object]]:
-        return dict(self._catalog)
+        return {
+            self.name: {
+                "title": self.info.title,
+                "description": self.info.description,
+                "counts": self.info.counts,
+            }
+        }
 
     async def act(
-        self, game_id: str, setup: dict[str, Any], moves: list[int], seat: int
+        self, game_id: str, setup: dict[str, Any], history: list[int], seat: int
     ) -> int:
-        """The flat move the service picks for ``seat`` (raises
-        :class:`RemoteBotError` on any transport / protocol failure)."""
-        req = ActRequest(game_id=game_id, setup=setup, moves=moves, seat=seat)
+        """The flat move the service picks for ``seat``, sending only the moves
+        after this provider's cursor (replaying from the service's reported count
+        on a ``409`` resync). Raises :class:`RemoteBotError` on any transport /
+        protocol failure."""
+        base = self._sent.get(game_id, 0)
+        if not 0 <= base <= len(history):
+            base = 0
         try:
-            resp = await self._client.post(
-                self.base_url + "/act", json=req.model_dump()
-            )
-            resp.raise_for_status()
-            return ActResponse(**resp.json()).flat
+            for resync in (False, True):
+                moves = [move_for_flat(f) for f in history[base:]]
+                req = ActRequest(
+                    game_id=game_id, seat=seat, setup=setup, base=base, moves=moves
+                )
+                resp = await self._client.post(
+                    self.base_url + "/act", json=req.model_dump()
+                )
+                if resp.status_code == 409 and not resync:
+                    detail = resp.json().get("detail")
+                    if isinstance(detail, dict) and detail.get("resync"):
+                        base = max(0, min(int(detail.get("have", 0)), len(history)))
+                        continue
+                resp.raise_for_status()
+                flat = flat_for_move(ActResponse(**resp.json()).move)
+                self._remember(game_id, len(history))
+                return flat
+            raise RemoteBotError(f"bot service {self.name!r} kept asking to resync")
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise RemoteBotError(f"bot service {self.name!r} failed: {exc}") from exc
 
+    def _remember(self, game_id: str, count: int) -> None:
+        self._sent[game_id] = count
+        self._sent.move_to_end(game_id)
+        while len(self._sent) > _CURSOR_CAP:
+            self._sent.popitem(last=False)
+
 
 class ProviderRegistry:
-    """Bot kinds -> the remote service that serves them. The game server runs
-    **no** bots in-process; admins register bot services whose kinds form the
-    whole catalog (an unreachable bot still falls back to a server-side random
-    move for liveness, but that is not a selectable kind).
+    """Bot kind (a service's bot name) -> the remote service that serves it. The
+    game server runs **no** bots in-process; admins register one-bot services
+    whose names form the whole catalog (an unreachable bot still falls back to a
+    server-side random move for liveness, but that is not a selectable kind).
 
     ``client`` is the shared async HTTP client for remote calls (tests inject one
     wired to a bot-service app via ``ASGITransport``)."""
@@ -120,45 +144,31 @@ class ProviderRegistry:
         await self._client.aclose()
 
     def catalog(self) -> dict[str, dict[str, object]]:
-        """Every offered bot kind (each registered provider's), in the shape
-        ``GET /api/bots`` returns."""
+        """Every offered bot kind, in the shape ``GET /api/bots`` returns."""
         out: dict[str, dict[str, object]] = {}
         for prov in self._remotes.values():
             out.update(prov.catalog())
         return out
 
     def remote_for(self, kind: str) -> RemoteBotProvider | None:
-        """The remote provider that owns ``kind`` (None if unknown — the create
-        route rejects unknown kinds first)."""
-        for prov in self._remotes.values():
-            if kind in prov.kinds:
-                return prov
-        return None
+        """The provider serving ``kind`` (None if no service offers it)."""
+        return self._remotes.get(kind)
 
     def remote_kinds(self) -> frozenset[str]:
         """All kinds served remotely (the session's ``external_kinds``)."""
-        return frozenset(k for prov in self._remotes.values() for k in prov.kinds)
+        return frozenset(self._remotes)
 
-    async def register(self, name: str, base_url: str) -> RemoteBotProvider:
-        """Register (or replace) a remote provider by name. Raises
-        :class:`RemoteBotError` if it is unreachable or any of its kinds clash
-        with another remote provider's kind."""
-        provider = await RemoteBotProvider.connect(name, base_url, self._client)
-        others = {k for n, p in self._remotes.items() if n != name for k in p.kinds}
-        clash = provider.kinds & others
-        if clash:
-            raise RemoteBotError(
-                f"bot kind(s) already provided: {', '.join(sorted(clash))}"
-            )
-        self._remotes[name] = provider
+    async def register(self, base_url: str) -> RemoteBotProvider:
+        """Register (or replace) a remote bot service by base URL; its bot name
+        becomes the seatable kind. Raises :class:`RemoteBotError` if it is
+        unreachable."""
+        provider = await RemoteBotProvider.connect(base_url, self._client)
+        self._remotes[provider.name] = provider
         return provider
 
     def unregister(self, name: str) -> bool:
         return self._remotes.pop(name, None) is not None
 
     def providers(self) -> list[dict[str, object]]:
-        """Registered remote providers (name, base url, kinds) for the admin API."""
-        return [
-            {"name": n, "base_url": p.base_url, "kinds": sorted(p.kinds)}
-            for n, p in self._remotes.items()
-        ]
+        """Registered bot services (name, base url) for the admin API."""
+        return [{"name": n, "base_url": p.base_url} for n, p in self._remotes.items()]

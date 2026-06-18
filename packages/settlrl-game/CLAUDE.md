@@ -8,11 +8,15 @@ without a dependency cycle.
 
 Two layers: the reference rules (`settlrl_game.reference`, below) and the
 serialization/replay layer over them — `session.py` (`GameSession`: a live game
-driven by a stable flat action index), `actions.py` (the flat space + decode),
-`convert.py` (reference `Game` → `BoardModel`), `models.py` (the pydantic wire
-models), `record.py` (replayable records), and `botproto.py` (the bot-service
-`/act` wire protocol). The flat action indexing and record format are the
-contract the app and bot service agree on across the wire; keep them stable.
+driven by a stable flat action index), `actions.py` (the flat space + decode,
+plus the `move_for_flat` / `flat_for_move` / `legal_moves` translation to the
+structured `MoveModel`), `convert.py` (reference `Game` → `BoardModel`),
+`models.py` (the pydantic wire models), `record.py` (replayable records), and
+`botproto.py` (the bot-service wire protocol: `BotInfo`, the structured
+`MoveModel` in board coordinates, and the incremental `ActRequest`/`ActResponse`).
+The flat action indexing and the record format are the contract the app and bot
+service agree on; keep them stable. Flat indices stay internal — the bot wire
+speaks `MoveModel` (cube/axial coordinates), so it survives engine reindexing.
 
 ## `settlrl_game.reference` — the reference rules
 

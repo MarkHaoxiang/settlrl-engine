@@ -103,6 +103,7 @@ def create_app(
         replays=ReplaySlot(),
         spawn_driver=spawn_driver,
         turn_timeout=turn_timeout,
+        store=store,
     )
 
     @asynccontextmanager

@@ -440,7 +440,7 @@
   "/api/games/{game_id}/record": {
    "get": {
     "summary": "Get Record",
-    "description": "The finished game as ``GameRecord`` JSON -- a self-contained,\nreplayable transcript. 409 while running: replaying a record\nreconstructs hidden hands, so live games don't export.",
+    "description": "The finished game as ``GameRecord`` JSON -- a self-contained,\nreplayable transcript (served for past games too, rebuilt from the\nstore). 409 while running; 404 if unknown.",
     "operationId": "get_record_api_games__game_id__record_get",
     "parameters": [
      {
@@ -478,7 +478,7 @@
   "/api/games/{game_id}/replay": {
    "post": {
     "summary": "Post Replay From Game",
-    "description": "Load a finished game for replay (409 while it is still running:\nreplaying reconstructs hidden hands).",
+    "description": "Load a finished game for replay (a past game too, rebuilt from the\nstore). 409 while it is still running; 404 if unknown.",
     "operationId": "post_replay_from_game_api_games__game_id__replay_post",
     "parameters": [
      {
@@ -617,7 +617,7 @@
   "/api/bots": {
    "get": {
     "summary": "Get Bots",
-    "description": "Bot kinds available for seats \u2014 built-in (settlrl-agents) names plus\nany registered remote providers' \u2014 each with the player counts it\nsupports and its configurable build parameters.",
+    "description": "Bot kinds available for seats \u2014 one per registered bot service \u2014 each\nwith its title, description, and the player counts it supports.",
     "operationId": "get_bots_api_bots_get",
     "responses": {
      "200": {
@@ -668,7 +668,7 @@
    },
    "post": {
     "summary": "Register Bot Provider",
-    "description": "Register (or replace) a remote bot service by name + base URL; its\nbot kinds join the catalog. ``400`` if it is unreachable or a kind\nclashes with an existing one (admin only).",
+    "description": "Register (or replace) a remote bot service by base URL; the bot it\nserves joins the catalog under its own name. ``400`` if it is unreachable\n(admin only).",
     "operationId": "register_bot_provider_api_admin_bot_providers_post",
     "requestBody": {
      "content": {
@@ -765,6 +765,34 @@
          },
          "type": "array",
          "title": "Response My Games Api Me Games Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
+   }
+  },
+  "/api/me/history": {
+   "get": {
+    "summary": "My History",
+    "description": "The signed-in user's finished games (newest first) \u2014 their seats, the\nwinner, and the player count \u2014 each replayable / downloadable by id.",
+    "operationId": "my_history_api_me_history_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/_PastGameModel"
+         },
+         "type": "array",
+         "title": "Response My History Api Me History Get"
         }
        }
       }
@@ -2493,14 +2521,7 @@
       "anyOf": [
        {
         "items": {
-         "anyOf": [
-          {
-           "type": "string"
-          },
-          {
-           "$ref": "#/components/schemas/_SeatSpec"
-          }
-         ]
+         "type": "string"
         },
         "type": "array"
        },
@@ -2627,12 +2648,52 @@
     "title": "_MyGameModel",
     "description": "A live game the signed-in user owns a seat in."
    },
+   "_PastGameModel": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "seats": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Seats"
+     },
+     "n_players": {
+      "type": "integer",
+      "title": "N Players"
+     },
+     "winner": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Winner"
+     },
+     "finished_at": {
+      "type": "number",
+      "title": "Finished At"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "seats",
+     "n_players",
+     "winner",
+     "finished_at"
+    ],
+    "title": "_PastGameModel",
+    "description": "A finished game in the user's history."
+   },
    "_ProviderRequest": {
     "properties": {
-     "name": {
-      "type": "string",
-      "title": "Name"
-     },
      "base_url": {
       "type": "string",
       "title": "Base Url"
@@ -2640,11 +2701,10 @@
     },
     "type": "object",
     "required": [
-     "name",
      "base_url"
     ],
     "title": "_ProviderRequest",
-    "description": "A remote bot service to register: a short name and its base URL."
+    "description": "A remote bot service to register: its base URL (the bot self-identifies)."
    },
    "_QueuedModel": {
     "properties": {
@@ -2675,38 +2735,6 @@
     ],
     "title": "_QueuedModel",
     "description": "The server is at its concurrency cap: the caller's place in line. They\nre-POST with ``ticket`` until they get a :class:`_CreatedModel` back."
-   },
-   "_SeatSpec": {
-    "properties": {
-     "kind": {
-      "type": "string",
-      "title": "Kind"
-     },
-     "params": {
-      "additionalProperties": {
-       "anyOf": [
-        {
-         "type": "number"
-        },
-        {
-         "type": "integer"
-        },
-        {
-         "type": "boolean"
-        }
-       ]
-      },
-      "type": "object",
-      "title": "Params",
-      "default": {}
-     }
-    },
-    "type": "object",
-    "required": [
-     "kind"
-    ],
-    "title": "_SeatSpec",
-    "description": "A configured bot seat: its kind plus knob overrides from the catalog."
    }
   },
   "securitySchemes": {

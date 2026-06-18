@@ -1,26 +1,33 @@
-"""Tests for the standalone bot service (the standardized bot API).
+"""Tests for the one-bot service (the bot wire protocol).
 
-The service is a pure function of a game record: given a setup and the flat
-moves so far, it replays and returns the acting bot's move. These drive it
-through its own TestClient.
+A service hosts a single bot and tracks each game in flight: ``/act`` applies the
+moves it has not seen yet (structured, in board coordinates) and returns the
+acting seat's move. These drive it through a ``TestClient``.
 """
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from settlrl_agents.service.app import create_bot_app
+from settlrl_agents.service.app import create_app
+from settlrl_agents.service.bots import make_bot
+from settlrl_game.actions import flat_for_move, move_for_flat
+from settlrl_game.botproto import MoveModel
 from settlrl_game.session import GameSession, GameSetup
+
+
+def _move(resp: Any) -> MoveModel:
+    """The MoveModel from an /act response."""
+    return MoveModel(**resp.json()["move"])
 
 
 @pytest.fixture()
 def client() -> Iterator[TestClient]:
-    yield TestClient(create_bot_app())
+    yield TestClient(create_app(make_bot("random")))
 
 
-def _all_bot_setup() -> dict[str, object]:
-    # The game server stores bot seats verbatim, so build the setup dict directly
-    # (a GameSession would need the kinds in external_kinds, which the service has).
+def _all_bot_setup() -> dict[str, Any]:
     return GameSetup(
         seed=3, n_players=2, number_placement="random", seats=["random", "random"]
     ).to_dict()
@@ -32,52 +39,78 @@ def _mirror() -> GameSession:
     return GameSession(seed=3, n_players=2, seats=["human", "human"])
 
 
-def test_catalog_lists_built_in_kinds(client: TestClient) -> None:
-    catalog = client.get("/catalog").json()
-    assert "random" in catalog
-    assert 2 in catalog["random"]["counts"]
+def _structured(flats: list[int]) -> list[dict[str, Any]]:
+    return [move_for_flat(f).model_dump() for f in flats]
+
+
+def test_info_reports_the_bot(client: TestClient) -> None:
+    info = client.get("/info").json()
+    assert info["name"] == "random"
+    assert 2 in info["counts"]
 
 
 def test_act_returns_a_legal_move_for_the_acting_seat(client: TestClient) -> None:
-    setup = _all_bot_setup()
-    # From the opening of an all-bot game, seat 0 (a bot) is acting.
-    resp = client.post(
-        "/act", json={"game_id": "g1", "setup": setup, "moves": [], "seat": 0}
-    )
+    body = {
+        "game_id": "g1",
+        "seat": 0,
+        "setup": _all_bot_setup(),
+        "base": 0,
+        "moves": [],
+    }
+    resp = client.post("/act", json=body)
     assert resp.status_code == 200, resp.text
-    flat = resp.json()["flat"]
-    # The returned move is legal in a freshly replayed copy of the same position.
+    flat = flat_for_move(_move(resp))
     assert flat in {int(f) for f in _mirror().legal_flat()}
 
 
-def test_act_advances_move_by_move(client: TestClient) -> None:
-    """Feeding back each chosen move (growing the trace) keeps producing legal
-    moves — exercising the service's incremental replay cache."""
+def test_act_advances_incrementally(client: TestClient) -> None:
+    """Feeding only each new move (a growing ``base``) keeps producing legal
+    moves — exercising the service's incremental game tracking."""
     setup = _all_bot_setup()
     mirror = _mirror()
-    moves: list[int] = []
+    service_count = 0  # moves the service already holds
     for _ in range(8):
         seat = mirror.acting_seat()
-        resp = client.post(
-            "/act", json={"game_id": "g2", "setup": setup, "moves": moves, "seat": seat}
-        )
+        history = mirror.moves_flat()
+        body = {
+            "game_id": "g2",
+            "seat": seat,
+            "setup": setup,
+            "base": service_count,
+            "moves": _structured(history[service_count:]),
+        }
+        resp = client.post("/act", json=body)
         assert resp.status_code == 200, resp.text
-        flat = resp.json()["flat"]
+        service_count = len(history)  # the service applied the tail we sent
+        flat = flat_for_move(_move(resp))
         assert flat in {int(f) for f in mirror.legal_flat()}
         mirror.apply(flat)
-        moves.append(flat)
+
+
+def test_act_resync_when_base_is_ahead(client: TestClient) -> None:
+    body = {
+        "game_id": "g3",
+        "seat": 0,
+        "setup": _all_bot_setup(),
+        "base": 999,
+        "moves": [],
+    }
+    resp = client.post("/act", json=body)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == {"resync": True, "have": 0}
 
 
 def test_act_409_when_seat_not_acting(client: TestClient) -> None:
-    setup = _all_bot_setup()
-    resp = client.post(
-        "/act", json={"game_id": "g3", "setup": setup, "moves": [], "seat": 1}
-    )
-    assert resp.status_code == 409
+    body = {
+        "game_id": "g4",
+        "seat": 1,
+        "setup": _all_bot_setup(),
+        "base": 0,
+        "moves": [],
+    }
+    assert client.post("/act", json=body).status_code == 409
 
 
 def test_act_422_on_bad_setup(client: TestClient) -> None:
-    resp = client.post(
-        "/act", json={"game_id": "g4", "setup": {"seed": 1}, "moves": [], "seat": 0}
-    )
-    assert resp.status_code == 422
+    body = {"game_id": "g5", "seat": 0, "setup": {"seed": 1}, "base": 0, "moves": []}
+    assert client.post("/act", json=body).status_code == 422

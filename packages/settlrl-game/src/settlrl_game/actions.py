@@ -11,17 +11,28 @@ The ordering is the game's own; the frontend never assumes specific values.
 from __future__ import annotations
 
 import settlrl_game.reference as ref
+from settlrl_game.botproto import MoveModel
 from settlrl_game.convert import (
     _RESOURCE_NAMES,
     EDGE_VERTICES,
     TILE_COORDS,
     VERTEX_COORDS,
+    Cube,
     _cube,
 )
 from settlrl_game.models import ActionModel, EdgeModel, HexModel
 from settlrl_game.reference import board as rb
 
-__all__ = ["N_FLAT", "decode_actions", "flat_for_action", "legal_flats", "to_action"]
+__all__ = [
+    "N_FLAT",
+    "decode_actions",
+    "flat_for_action",
+    "flat_for_move",
+    "legal_flats",
+    "legal_moves",
+    "move_for_flat",
+    "to_action",
+]
 
 _NR = len(ref.RESOURCES)
 # Victim slots a robber/knight row can name: "no one" plus the four seats (the
@@ -272,3 +283,98 @@ def _decode(flat: int) -> ActionModel:
 def decode_actions(flat_indices: list[int]) -> list[ActionModel]:
     """Decode a list of legal flat action indices into action descriptors."""
     return [_decode(f) for f in flat_indices]
+
+
+# -- structured MoveModel <-> flat (the bot-service wire form) ----------------
+#
+# `MoveModel` names an action in board coordinates (the inverse of the engine's
+# opaque flat index), so it survives across engine versions. The tables below
+# invert the geometry lookups so a structured move maps back to its flat row.
+
+_CUBE_TO_VERTEX: dict[Cube, int] = {c: v for v, c in enumerate(VERTEX_COORDS)}
+_QR_TO_TILE: dict[tuple[int, int], int] = {qr: t for t, qr in enumerate(TILE_COORDS)}
+_EDGE_BY_CUBES: dict[frozenset[Cube], int] = {
+    frozenset((VERTEX_COORDS[v1], VERTEX_COORDS[v2])): e
+    for e, (v1, v2) in enumerate(EDGE_VERTICES)
+}
+_RESOURCE_INDEX: dict[str, int] = {n: i for i, n in enumerate(_RESOURCE_NAMES)}
+
+
+def move_for_flat(flat: int) -> MoveModel:
+    """The structured move naming flat index ``flat``."""
+    type_, a, b, c = _ROWS[flat]
+    if type_ in _VERTEX_TYPES:
+        return MoveModel(type=type_, vertex=_cube(VERTEX_COORDS[a]))
+    if type_ in _ROAD_TYPES:
+        v1, v2 = EDGE_VERTICES[a]
+        edge = EdgeModel(a=_cube(VERTEX_COORDS[v1]), b=_cube(VERTEX_COORDS[v2]))
+        return MoveModel(type=type_, edge=edge)
+    if type_ in _ROBBER_TYPES:
+        q, r = TILE_COORDS[a]
+        return MoveModel(
+            type=type_, tile=HexModel(q=q, r=r), victim=None if b < 0 else b
+        )
+    if type_ in ("discard", "play_monopoly"):
+        return MoveModel(type=type_, resource=_RESOURCE_NAMES[a])
+    if type_ == "play_year_of_plenty":
+        return MoveModel(type=type_, resources=[_RESOURCE_NAMES[a], _RESOURCE_NAMES[b]])
+    if type_ == "maritime_trade":
+        return MoveModel(
+            type=type_, give=_RESOURCE_NAMES[a], receive=_RESOURCE_NAMES[b]
+        )
+    if type_ == "propose_trade":
+        return MoveModel(
+            type=type_, give=_RESOURCE_NAMES[a], receive=_RESOURCE_NAMES[b], partner=c
+        )
+    return MoveModel(type=type_)
+
+
+def _res(name: str | None) -> int:
+    if name is None or name not in _RESOURCE_INDEX:
+        raise ValueError(f"unknown resource: {name!r}")
+    return _RESOURCE_INDEX[name]
+
+
+def flat_for_move(move: MoveModel) -> int:
+    """The flat index naming a structured ``move`` (raises ``ValueError`` if the
+    move names no action: an unknown type or off-board geometry)."""
+    t = move.type
+    try:
+        if t in _VERTEX_TYPES:
+            if move.vertex is None:
+                raise ValueError("vertex action needs a vertex")
+            v = move.vertex
+            key: Row = (t, _CUBE_TO_VERTEX[(v.q, v.r, v.s)], -1, -1)
+        elif t in _ROAD_TYPES:
+            if move.edge is None:
+                raise ValueError("road action needs an edge")
+            a, b = move.edge.a, move.edge.b
+            cubes = frozenset(((a.q, a.r, a.s), (b.q, b.r, b.s)))
+            key = (t, _EDGE_BY_CUBES[cubes], -1, -1)
+        elif t in _ROBBER_TYPES:
+            if move.tile is None:
+                raise ValueError("robber action needs a tile")
+            victim = -1 if move.victim is None else move.victim
+            key = (t, _QR_TO_TILE[(move.tile.q, move.tile.r)], victim, -1)
+        elif t in ("discard", "play_monopoly"):
+            key = (t, _res(move.resource), -1, -1)
+        elif t == "play_year_of_plenty":
+            if move.resources is None or len(move.resources) != 2:
+                raise ValueError("year of plenty needs two resources")
+            key = (t, _res(move.resources[0]), _res(move.resources[1]), -1)
+        elif t == "maritime_trade":
+            key = (t, _res(move.give), _res(move.receive), -1)
+        elif t == "propose_trade":
+            if move.partner is None:
+                raise ValueError("propose trade needs a partner")
+            key = (t, _res(move.give), _res(move.receive), move.partner)
+        else:
+            key = (t, 0, -1, -1)
+        return _KEY_TO_FLAT[key]
+    except KeyError as exc:
+        raise ValueError(f"no such move: {move!r}") from exc
+
+
+def legal_moves(game: ref.Game) -> list[MoveModel]:
+    """The structured moves legal in ``game`` right now."""
+    return [move_for_flat(f) for f in legal_flats(game)]

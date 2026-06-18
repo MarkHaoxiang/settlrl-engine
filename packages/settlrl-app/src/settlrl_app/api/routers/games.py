@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from settlrl_game.convert import board_to_model
 from settlrl_game.models import BoardModel, GameModel, ReplayStateModel
+from settlrl_game.record import GameRecord
 from settlrl_game.session import HUMAN, GameSession, IllegalActionError
 from starlette.responses import Response
 
@@ -29,23 +30,15 @@ from settlrl_app.game.games import QueuePosition, RegistryFullError
 from settlrl_app.storage.db import User
 
 
-class _SeatSpec(BaseModel):
-    """A configured bot seat: its kind plus knob overrides from the catalog."""
-
-    kind: str
-    params: dict[str, float | int | bool] = {}
-
-
 class _CreateRequest(BaseModel):
     seed: int = 0
     # Seats in the new game. The engine supports 2-4; the app offers 2
     # and 4 for now.
     n_players: Literal[2, 4] = 4
     number_placement: Literal["random", "spiral"] = "random"
-    # What controls each seat: "human", a bot kind from GET /api/bots, or a
-    # configured bot {"kind", "params"}; no seat has to be human. None seats a
-    # human on seat 0 and "random" bots elsewhere.
-    seats: list[str | _SeatSpec] | None = None
+    # What controls each seat: "human" or a bot kind from GET /api/bots; no seat
+    # has to be human. None seats a human on seat 0 and "random" bots elsewhere.
+    seats: list[str] | None = None
     # Human seats the creator claims immediately: every one ("all", the
     # hotseat default), just the first ("first", online play — others join
     # via POST /join), or none.
@@ -95,18 +88,16 @@ class _ChatRequest(BaseModel):
 
 
 def _validate_seat_kinds(
-    seats: "list[str | _SeatSpec] | None",
+    seats: "list[str] | None",
     n_players: int,
     catalog: dict[str, dict[str, object]],
 ) -> None:
     """Reject a create whose bot seats name unknown kinds or kinds that don't
-    support the player count, against the aggregated provider catalog (so remote
-    kinds are validated the same way local ones are). The session re-checks
-    local kinds; remote kinds are only knowable here."""
+    support the player count, against the registered bot catalog (the game server
+    runs no bots, so a seat kind is valid only if some provider serves it)."""
     if seats is None:
         return
-    for entry in seats:
-        kind = entry if isinstance(entry, str) else entry.kind
+    for kind in seats:
         if kind == HUMAN:
             continue
         spec = catalog.get(kind)
@@ -145,11 +136,6 @@ def build(deps: Deps) -> APIRouter:
     ) -> _CreatedModel | _QueuedModel:
         """Create a game, or return the caller's place in line when the server
         is at its concurrency cap (a ``202`` they re-POST with ``ticket``)."""
-        seats = (
-            [s if isinstance(s, str) else s.model_dump() for s in req.seats]
-            if req.seats is not None
-            else None
-        )
         catalog = bots.catalog()
         _validate_seat_kinds(req.seats, req.n_players, catalog)
         try:
@@ -158,7 +144,7 @@ def build(deps: Deps) -> APIRouter:
                 lambda: session.reset(
                     req.seed,
                     number_placement=req.number_placement,
-                    seats=seats,
+                    seats=req.seats,
                     external_kinds=bots.remote_kinds(),
                 )
             )
@@ -285,27 +271,34 @@ def build(deps: Deps) -> APIRouter:
             handle.bump()
             return game_model(handle, owned)
 
+    async def _finished_record(game_id: str) -> GameRecord:
+        """A finished game's replayable record — from the live handle, or rebuilt
+        from the journal store when the handle has been evicted. 409 while still
+        running (replaying reconstructs hidden hands); 404 if unknown."""
+        handle = deps.registry.get(game_id)
+        if handle is not None:
+            async with handle.lock:
+                if not handle.session.terminal():
+                    raise HTTPException(status_code=409, detail="game still running")
+                return handle.session.record()
+        if deps.store is not None:
+            record = await deps.store.finished_record(game_id)
+            if record is not None:
+                return record
+        raise HTTPException(status_code=404, detail="no such game")
+
     @router.get("/api/games/{game_id}/record")
     async def get_record(game_id: str) -> Response:
         """The finished game as ``GameRecord`` JSON -- a self-contained,
-        replayable transcript. 409 while running: replaying a record
-        reconstructs hidden hands, so live games don't export."""
-        handle = deps.handle_of(game_id)
-        async with handle.lock:
-            if not handle.session.terminal():
-                raise HTTPException(status_code=409, detail="game still running")
-            body = handle.session.record().to_json()
-        return Response(content=body, media_type="application/json")
+        replayable transcript (served for past games too, rebuilt from the
+        store). 409 while running; 404 if unknown."""
+        record = await _finished_record(game_id)
+        return Response(content=record.to_json(), media_type="application/json")
 
     @router.post("/api/games/{game_id}/replay")
     async def post_replay_from_game(game_id: str) -> ReplayStateModel:
-        """Load a finished game for replay (409 while it is still running:
-        replaying reconstructs hidden hands)."""
-        handle = deps.handle_of(game_id)
-        async with handle.lock:
-            if not handle.session.terminal():
-                raise HTTPException(status_code=409, detail="game still running")
-            record = handle.session.record()
-        return await load_replay(deps.replays, record)
+        """Load a finished game for replay (a past game too, rebuilt from the
+        store). 409 while it is still running; 404 if unknown."""
+        return await load_replay(deps.replays, await _finished_record(game_id))
 
     return router

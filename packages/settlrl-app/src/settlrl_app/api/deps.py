@@ -21,6 +21,7 @@ from settlrl_app.game.games import GameHandle, GameRegistry
 from settlrl_app.game.replay import ReplaySession
 from settlrl_app.storage.auth import Auth
 from settlrl_app.storage.db import User
+from settlrl_app.storage.store import GameStore
 
 # The per-request seat-ownership proof: a comma-separated list of seat tokens.
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
@@ -62,6 +63,7 @@ class Deps:
     replays: ReplaySlot
     spawn_driver: Callable[[GameHandle], None]
     turn_timeout: float
+    store: GameStore | None = None
 
     def handle_of(self, game_id: str) -> GameHandle:
         handle = self.registry.get(game_id)

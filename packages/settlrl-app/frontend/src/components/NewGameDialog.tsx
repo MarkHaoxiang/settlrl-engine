@@ -1,13 +1,12 @@
 // Modal dialog configuring a new game: players, per-seat Human/Bot choice,
 // number placement, seed. Choosing Bot opens an in-dialog picker listing each
-// bot kind with a description and its tunable parameters.
+// available bot with its description (one bot service = one configured bot).
 
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchBots,
   fetchPreview,
   HUMAN,
-  type BotParamValue,
   type BotSpec,
   type NewGameConfig,
   type NumberPlacement,
@@ -37,8 +36,8 @@ const seatButtonStyle: React.CSSProperties = {
   gap: 6,
 };
 
-const botLabel = (kind: string) =>
-  kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1);
+const botLabel = (kind: string, spec?: BotSpec) =>
+  spec?.title ?? (kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1));
 
 // A labelled row of toggle buttons, one per option. `optionTitle` adds per-
 // option hover help.
@@ -80,52 +79,6 @@ const PLACEMENT_HELP: Record<NumberPlacement, string> = {
   random: "Number tokens shuffled uniformly across the land tiles.",
   spiral: "The rulebook's variable setup: tokens A–R laid alphabetically along a counter-clockwise spiral.",
 };
-
-// The parameter rows for one configured bot seat. Values not overridden show
-// (and reset to) the catalog defaults; only overrides are sent to the server.
-function SeatParams({
-  spec,
-  params,
-  onChange,
-}: {
-  spec: BotSpec;
-  params: Record<string, BotParamValue>;
-  onChange: (params: Record<string, BotParamValue>) => void;
-}) {
-  const set = (name: string, value: BotParamValue | undefined) => {
-    const next = { ...params };
-    if (value === undefined || value === spec.params[name].default) delete next[name];
-    else next[name] = value;
-    onChange(next);
-  };
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, margin: "2px 0 6px 12px" }}>
-      {Object.entries(spec.params).map(([name, p]) => (
-        <div key={name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ ...labelStyle, width: 200, textTransform: "none" }}>{name}</span>
-          {p.type === "bool" ? (
-            <input
-              type="checkbox"
-              checked={Boolean(params[name] ?? p.default)}
-              onChange={(e) => set(name, e.target.checked)}
-            />
-          ) : (
-            <input
-              type="number"
-              step={p.type === "int" ? 1 : "any"}
-              value={String(params[name] ?? p.default)}
-              onChange={(e) => {
-                const v = e.target.value === "" ? undefined : Number(e.target.value);
-                set(name, v === undefined || Number.isNaN(v) ? undefined : p.type === "int" ? Math.round(v) : v);
-              }}
-              style={{ ...buttonStyle, cursor: "text", width: 80, padding: "3px 8px", fontSize: 12 }}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function NewGameDialog({
   onStart,
@@ -262,34 +215,24 @@ export default function NewGameDialog({
             const spec = bots[name];
             const selected = seat.kind === name;
             return (
-              <div key={name} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <button
-                  onClick={() =>
-                    setSeat(pickerSeat, { kind: name, params: seat.kind === name ? seat.params : {} })
-                  }
-                  style={{
-                    ...buttonStyle,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 3,
-                    padding: "8px 12px",
-                    textAlign: "left",
-                    width: "100%",
-                    ...(selected ? selectedStyle : {}),
-                  }}
-                >
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{botLabel(name)}</span>
-                  <span style={{ fontSize: 11, opacity: 0.75, fontWeight: 400 }}>{spec.description}</span>
-                </button>
-                {selected && Object.keys(spec.params).length > 0 && (
-                  <SeatParams
-                    spec={spec}
-                    params={seat.params ?? {}}
-                    onChange={(params) => setSeat(pickerSeat, { ...seat, params })}
-                  />
-                )}
-              </div>
+              <button
+                key={name}
+                onClick={() => setSeat(pickerSeat, { kind: name })}
+                style={{
+                  ...buttonStyle,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 3,
+                  padding: "8px 12px",
+                  textAlign: "left",
+                  width: "100%",
+                  ...(selected ? selectedStyle : {}),
+                }}
+              >
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{botLabel(name, spec)}</span>
+                <span style={{ fontSize: 11, opacity: 0.75, fontWeight: 400 }}>{spec.description}</span>
+              </button>
             );
           })}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -384,7 +327,7 @@ export default function NewGameDialog({
                 style={{ ...seatButtonStyle, ...(isHuman ? {} : selectedStyle) }}
                 onClick={() => openPicker(i)}
               >
-                <BotIcon /> {isHuman ? "Bot" : botLabel(seat.kind)}
+                <BotIcon /> {isHuman ? "Bot" : botLabel(seat.kind, bots[seat.kind])}
               </button>
             </div>
           );

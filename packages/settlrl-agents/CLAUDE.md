@@ -32,14 +32,23 @@ stays free of `pydantic`/`omegaconf`; those are agents deps only because this
 subpackage uses them. (If keeping the play-time lib leaner matters, this is the
 piece to relocate — e.g. to `settlrl-learn`.)
 
-`service/` is the bot service — a FastAPI app (`app.py`) that serves moves over
-the shared wire protocol (`settlrl_game.botproto`): it replays a game from its
-record, bridges the reference position to an engine board (`bridge.py`), and
-runs the seat's policy (`bots.py`). It's the `settlrl-app` game server's only
-source of bot moves (delegated over HTTP), kept here because it *is* the agents
-running. Behind the `[service]` optional extra (`fastapi` + `settlrl-game`) and,
-like `experiment/`, never imported by `__init__`, so `import settlrl_agents`
-stays free of `fastapi`. The `bridge.py` dtype contract is exact: engine
+`service/` is the **one-bot SDK + service**. A service hosts a single `Bot`
+(`sdk.py`: subclass it, implement `act(view) -> MoveModel`; the framework tracks
+each game in flight and hands the bot a `GameView` from the acting seat). `app.py`
+(`create_app(bot)`) serves it over the shared wire protocol
+(`settlrl_game.botproto`): `GET /info` (the bot's `BotInfo`) and `POST /act`,
+which applies the moves the bot has not seen yet — the incremental, structured
+`MoveModel` tail after `base`, with a `409 {resync, have}` handshake when its
+tracked game is behind — then returns the chosen move. `bots.py` is the four
+bundled engine bots (`EngineBot` over a `POLICIES` policy): it bridges the
+tracked reference position to an engine board (`bridge.py`) and translates the
+chosen engine flat back to a `MoveModel`. The CLI `settlrl-bot-service --bot KIND`
+serves one. It's the `settlrl-app` game server's only source of bot moves
+(delegated over HTTP), kept here because it *is* the agents running. Behind the
+`[service]` optional extra (`fastapi` + `settlrl-game`) and, like `experiment/`,
+never imported by `__init__`, so `import settlrl_agents` stays free of `fastapi`
+(`sdk.py`/`app.py` themselves are JAX-free; only `bots.py` pulls the engine). The
+`bridge.py` dtype contract is exact: engine
 `BoardLayout`/`BoardState` arrays are `uint8` (jaxtyping-enforced under the test
 hook — render's conftest never checked engine types, so an int32 slipped by).
 

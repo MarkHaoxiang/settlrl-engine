@@ -5,7 +5,7 @@
 // index) — scoped by the seat tokens sent with every request: your_turn,
 // actions, unredacted hands, and belief all follow the seats you can prove.
 
-import { api, sse } from "./api";
+import { API_BASE, ApiError, api, sse } from "./api";
 import type { components } from "./api-schema";
 import { authHeader } from "./auth";
 import { adaptBoard, type Board } from "./boardData";
@@ -117,14 +117,9 @@ export type NumberPlacement = "random" | "spiral";
 export type SeatKind = string;
 export const HUMAN: SeatKind = "human";
 
-// A configurable scalar build parameter of a bot kind, and its value.
-export type BotParamValue = number | boolean;
-
-// A seat assignment: its controller plus any bot knob overrides
-// (params only ever holds values the user changed from the defaults).
+// A seat assignment: just its controller (one bot service = one configured bot).
 export interface SeatConfig {
   kind: SeatKind;
-  params?: Record<string, BotParamValue>;
 }
 
 // Which human seats the creator claims: every one (hotseat, sharing this
@@ -167,10 +162,7 @@ export async function createGame(
       seed: config.seed,
       n_players: config.nPlayers,
       number_placement: config.numberPlacement,
-      // Plain kind strings unless a seat carries knob overrides.
-      seats: config.seats.map((s) =>
-        s.params && Object.keys(s.params).length > 0 ? { kind: s.kind, params: s.params } : s.kind
-      ),
+      seats: config.seats.map((s) => s.kind),
       claim: config.claim,
       ticket,
     }),
@@ -192,20 +184,31 @@ export async function joinGame(
   });
 }
 
-// One knob of a bot kind, as described by GET /api/bots.
-export interface BotParamSpec {
-  type: "int" | "float" | "bool";
-  default: BotParamValue;
-}
-
-// A bot kind's catalog entry: the player counts it supports, a short
-// description, and its tunable knobs.
+// A bot's catalog entry (one per registered bot service): a display title, a
+// short description, and the player counts it supports.
 export interface BotSpec {
-  counts: number[];
+  title?: string;
   description: string;
-  params: Record<string, BotParamSpec>;
+  counts: number[];
 }
 
 export async function fetchBots(): Promise<Record<string, BotSpec>> {
   return api<Record<string, BotSpec>>("/api/bots");
+}
+
+// Download a finished game's replay (the GameRecord JSON) as a file the player
+// can keep and re-load in the Replay view.
+export async function downloadRecord(gameId: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/games/${gameId}/record`, {
+    headers: authHeader(),
+  });
+  if (!resp.ok) throw new ApiError(resp.status, resp.statusText);
+  const url = URL.createObjectURL(new Blob([await resp.text()], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `settlrl-replay-${gameId}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

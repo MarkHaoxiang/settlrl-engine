@@ -23,14 +23,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Literal
 
-from sqlalchemy import delete, select
+from settlrl_game.record import GameRecord, Move
+from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from settlrl_app.storage.db import Database, GameEvent, GameRow
 
-if TYPE_CHECKING:
-    from settlrl_game.record import Move
+# Finished games kept as replayable history; past this the oldest are pruned.
+_HISTORY_CAP = 200
 
 
 @dataclass(frozen=True)
@@ -46,11 +48,31 @@ class _Append:
 
 
 @dataclass(frozen=True)
+class _Finish:
+    game_id: str
+    finished_at: float
+    winner: int | None
+    owners: dict[str, list[int]]
+
+
+@dataclass(frozen=True)
 class _Remove:
     game_id: str
 
 
-_Op = _WriteHeader | _Append | _Remove
+_Op = _WriteHeader | _Append | _Finish | _Remove
+
+
+@dataclass(frozen=True)
+class FinishedGame:
+    """One past game in a user's history (its replayable record lives in the
+    journal under ``id``)."""
+
+    id: str
+    finished_at: float
+    winner: int | None
+    header: dict[str, object]
+    owners: dict[str, list[int]]
 
 
 class GameJournal:
@@ -66,6 +88,9 @@ class GameJournal:
         self._moves_written = moves_written
 
     def sync_moves(self, moves: Sequence[Move]) -> None:
+        # The full resolved outcome is stored (not just the flat), so a game
+        # rebuilds faithfully from the journal without re-sampling the seed --
+        # which would diverge for any game that used the random fallback.
         for move in moves[self._moves_written :]:
             self._store._append(
                 self._game_id,
@@ -74,6 +99,8 @@ class GameJournal:
                     "player": move.player,
                     "flat": move.flat,
                     "dice": move.dice,
+                    "drawn": move.drawn,
+                    "stolen": move.stolen,
                 },
             )
         self._moves_written = len(moves)
@@ -87,6 +114,14 @@ class GameJournal:
     def chat(self, player: int | None, text: str) -> None:
         self._store._append(
             self._game_id, {"t": "chat", "player": player, "text": text}
+        )
+
+    def finish(
+        self, finished_at: float, winner: int | None, owners: dict[str, list[int]]
+    ) -> None:
+        """Mark the game finished, so it is kept as history rather than removed."""
+        self._store._queue.put_nowait(
+            _Finish(self._game_id, finished_at, winner, owners)
         )
 
     def close(self) -> None:
@@ -139,6 +174,17 @@ class GameStore:
                     await session.merge(GameRow(id=op.game_id, header=op.header))
                 elif isinstance(op, _Append):
                     session.add(GameEvent(game_id=op.game_id, payload=op.payload))
+                elif isinstance(op, _Finish):
+                    await session.execute(
+                        update(GameRow)
+                        .where(GameRow.id == op.game_id)
+                        .values(
+                            finished_at=op.finished_at,
+                            winner=op.winner,
+                            owners=op.owners,
+                        )
+                    )
+                    await self._prune_history(session)
                 else:
                     await session.execute(
                         delete(GameEvent).where(GameEvent.game_id == op.game_id)
@@ -148,13 +194,65 @@ class GameStore:
                     )
                 await session.commit()
 
+    async def _prune_history(self, session: AsyncSession) -> None:
+        """Drop finished games (and their events) beyond the newest cap."""
+        stale = (
+            (
+                await session.execute(
+                    select(GameRow.id)
+                    .where(GameRow.finished_at.is_not(None))
+                    .order_by(GameRow.finished_at.desc())
+                    .offset(_HISTORY_CAP)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if stale:
+            await session.execute(delete(GameEvent).where(GameEvent.game_id.in_(stale)))
+            await session.execute(delete(GameRow).where(GameRow.id.in_(stale)))
+
+    async def history(self) -> list[FinishedGame]:
+        """Finished games kept as history, newest first."""
+        async with self._db.sessionmaker() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(GameRow)
+                        .where(GameRow.finished_at.is_not(None))
+                        .order_by(GameRow.finished_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                FinishedGame(
+                    id=row.id,
+                    finished_at=row.finished_at or 0.0,
+                    winner=row.winner,
+                    header=row.header,
+                    owners=row.owners or {},
+                )
+                for row in rows
+            ]
+
     async def load(
         self,
     ) -> list[tuple[dict[str, object], list[dict[str, object]]]]:
-        """``(header, events)`` for every stored game, events in order. The
-        header carries the game id back under ``"id"`` (it is the row's key)."""
+        """``(header, events)`` for every **live** stored game, events in order
+        (finished games are kept as history, not restored). The header carries the
+        game id back under ``"id"`` (it is the row's key)."""
         async with self._db.sessionmaker() as session:
-            rows = (await session.execute(select(GameRow))).scalars().all()
+            rows = (
+                (
+                    await session.execute(
+                        select(GameRow).where(GameRow.finished_at.is_(None))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             loaded: list[tuple[dict[str, object], list[dict[str, object]]]] = []
             for row in rows:
                 events = list(
@@ -170,3 +268,46 @@ class GameStore:
                 )
                 loaded.append(({"id": row.id, **row.header}, events))
             return loaded
+
+    async def finished_record(self, game_id: str) -> GameRecord | None:
+        """The replayable :class:`GameRecord` for a **finished** stored game
+        (rebuilt from its journalled moves and their stored outcomes — so an
+        evicted past game still downloads / replays). None if it is not a stored,
+        finished game."""
+        async with self._db.sessionmaker() as session:
+            row = await session.get(GameRow, game_id)
+            if row is None or row.finished_at is None:
+                return None
+            events = (
+                (
+                    await session.execute(
+                        select(GameEvent.payload)
+                        .where(GameEvent.game_id == game_id)
+                        .order_by(GameEvent.seq)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        placement: Literal["random", "spiral"] = (
+            "spiral" if row.header.get("number_placement") == "spiral" else "random"
+        )
+        moves = tuple(
+            Move(
+                player=e["player"],
+                flat=e["flat"],
+                dice=e.get("dice"),
+                drawn=e.get("drawn"),
+                stolen=e.get("stolen"),
+            )
+            for e in events
+            if e.get("t") == "move"
+        )
+        return GameRecord(
+            seed=int(row.header["seed"]),
+            n_players=int(row.header["n_players"]),
+            number_placement=placement,
+            moves=moves,
+            winner=row.winner,
+            meta={"seats": row.header.get("seats", [])},
+        )

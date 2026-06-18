@@ -152,8 +152,8 @@ export interface paths {
         /**
          * Get Record
          * @description The finished game as ``GameRecord`` JSON -- a self-contained,
-         *     replayable transcript. 409 while running: replaying a record
-         *     reconstructs hidden hands, so live games don't export.
+         *     replayable transcript (served for past games too, rebuilt from the
+         *     store). 409 while running; 404 if unknown.
          */
         get: operations["get_record_api_games__game_id__record_get"];
         put?: never;
@@ -175,8 +175,8 @@ export interface paths {
         put?: never;
         /**
          * Post Replay From Game
-         * @description Load a finished game for replay (409 while it is still running:
-         *     replaying reconstructs hidden hands).
+         * @description Load a finished game for replay (a past game too, rebuilt from the
+         *     store). 409 while it is still running; 404 if unknown.
          */
         post: operations["post_replay_from_game_api_games__game_id__replay_post"];
         delete?: never;
@@ -259,9 +259,8 @@ export interface paths {
         };
         /**
          * Get Bots
-         * @description Bot kinds available for seats — built-in (settlrl-agents) names plus
-         *     any registered remote providers' — each with the player counts it
-         *     supports and its configurable build parameters.
+         * @description Bot kinds available for seats — one per registered bot service — each
+         *     with its title, description, and the player counts it supports.
          */
         get: operations["get_bots_api_bots_get"];
         put?: never;
@@ -287,9 +286,9 @@ export interface paths {
         put?: never;
         /**
          * Register Bot Provider
-         * @description Register (or replace) a remote bot service by name + base URL; its
-         *     bot kinds join the catalog. ``400`` if it is unreachable or a kind
-         *     clashes with an existing one (admin only).
+         * @description Register (or replace) a remote bot service by base URL; the bot it
+         *     serves joins the catalog under its own name. ``400`` if it is unreachable
+         *     (admin only).
          */
         post: operations["register_bot_provider_api_admin_bot_providers_post"];
         delete?: never;
@@ -331,6 +330,27 @@ export interface paths {
          *     owns a seat — so they can resume on any device without a seat token.
          */
         get: operations["my_games_api_me_games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My History
+         * @description The signed-in user's finished games (newest first) — their seats, the
+         *     winner, and the player count — each replayable / downloadable by id.
+         */
+        get: operations["my_history_api_me_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -964,7 +984,7 @@ export interface components {
              */
             number_placement: "random" | "spiral";
             /** Seats */
-            seats?: (string | components["schemas"]["_SeatSpec"])[] | null;
+            seats?: string[] | null;
             /**
              * Claim
              * @default all
@@ -1013,12 +1033,26 @@ export interface components {
             seats: number[];
         };
         /**
+         * _PastGameModel
+         * @description A finished game in the user's history.
+         */
+        _PastGameModel: {
+            /** Id */
+            id: string;
+            /** Seats */
+            seats: number[];
+            /** N Players */
+            n_players: number;
+            /** Winner */
+            winner: number | null;
+            /** Finished At */
+            finished_at: number;
+        };
+        /**
          * _ProviderRequest
-         * @description A remote bot service to register: a short name and its base URL.
+         * @description A remote bot service to register: its base URL (the bot self-identifies).
          */
         _ProviderRequest: {
-            /** Name */
-            name: string;
             /** Base Url */
             base_url: string;
         };
@@ -1040,21 +1074,6 @@ export interface components {
             position: number;
             /** Total */
             total: number;
-        };
-        /**
-         * _SeatSpec
-         * @description A configured bot seat: its kind plus knob overrides from the catalog.
-         */
-        _SeatSpec: {
-            /** Kind */
-            kind: string;
-            /**
-             * Params
-             * @default {}
-             */
-            params: {
-                [key: string]: number | boolean;
-            };
         };
     };
     responses: never;
@@ -1580,6 +1599,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_MyGameModel"][];
+                };
+            };
+        };
+    };
+    my_history_api_me_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_PastGameModel"][];
                 };
             };
         };
