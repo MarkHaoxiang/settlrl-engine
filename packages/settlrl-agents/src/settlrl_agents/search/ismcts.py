@@ -44,8 +44,9 @@ from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, BoolScalar, IntScalar, KeyScalar
 from settlrl_engine.env import N_FLAT, flat_to_action
-from settlrl_engine.mechanics.action import action_available, apply_action
+from settlrl_engine.mechanics.action import ActionType, action_available, apply_action
 from settlrl_engine.mechanics.common import agent_selection_single
+from settlrl_engine.mechanics.dice import distribute_resources
 from settlrl_engine.mechanics.flat import flat_available_for
 
 from settlrl_agents.internal.rows import ROW_PARAMS, ROW_TYPE
@@ -53,7 +54,9 @@ from settlrl_agents.policy import FlatMask
 from settlrl_agents.sample import sample_world
 from settlrl_agents.value import Value, ValueFunction
 
-from . import _TIER_LOGITS, _terminal, _winner
+from . import _ROLL_P, _ROLLS, _TIER_LOGITS, _terminal, _winner
+
+_ROLL_T = jnp.int32(ActionType.ROLL_DICE)
 
 __all__ = ["ismcts_move", "ismcts_weights"]
 
@@ -164,6 +167,18 @@ def _tree_fn(
             _TIER_LOGITS + jnp.tanh(vals / value_scale) / prior_scale, legal
         )
 
+    def roll_ev(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+        """E over the 11 dice rolls of the post-payout value of a pre-roll
+        ``state`` -- the leaf value of a ROLL_DICE edge, so the search reads the
+        roll's expectation instead of the one die the determinization sampled
+        (mctx's ply-2 dice fix)."""
+        vals = jax.vmap(
+            lambda r: jnp.tanh(
+                value(layout, distribute_resources(layout, state, r), player) / value_scale
+            )
+        )(_ROLLS)
+        return _ROLL_P @ vals
+
     @jax.jit
     def tree(
         key: KeyScalar, layout: BoardLayout, view: BeliefView, player: IntScalar
@@ -212,6 +227,13 @@ def _tree_fn(
                 nstate = step(layout, d.state, a)
                 legal2, mover2, term2, leaf2 = facts(layout, nstate, player)
                 is_leaf = arena.children[cur0, a] < 0  # unexpanded edge -> expand
+                # ROLL_DICE leaf: value the pre-roll state by its 11-roll
+                # expectation, not the one die this determinization rolled.
+                leaf2 = jax.lax.cond(
+                    (ROW_TYPE[a] == _ROLL_T) & ~term2,
+                    lambda: roll_ev(layout, d.state, player),
+                    lambda: leaf2,
+                )
                 return _Descent(
                     state=nstate,
                     legal=legal2,
