@@ -299,6 +299,8 @@ def learn(
     weight_decay: float = 1e-4,
     arena_games: int = 0,
     arena_every: int = 1,
+    arena_batch: int = 128,
+    arena_sims: int = 48,
     seed: int = 0,
     checkpoint_dir: str | Path | None = None,
     checkpoint_every: int = 1,
@@ -363,7 +365,7 @@ def learn(
 
     @eqx.filter_jit
     def _param_norm(m: Any) -> Array:
-        return optax.global_norm(eqx.filter(m, eqx.is_inexact_array))
+        return cast(Array, optax.global_norm(eqx.filter(m, eqx.is_inexact_array)))
 
     ev: GNNSamples | None = None
     for i in range(int(state.iteration), n_iterations):
@@ -428,16 +430,18 @@ def learn(
             metrics.update({k2: float(v) for k2, v in vm.items()})
         if arena_games and (i + 1) % arena_every == 0:
             t2 = time.perf_counter()
+            # Arena decoupled from training: many lanes (parallel, GPU-saturating)
+            # at a modest sim budget -- ~an order of magnitude faster, same signal.
             winrate = arena(
                 model, opponent="lookahead", n_games=arena_games,
-                num_simulations=num_simulations,
+                num_simulations=arena_sims, batch_size=arena_batch,
                 max_num_considered_actions=max_num_considered_actions,
                 seed=seed + 20_000 + i,
             )  # fmt: skip
             metrics["arena_winrate"] = winrate
             metrics["arena_vs_random"] = arena(
                 model, opponent="random", n_games=arena_games,
-                num_simulations=num_simulations,
+                num_simulations=arena_sims, batch_size=arena_batch,
                 max_num_considered_actions=max_num_considered_actions,
                 seed=seed + 30_000 + i,
             )  # fmt: skip

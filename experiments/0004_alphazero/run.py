@@ -48,6 +48,8 @@ class AlphaZeroConfig(Config):
     # gate
     arena_games: int = 80
     arena_every: int = 5
+    arena_batch: int = 128  # GNN arena: many parallel lanes (fast) ...
+    arena_sims: int = 48  # ... at a modest sim budget (decoupled from training)
     gate_winrate: float = 0.55  # pass iff the final net clears this vs lookahead
     # logging / checkpointing
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
@@ -127,7 +129,6 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     flashbax/orbax infra)."""
     import equinox as eqx
     import numpy as np
-
     from settlrl_learn import azgnn
     from settlrl_learn.graphnet import PRESETS
 
@@ -180,6 +181,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,
             arena_every=cfg.arena_every,
+            arena_batch=cfg.arena_batch,
+            arena_sims=cfg.arena_sims,
             seed=cfg.seed,
             checkpoint_dir=run.dir,
             checkpoint_every=cfg.checkpoint_every,
@@ -190,7 +193,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         wb.finish()
 
     winrate = azgnn.arena(
-        model, n_games=cfg.arena_games, num_simulations=cfg.num_simulations,
+        model, n_games=cfg.arena_games, num_simulations=cfg.arena_sims,
+        batch_size=cfg.arena_batch,
         max_num_considered_actions=cfg.max_num_considered_actions, seed=cfg.seed + 99,
     )  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
