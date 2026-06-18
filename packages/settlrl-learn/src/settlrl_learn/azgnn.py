@@ -203,13 +203,15 @@ def az_gnn_loss(
 def arena(
     model: AZGraphNet,
     *,
+    opponent: str = "lookahead",
     n_games: int = 40,
     num_simulations: int = 64,
     max_num_considered_actions: int = 16,
     batch_size: int = 16,
     seed: int = 0,
 ) -> float:
-    """The GNN's win rate vs. ``lookahead(heuristic)``, seat-swapped at 2p."""
+    """The GNN's win rate vs. a ``POLICIES`` ``opponent``, seat-swapped at 2p
+    (``lookahead`` = the Stage-1 gate; ``random`` = the lower-bound sanity check)."""
     value_fn, prior_fn = make_az_gnn(model)
     net = make_search(
         value_fn, prior=prior_fn, value_scale=2.0,
@@ -217,7 +219,7 @@ def arena(
         max_num_considered_actions=max_num_considered_actions,
     )  # fmt: skip
     net_spec = BeliefSpec(lambda: net, frozenset((2,)))
-    base = POLICIES["lookahead"]
+    base = POLICIES[opponent]
     half = max(1, n_games // 2)
     r1 = evaluate([net_spec, base], n_episodes=half, batch_size=batch_size, seed=seed)
     r2 = evaluate(
@@ -387,11 +389,18 @@ def learn(
             metrics.update({k2: float(v) for k2, v in vm.items()})
         if arena_games and (i + 1) % arena_every == 0:
             winrate = arena(
-                model, n_games=arena_games, num_simulations=num_simulations,
+                model, opponent="lookahead", n_games=arena_games,
+                num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
                 seed=seed + 20_000 + i,
             )  # fmt: skip
             metrics["arena_winrate"] = winrate
+            metrics["arena_vs_random"] = arena(
+                model, opponent="random", n_games=arena_games,
+                num_simulations=num_simulations,
+                max_num_considered_actions=max_num_considered_actions,
+                seed=seed + 30_000 + i,
+            )  # fmt: skip
             best = max(best, winrate)
         if ckpt is not None and (i + 1) % checkpoint_every == 0:
             save_gnn_state(
