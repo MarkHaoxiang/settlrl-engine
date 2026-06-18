@@ -65,6 +65,7 @@ export default function Menu() {
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
         <MenuCard to="/play" title="Play" subtitle="Start a new game and take turns on the board." />
         <MenuCard to="/replay" title="Replay" subtitle="Step through a recorded game from start to finish." />
+        <MenuCard to="/leaderboard" title="Leaderboard" subtitle="Elo rankings for players and bots, split by game size." />
       </div>
       <MyGames user={user} />
       <BotProviders user={user} />

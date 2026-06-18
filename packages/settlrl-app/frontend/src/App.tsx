@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Menu from "./pages/Menu";
 import PlayView from "./pages/PlayView";
+import LeaderboardView from "./pages/LeaderboardView";
 import ProfileView from "./pages/ProfileView";
 import ReplayView from "./pages/ReplayView";
 import HelpView from "./pages/HelpView";
@@ -13,6 +14,7 @@ export default function App() {
       <Route path="/play" element={<PlayView />} />
       <Route path="/play/:id" element={<PlayView />} />
       <Route path="/help" element={<HelpView />} />
+      <Route path="/leaderboard" element={<LeaderboardView />} />
       <Route path="/profile" element={<ProfileView />} />
       <Route path="/replay" element={<ReplayView />} />
       <Route path="/login" element={<AuthView initialMode="login" />} />

@@ -176,6 +176,18 @@ are kept in the store (a capped, replayable archive) rather than discarded, so
 their record is served even after the live game is evicted — the same record the
 end-of-game screen's **Download replay** button saves.
 
+## Leaderboard
+
+The menu's **Leaderboard** page (`/leaderboard`, public) ranks players by Elo,
+**split by player count** — a 2-, 3-, and 4-player ladder are kept separately.
+Both registered accounts (shown by their handle) and bots (shown by name) are
+rated on the same ladders, so games against bots count. When a game ends its
+result settles the ratings: standard Elo applied pairwise with a winner-takes-all
+result (the winner beats everyone; the rest draw with each other). A seat that is
+neither an account nor a bot (an anonymous, token-only human) is not rated, and a
+bot occupying more than one seat in a game is skipped for that game. Endpoint:
+`GET /api/leaderboard`.
+
 ## Bot services
 
 The game server runs **no** agent code in-process. A seat's bot moves are
@@ -258,6 +270,7 @@ BASE=http://localhost:8000 npm run e2e
 | `POST /api/auth/register` · `/login` · `/logout` · `GET /api/users/me` | Optional accounts (OAuth2 password flow; see [Accounts](#accounts)) |
 | `GET /api/me/games` | The signed-in user's live games — seats follow the account across devices |
 | `GET /api/me/history` | The signed-in user's finished games (newest first) — replayable / downloadable by id |
+| `GET /api/leaderboard` | Elo ratings for accounts and bots, per player-count bucket, best first (public; see [Leaderboard](#leaderboard)) |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
@@ -288,7 +301,7 @@ packages/settlrl-app/
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
 │   ├── api/             # the HTTP layer (game model + serialization is settlrl-game)
 │   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over
-│   │   ├── routers/       # Routes by area: games, replay, bots, me (each build(deps) -> APIRouter)
+│   │   ├── routers/       # Routes by area: games, replay, bots, me, leaderboard (each build(deps) -> APIRouter)
 │   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
 │   │   └── openapi.py     # Schema dump backing the generated frontend types
 │   ├── game/            # the live game runtime
@@ -297,16 +310,17 @@ packages/settlrl-app/
 │   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots/            # the bot seam (no agent code runs here)
 │   │   └── providers.py   # Bot kinds -> the registered remote services that serve them
+│   ├── elo.py           # Pure Elo math: pairwise winner-takes-all rating updates
 │   └── storage/         # the one async DB: identity + persistence
-│       ├── db.py          # The async SQLAlchemy engine: users, login tokens, and game journals
+│       ├── db.py          # The async SQLAlchemy engine: users, login tokens, game journals, ratings
 │       ├── auth.py        # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB
-│       └── store.py       # Crash-recovery journals on the shared DB (write-behind), replay on boot
+│       └── store.py       # Crash-recovery journals + Elo ratings on the shared DB (write-behind)
 ├── tests/               # Pytest: board conversion, flat-table round-trip, per-seat views, server
 └── frontend/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /help, /profile, /replay
+        ├── App.tsx          # Routes: menu, /play, /help, /profile, /leaderboard, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError)
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard

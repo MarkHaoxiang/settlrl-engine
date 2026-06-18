@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry, _rebuild_handle
 from settlrl_app.server import create_app
 from settlrl_app.storage.db import Database
-from settlrl_app.storage.store import GameStore
+from settlrl_app.storage.store import GameStore, RatingEntry
 from settlrl_game.convert import board_to_model
 from settlrl_game.session import GameSession, GameSetup
 
@@ -192,6 +192,68 @@ def test_restore_is_faithful_for_a_random_fallback_game(tmp_path: Path) -> None:
 
     before, after = asyncio.run(scenario())
     assert before == after  # identical, not a re-sampled divergence
+
+
+def _bot_game(seed: int, kinds: list[str]) -> GameSession:
+    return GameSession(
+        seed=seed,
+        n_players=len(kinds),
+        seats=kinds,
+        external_kinds=frozenset(kinds),
+    )
+
+
+def test_finished_game_updates_elo_ratings(tmp_path: Path) -> None:
+    async def scenario() -> tuple[int | None, list[RatingEntry]]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(store=store)
+        h = reg.create(_bot_game(0, ["alpha", "beta"]))
+        _play_out(h.session)
+        winner = h.session.winner()
+        h.bump()  # fires the finish hook -> enqueues the rating update
+        await store.aclose()
+        board = await store.leaderboard()
+        await db.dispose()
+        return winner, board
+
+    winner, board = asyncio.run(scenario())
+    assert winner is not None
+    by_name = {e.name: e for e in board}
+    assert set(by_name) == {"alpha", "beta"}
+    assert all(e.kind == "bot" and e.n_players == 2 and e.games == 1 for e in board)
+    won, lost = ["alpha", "beta"][winner], ["beta", "alpha"][winner]
+    assert by_name[won].wins == 1 and by_name[won].rating > 1500
+    assert by_name[lost].wins == 0 and by_name[lost].rating < 1500
+    assert board[0].rating >= board[1].rating  # best first
+
+
+def test_ratings_are_bucketed_by_player_count(tmp_path: Path) -> None:
+    async def scenario() -> list[RatingEntry]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(store=store)
+        for game in (
+            _bot_game(0, ["alpha", "beta"]),
+            _bot_game(1, ["alpha", "beta", "gamma", "delta"]),
+        ):
+            h = reg.create(game)
+            _play_out(h.session)
+            h.bump()
+        await store.aclose()
+        board = await store.leaderboard()
+        await db.dispose()
+        return board
+
+    board = asyncio.run(scenario())
+    # "alpha" played both sizes -> one independent rating row per bucket.
+    alpha = {e.n_players for e in board if e.name == "alpha"}
+    assert alpha == {2, 4}
+    assert [e.n_players for e in board] == sorted(e.n_players for e in board)
 
 
 def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:

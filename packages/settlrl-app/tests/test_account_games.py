@@ -170,6 +170,47 @@ def test_finished_owned_game_appears_in_history_and_record_is_served() -> None:
         assert client.post(f"/api/games/{game}/replay").status_code == 200
 
 
+def test_leaderboard_rates_accounts_and_bots() -> None:
+    """A finished human-vs-bot game lands the account (by handle) and the bot on
+    the public per-player-count leaderboard."""
+    rng = random.Random(0)
+    with (
+        tempfile.TemporaryDirectory() as state_dir,
+        TestClient(
+            create_app(state_dir=state_dir, bot_delay=0.0, providers=bot_registry())
+        ) as client,
+    ):
+        h = _bearer(_token(client, "champ@example.com"))
+        game = client.post(
+            "/api/games",
+            json={"seed": 3, "n_players": 2, "seats": ["human", "random"]},
+            headers=h,
+        ).json()["id"]
+
+        for _ in range(6000):
+            snap = client.get(f"/api/games/{game}", headers=h).json()
+            if snap["status"]["terminal"]:
+                break
+            if snap["status"]["your_turn"] and snap["actions"]:
+                flat = rng.choice(snap["actions"])["flat"]
+                client.post(f"/api/games/{game}/action", json={"flat": flat}, headers=h)
+            else:
+                time.sleep(0.01)
+        assert client.get(f"/api/games/{game}", headers=h).json()["status"]["terminal"]
+
+        # The rating update is journalled write-behind; poll until it lands.
+        board: list[dict[str, object]] = []
+        for _ in range(100):
+            board = client.get("/api/leaderboard").json()  # public: no auth
+            if board:
+                break
+            time.sleep(0.02)
+        assert {e["name"] for e in board} == {"champ", "random"}  # handle + bot
+        assert {e["kind"] for e in board} == {"account", "bot"}
+        assert all(e["n_players"] == 2 and e["games"] == 1 for e in board)
+        assert sum(e["wins"] for e in board) == 1  # exactly one winner
+
+
 def test_account_seat_ownership_survives_a_restart() -> None:
     """The seat<->account tie is journalled, so a restored game still knows it."""
     with tempfile.TemporaryDirectory() as state_dir:

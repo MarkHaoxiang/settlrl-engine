@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
+from collections import Counter
 from dataclasses import dataclass
 from typing import cast
 
@@ -30,7 +31,7 @@ from settlrl_game.models import BotMoveModel
 from settlrl_game.record import Move
 from settlrl_game.session import HUMAN, GameSession, GameSetup
 
-from settlrl_app.storage.store import GameJournal, GameStore
+from settlrl_app.storage.store import GameJournal, GameStore, Subject
 
 # Games are addressed by unguessable ids; tokens prove seat ownership. The id
 # is the only thing gating a game's public snapshot and its finished-game
@@ -126,7 +127,36 @@ class GameHandle:
             if not self._finished and self.session.terminal():
                 self._finished = True
                 self.journal.finish(time.time(), self.session.winner(), self._owners())
+                self._record_result()
         self._wake()
+
+    def _record_result(self) -> None:
+        """Enqueue this finished game's Elo update over its rated seats: accounts
+        (by user-id) and bots (by kind). Token-only human seats aren't rated, and
+        a subject holding more than one seat is playing itself — it can't be rated
+        for this game, so it (and its seats) are dropped. An update needs at least
+        two rated subjects with the winner among them."""
+        if self.journal is None:
+            return
+        winner = self.session.winner()
+        if winner is None:
+            return
+        seat_subject: dict[int, Subject] = {}
+        for seat in range(self.session.n_players):
+            if seat in self.claim_users:
+                seat_subject[seat] = ("account", self.claim_users[seat])
+            elif self.session.seats[seat] != HUMAN:
+                seat_subject[seat] = ("bot", self.session.seats[seat])
+        counts = Counter(seat_subject.values())
+        rated = [s for s in sorted(seat_subject) if counts[seat_subject[s]] == 1]
+        if winner not in rated or len(rated) < 2:
+            return
+        self.journal.record_result(
+            self.session.n_players,
+            tuple(seat_subject[s] for s in rated),
+            rated.index(winner),
+            time.time(),
+        )
 
     def _owners(self) -> dict[str, list[int]]:
         """Account user-id -> the seats it holds (for the finished-game history)."""

@@ -21,6 +21,7 @@ lives in ``games``, which owns the game and bot drivers.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -29,10 +30,14 @@ from settlrl_game.record import GameRecord, Move
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from settlrl_app.storage.db import Database, GameEvent, GameRow
+from settlrl_app.elo import INITIAL_RATING, winner_takes_all
+from settlrl_app.storage.db import Database, GameEvent, GameRow, Rating, User
 
 # Finished games kept as replayable history; past this the oldest are pruned.
 _HISTORY_CAP = 200
+
+# A rated participant in a finished game: ("account", user-id) or ("bot", name).
+Subject = tuple[Literal["account", "bot"], str]
 
 
 @dataclass(frozen=True)
@@ -56,11 +61,34 @@ class _Finish:
 
 
 @dataclass(frozen=True)
+class _Result:
+    """A finished game's Elo update: ``subjects[winner_index]`` won, the rest
+    drew, all at this ``n_players`` bucket."""
+
+    n_players: int
+    subjects: tuple[Subject, ...]
+    winner_index: int
+    finished_at: float
+
+
+@dataclass(frozen=True)
 class _Remove:
     game_id: str
 
 
-_Op = _WriteHeader | _Append | _Finish | _Remove
+_Op = _WriteHeader | _Append | _Finish | _Result | _Remove
+
+
+@dataclass(frozen=True)
+class RatingEntry:
+    """One leaderboard row (a subject's standing in one ``n_players`` bucket)."""
+
+    n_players: int
+    kind: str
+    name: str
+    rating: float
+    games: int
+    wins: int
 
 
 @dataclass(frozen=True)
@@ -124,6 +152,18 @@ class GameJournal:
             _Finish(self._game_id, finished_at, winner, owners)
         )
 
+    def record_result(
+        self,
+        n_players: int,
+        subjects: tuple[Subject, ...],
+        winner_index: int,
+        finished_at: float,
+    ) -> None:
+        """Enqueue this finished game's Elo update over its rated seats."""
+        self._store._queue.put_nowait(
+            _Result(n_players, subjects, winner_index, finished_at)
+        )
+
     def close(self) -> None:
         pass
 
@@ -185,6 +225,8 @@ class GameStore:
                         )
                     )
                     await self._prune_history(session)
+                elif isinstance(op, _Result):
+                    await self._apply_result(session, op)
                 else:
                     await session.execute(
                         delete(GameEvent).where(GameEvent.game_id == op.game_id)
@@ -211,6 +253,71 @@ class GameStore:
         if stale:
             await session.execute(delete(GameEvent).where(GameEvent.game_id.in_(stale)))
             await session.execute(delete(GameRow).where(GameRow.id.in_(stale)))
+
+    async def _apply_result(self, session: AsyncSession, op: _Result) -> None:
+        """Settle one finished game's ratings (pairwise winner-takes-all) against
+        the current standings, creating rows for first-time subjects."""
+        names = await self._display_names(session, op.subjects)
+        rows = [
+            await session.get(Rating, (kind, sid, op.n_players))
+            for kind, sid in op.subjects
+        ]
+        before = [row.rating if row else INITIAL_RATING for row in rows]
+        after = winner_takes_all(before, op.winner_index)
+        for i, ((kind, sid), row) in enumerate(zip(op.subjects, rows, strict=True)):
+            if row is None:
+                # Column defaults only apply at flush, so seed the counters here.
+                row = Rating(
+                    subject_kind=kind,
+                    subject_id=sid,
+                    n_players=op.n_players,
+                    games=0,
+                    wins=0,
+                )
+                session.add(row)
+            row.name = names[(kind, sid)]
+            row.rating = after[i]
+            row.games += 1
+            row.wins += int(i == op.winner_index)
+            row.updated_at = op.finished_at
+
+    async def _display_names(
+        self, session: AsyncSession, subjects: tuple[Subject, ...]
+    ) -> dict[Subject, str]:
+        """The label to show each subject: a bot's name as-is, an account's
+        email local-part (falling back to a short id if the account is gone)."""
+        names: dict[Subject, str] = {s: s[1] for s in subjects}
+        for kind, sid in subjects:
+            if kind != "account":
+                continue
+            user = await session.get(User, uuid.UUID(sid))
+            names[(kind, sid)] = user.email.split("@", 1)[0] if user else sid[:8]
+        return names
+
+    async def leaderboard(self) -> list[RatingEntry]:
+        """Every rating, grouped by bucket (ascending) then by rating (best
+        first within a bucket)."""
+        async with self._db.sessionmaker() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(Rating).order_by(Rating.n_players, Rating.rating.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                RatingEntry(
+                    n_players=row.n_players,
+                    kind=row.subject_kind,
+                    name=row.name,
+                    rating=row.rating,
+                    games=row.games,
+                    wins=row.wins,
+                )
+                for row in rows
+            ]
 
     async def history(self) -> list[FinishedGame]:
         """Finished games kept as history, newest first."""

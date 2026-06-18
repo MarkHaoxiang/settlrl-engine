@@ -805,6 +805,29 @@
     ]
    }
   },
+  "/api/leaderboard": {
+   "get": {
+    "summary": "Leaderboard",
+    "description": "Every rated subject, ordered by player-count bucket then rating\n(best first). Public; clients split the buckets into ladders.",
+    "operationId": "leaderboard_api_leaderboard_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/_LeaderboardEntry"
+         },
+         "type": "array",
+         "title": "Response Leaderboard Api Leaderboard Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/auth/login": {
    "post": {
     "tags": [
@@ -2625,6 +2648,45 @@
      "token"
     ],
     "title": "_JoinedModel"
+   },
+   "_LeaderboardEntry": {
+    "properties": {
+     "n_players": {
+      "type": "integer",
+      "title": "N Players"
+     },
+     "kind": {
+      "type": "string",
+      "title": "Kind"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "rating": {
+      "type": "number",
+      "title": "Rating"
+     },
+     "games": {
+      "type": "integer",
+      "title": "Games"
+     },
+     "wins": {
+      "type": "integer",
+      "title": "Wins"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n_players",
+     "kind",
+     "name",
+     "rating",
+     "games",
+     "wins"
+    ],
+    "title": "_LeaderboardEntry",
+    "description": "One ranked subject in a player-count bucket."
    },
    "_MyGameModel": {
     "properties": {

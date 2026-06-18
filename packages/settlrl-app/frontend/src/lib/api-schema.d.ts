@@ -359,6 +359,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Leaderboard
+         * @description Every rated subject, ordered by player-count bucket then rating
+         *     (best first). Public; clients split the buckets into ladders.
+         */
+        get: operations["leaderboard_api_leaderboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1023,6 +1044,24 @@ export interface components {
             token: string;
         };
         /**
+         * _LeaderboardEntry
+         * @description One ranked subject in a player-count bucket.
+         */
+        _LeaderboardEntry: {
+            /** N Players */
+            n_players: number;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Rating */
+            rating: number;
+            /** Games */
+            games: number;
+            /** Wins */
+            wins: number;
+        };
+        /**
          * _MyGameModel
          * @description A live game the signed-in user owns a seat in.
          */
@@ -1619,6 +1658,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_PastGameModel"][];
+                };
+            };
+        };
+    };
+    leaderboard_api_leaderboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LeaderboardEntry"][];
                 };
             };
         };

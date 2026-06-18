@@ -140,7 +140,13 @@ def create_app(
             return JSONResponse({"detail": "request body too large"}, status_code=413)
         return await call_next(request)
 
-    for module in (routers.games, routers.replay, routers.bots, routers.me):
+    for module in (
+        routers.games,
+        routers.replay,
+        routers.bots,
+        routers.me,
+        routers.leaderboard,
+    ):
         app.include_router(module.build(deps))
     app.include_router(auth.router)
 

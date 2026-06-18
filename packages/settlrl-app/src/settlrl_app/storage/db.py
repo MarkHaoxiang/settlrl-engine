@@ -27,6 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.pool import StaticPool
 
+from settlrl_app.elo import INITIAL_RATING
+
 
 class Base(DeclarativeBase):
     pass
@@ -56,6 +58,27 @@ class GameRow(Base):
     finished_at: Mapped[float | None] = mapped_column(Float, default=None, index=True)
     winner: Mapped[int | None] = mapped_column(Integer, default=None)
     owners: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+
+
+class Rating(Base):
+    """One Elo rating: a subject's standing at a given player count.
+
+    Accounts and bots share the leaderboard; ``subject_kind`` (``"account"`` /
+    ``"bot"``) tells them apart and ``subject_id`` is the account's user-id or
+    the bot's name. Ratings are bucketed by ``n_players`` — a separate ladder per
+    game size (a 2p and a 4p rating for the same subject are independent rows).
+    ``name`` is the cached display label (a bot's name, an account's handle)."""
+
+    __tablename__ = "rating"
+
+    subject_kind: Mapped[str] = mapped_column(String, primary_key=True)
+    subject_id: Mapped[str] = mapped_column(String, primary_key=True)
+    n_players: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    rating: Mapped[float] = mapped_column(Float, default=INITIAL_RATING)
+    games: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class GameEvent(Base):
