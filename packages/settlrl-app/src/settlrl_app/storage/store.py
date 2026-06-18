@@ -1,18 +1,20 @@
 """Persistence so live games survive a restart, on the shared async DB.
 
 A game is recorded as a header row -- the immutable ``(seed, n_players,
-number_placement, seats)`` it is fully determined by -- plus an ordered event
-log (a move, seat claim, or chat line per row), the
-:class:`~settlrl_app.storage.db.GameRow` / ``GameEvent`` tables of the one
+number_placement, seats)`` it is fully determined by -- plus its full ordered
+event log (moves, seat claims, chat) as one JSON document, the
+:class:`~settlrl_app.storage.db.GameRow` / ``GameLog`` tables of the one
 :class:`~settlrl_app.storage.db.Database`.
 
 Writes are **write-behind**: callers (the registry, a mutator's ``bump``) enqueue
 synchronously and never await, and a single background task drains the queue
-against the DB in order. So the game-driving code stays synchronous and the
-event loop never blocks on a commit. :meth:`GameStore.start` launches the writer;
-:meth:`GameStore.aclose` enqueues a sentinel and waits, draining everything
-queued before it -- so a clean shutdown loses nothing (only a hard crash can
-lose the last unwritten events).
+against the DB. So the game-driving code stays synchronous and the event loop
+never blocks on a commit. The drain processes everything currently queued in one
+batch under a single commit, and a game's log is rewritten in full -- so a burst
+of moves coalesces to one rewrite and one fsync, not one per move.
+:meth:`GameStore.start` launches the writer; :meth:`GameStore.aclose` enqueues a
+sentinel and waits, draining everything queued before it -- so a clean shutdown
+loses nothing (only a hard crash can lose the last unwritten events).
 
 Reconstructing a live ``GameSession`` from a loaded game (replaying its moves)
 lives in ``games``, which owns the game and bot drivers.
@@ -36,7 +38,7 @@ from settlrl_app.ratings import (
     display_rating,
     update_winner_takes_all,
 )
-from settlrl_app.storage.db import Database, GameEvent, GameRow, Rating, User
+from settlrl_app.storage.db import Database, GameLog, GameRow, Rating, User
 
 # Finished games kept as replayable history; past this the oldest are pruned.
 _HISTORY_CAP = 200
@@ -52,9 +54,12 @@ class _WriteHeader:
 
 
 @dataclass(frozen=True)
-class _Append:
+class _SaveLog:
+    """Rewrite a game's whole event log. Carries the full list, so repeated
+    saves for one game coalesce to the last in a drain batch."""
+
     game_id: str
-    payload: dict[str, object]
+    events: list[dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -81,7 +86,7 @@ class _Remove:
     game_id: str
 
 
-_Op = _WriteHeader | _Append | _Finish | _Result | _Remove
+_Op = _WriteHeader | _SaveLog | _Finish | _Result | _Remove
 
 
 @dataclass(frozen=True)
@@ -111,22 +116,35 @@ class FinishedGame:
 class GameJournal:
     """The append point for one game's events.
 
-    Mutators append under the game's lock; ``sync_moves`` enqueues only the moves
-    not yet recorded, so a single hook on every state change captures human and
-    bot moves alike."""
+    Holds the game's full ordered log in memory; each mutation appends to it (under
+    the game's lock) and enqueues a rewrite of the whole log. ``sync_moves`` folds
+    in only the moves not yet recorded, so a single hook on every state change
+    captures human and bot moves alike."""
 
-    def __init__(self, store: GameStore, game_id: str, moves_written: int) -> None:
+    def __init__(
+        self,
+        store: GameStore,
+        game_id: str,
+        events: list[dict[str, object]],
+        moves_written: int,
+    ) -> None:
         self._store = store
         self._game_id = game_id
+        self._events = events
         self._moves_written = moves_written
+
+    def _save(self) -> None:
+        self._store._queue.put_nowait(_SaveLog(self._game_id, list(self._events)))
 
     def sync_moves(self, moves: Sequence[Move]) -> None:
         # The full resolved outcome is stored (not just the flat), so a game
         # rebuilds faithfully from the journal without re-sampling the seed --
         # which would diverge for any game that used the random fallback.
-        for move in moves[self._moves_written :]:
-            self._store._append(
-                self._game_id,
+        new = moves[self._moves_written :]
+        if not new:
+            return
+        for move in new:
+            self._events.append(
                 {
                     "t": "move",
                     "player": move.player,
@@ -134,20 +152,20 @@ class GameJournal:
                     "dice": move.dice,
                     "drawn": move.drawn,
                     "stolen": move.stolen,
-                },
+                }
             )
         self._moves_written = len(moves)
+        self._save()
 
     def claim(self, seat: int, token: str, user_id: str | None = None) -> None:
-        self._store._append(
-            self._game_id,
-            {"t": "claim", "seat": seat, "token": token, "user_id": user_id},
+        self._events.append(
+            {"t": "claim", "seat": seat, "token": token, "user_id": user_id}
         )
+        self._save()
 
     def chat(self, player: int | None, text: str) -> None:
-        self._store._append(
-            self._game_id, {"t": "chat", "player": player, "text": text}
-        )
+        self._events.append({"t": "chat", "player": player, "text": text})
+        self._save()
 
     def finish(
         self, finished_at: float, winner: int | None, owners: dict[str, list[int]]
@@ -196,53 +214,69 @@ class GameStore:
     def create(self, game_id: str, setup: Mapping[str, object]) -> GameJournal:
         """Record a new game's header and return its journal."""
         self._queue.put_nowait(_WriteHeader(game_id, dict(setup)))
-        return GameJournal(self, game_id, moves_written=0)
+        return GameJournal(self, game_id, events=[], moves_written=0)
 
-    def reopen(self, game_id: str, moves_written: int) -> GameJournal:
-        """A journal for a game already loaded from the store (after a restart)."""
-        return GameJournal(self, game_id, moves_written)
+    def reopen(
+        self, game_id: str, events: list[dict[str, object]], moves_written: int
+    ) -> GameJournal:
+        """A journal for a game already loaded from the store (after a restart),
+        seeded with its existing log so later saves rewrite the whole thing."""
+        return GameJournal(self, game_id, list(events), moves_written)
 
     def remove(self, game_id: str) -> None:
-        """Drop a game and its events (on eviction)."""
+        """Drop a game and its log (on eviction)."""
         self._queue.put_nowait(_Remove(game_id))
-
-    def _append(self, game_id: str, payload: dict[str, object]) -> None:
-        self._queue.put_nowait(_Append(game_id, payload))
 
     async def _drain(self) -> None:
         while True:
             op = await self._queue.get()
             if op is None:
                 return
+            batch, shutdown = [op], False
+            while not self._queue.empty():
+                nxt = self._queue.get_nowait()
+                if nxt is None:
+                    shutdown = True
+                    break
+                batch.append(nxt)
             async with self._db.sessionmaker() as session:
-                if isinstance(op, _WriteHeader):
-                    await session.merge(GameRow(id=op.game_id, header=op.header))
-                elif isinstance(op, _Append):
-                    session.add(GameEvent(game_id=op.game_id, payload=op.payload))
-                elif isinstance(op, _Finish):
-                    await session.execute(
-                        update(GameRow)
-                        .where(GameRow.id == op.game_id)
-                        .values(
-                            finished_at=op.finished_at,
-                            winner=op.winner,
-                            owners=op.owners,
-                        )
-                    )
-                    await self._prune_history(session)
-                elif isinstance(op, _Result):
-                    await self._apply_result(session, op)
-                else:
-                    await session.execute(
-                        delete(GameEvent).where(GameEvent.game_id == op.game_id)
-                    )
-                    await session.execute(
-                        delete(GameRow).where(GameRow.id == op.game_id)
-                    )
+                await self._apply_batch(session, batch)
                 await session.commit()
+            if shutdown:
+                return
+
+    async def _apply_batch(self, session: AsyncSession, batch: list[_Op]) -> None:
+        # Each _SaveLog carries the full log, so only the last per game matters.
+        last_save = {
+            op.game_id: i for i, op in enumerate(batch) if isinstance(op, _SaveLog)
+        }
+        for i, op in enumerate(batch):
+            if isinstance(op, _WriteHeader):
+                await session.merge(GameRow(id=op.game_id, header=op.header))
+            elif isinstance(op, _SaveLog):
+                if last_save[op.game_id] == i:
+                    await session.merge(GameLog(game_id=op.game_id, events=op.events))
+            elif isinstance(op, _Finish):
+                await session.execute(
+                    update(GameRow)
+                    .where(GameRow.id == op.game_id)
+                    .values(
+                        finished_at=op.finished_at,
+                        winner=op.winner,
+                        owners=op.owners,
+                    )
+                )
+                await self._prune_history(session)
+            elif isinstance(op, _Result):
+                await self._apply_result(session, op)
+            else:
+                await session.execute(
+                    delete(GameLog).where(GameLog.game_id == op.game_id)
+                )
+                await session.execute(delete(GameRow).where(GameRow.id == op.game_id))
 
     async def _prune_history(self, session: AsyncSession) -> None:
-        """Drop finished games (and their events) beyond the newest cap."""
+        """Drop finished games (and their logs) beyond the newest cap."""
         stale = (
             (
                 await session.execute(
@@ -256,7 +290,7 @@ class GameStore:
             .all()
         )
         if stale:
-            await session.execute(delete(GameEvent).where(GameEvent.game_id.in_(stale)))
+            await session.execute(delete(GameLog).where(GameLog.game_id.in_(stale)))
             await session.execute(delete(GameRow).where(GameRow.id.in_(stale)))
 
     async def _apply_result(self, session: AsyncSession, op: _Result) -> None:
@@ -364,17 +398,8 @@ class GameStore:
             )
             loaded: list[tuple[dict[str, object], list[dict[str, object]]]] = []
             for row in rows:
-                events = list(
-                    (
-                        await session.execute(
-                            select(GameEvent.payload)
-                            .where(GameEvent.game_id == row.id)
-                            .order_by(GameEvent.seq)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
+                log = await session.get(GameLog, row.id)
+                events = list(log.events) if log else []
                 loaded.append(({"id": row.id, **row.header}, events))
             return loaded
 
@@ -387,17 +412,8 @@ class GameStore:
             row = await session.get(GameRow, game_id)
             if row is None or row.finished_at is None:
                 return None
-            events = (
-                (
-                    await session.execute(
-                        select(GameEvent.payload)
-                        .where(GameEvent.game_id == game_id)
-                        .order_by(GameEvent.seq)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            log = await session.get(GameLog, game_id)
+            events = list(log.events) if log else []
         placement: Literal["random", "spiral"] = (
             "spiral" if row.header.get("number_placement") == "spiral" else "random"
         )

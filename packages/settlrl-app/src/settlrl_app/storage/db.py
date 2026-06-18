@@ -84,16 +84,17 @@ class Rating(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=0.0)
 
 
-class GameEvent(Base):
-    """One ordered event in a game's journal (a move, seat claim, or chat line)."""
+class GameLog(Base):
+    """A game's full ordered event log (moves, seat claims, chat) as one JSON
+    document — one row per game, rewritten in place as the game advances. Kept
+    out of :class:`GameRow` so listing/restoring headers doesn't drag the log."""
 
-    __tablename__ = "game_event"
+    __tablename__ = "game_log"
 
-    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     game_id: Mapped[str] = mapped_column(
-        String, ForeignKey("game.id", ondelete="CASCADE"), index=True
+        String, ForeignKey("game.id", ondelete="CASCADE"), primary_key=True
     )
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    events: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
 
 
 class Database:

@@ -13,10 +13,11 @@ from _helpers import bot_registry
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry, _rebuild_handle
 from settlrl_app.server import create_app
-from settlrl_app.storage.db import Database
+from settlrl_app.storage.db import Database, GameLog
 from settlrl_app.storage.store import GameStore, RatingEntry
 from settlrl_game.convert import board_to_model
 from settlrl_game.session import GameSession, GameSetup
+from sqlalchemy import select
 
 
 def _play_out(session: GameSession) -> None:
@@ -254,6 +255,36 @@ def test_ratings_are_bucketed_by_player_count(tmp_path: Path) -> None:
     alpha = {e.n_players for e in board if e.name == "alpha"}
     assert alpha == {2, 4}
     assert [e.n_players for e in board] == sorted(e.n_players for e in board)
+
+
+def test_log_is_stored_as_one_row_per_game(tmp_path: Path) -> None:
+    """The whole event log (claims + moves) is a single ``game_log`` row, not a
+    row per event."""
+
+    async def scenario() -> tuple[int, int, int]:
+        db = Database(str(tmp_path / "settlrl.db"))
+        await db.init()
+        store = GameStore(db)
+        store.start()
+        reg = GameRegistry(store=store)
+        h = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
+        h.claim(0)
+        h.claim(1)
+        for _ in range(25):
+            if h.session.auto_step() is None:
+                break
+            h.bump()
+        await store.aclose()
+        async with db.sessionmaker() as session:
+            rows = (await session.execute(select(GameLog))).scalars().all()
+        (_, events) = (await store.load())[0]
+        await db.dispose()
+        moves = sum(1 for e in events if e["t"] == "move")
+        return len(rows), len(events), moves
+
+    n_rows, n_events, n_moves = asyncio.run(scenario())
+    assert n_rows == 1  # one row holds the entire log
+    assert n_moves > 0 and n_events == 2 + n_moves  # two claims + the moves
 
 
 def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:

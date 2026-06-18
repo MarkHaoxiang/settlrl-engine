@@ -381,7 +381,7 @@ def _rebuild_handle(
     handle.claim_users = claim_users
     handle.version = len(events)
     moves = sum(1 for e in events if e.get("t") == "move")
-    handle.journal = store.reopen(game_id, moves_written=moves)
+    handle.journal = store.reopen(game_id, events, moves_written=moves)
     return handle
 
 
