@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.pool import StaticPool
 
-from settlrl_app.elo import INITIAL_RATING
+from settlrl_app.ratings import INITIAL_MU, INITIAL_SIGMA
 
 
 class Base(DeclarativeBase):
@@ -67,7 +67,9 @@ class Rating(Base):
     ``"bot"``) tells them apart and ``subject_id`` is the account's user-id or
     the bot's name. Ratings are bucketed by ``n_players`` — a separate ladder per
     game size (a 2p and a 4p rating for the same subject are independent rows).
-    ``name`` is the cached display label (a bot's name, an account's handle)."""
+    Skill is the openskill ``(mu, sigma)`` pair; the displayed number is derived
+    from it. ``name`` is the cached display label (a bot's name, an account's
+    handle)."""
 
     __tablename__ = "rating"
 
@@ -75,7 +77,8 @@ class Rating(Base):
     subject_id: Mapped[str] = mapped_column(String, primary_key=True)
     n_players: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String)
-    rating: Mapped[float] = mapped_column(Float, default=INITIAL_RATING)
+    mu: Mapped[float] = mapped_column(Float, default=INITIAL_MU)
+    sigma: Mapped[float] = mapped_column(Float, default=INITIAL_SIGMA)
     games: Mapped[int] = mapped_column(Integer, default=0)
     wins: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[float] = mapped_column(Float, default=0.0)

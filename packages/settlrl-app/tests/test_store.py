@@ -203,7 +203,7 @@ def _bot_game(seed: int, kinds: list[str]) -> GameSession:
     )
 
 
-def test_finished_game_updates_elo_ratings(tmp_path: Path) -> None:
+def test_finished_game_updates_ratings(tmp_path: Path) -> None:
     async def scenario() -> tuple[int | None, list[RatingEntry]]:
         db = Database(str(tmp_path / "settlrl.db"))
         await db.init()
@@ -225,8 +225,8 @@ def test_finished_game_updates_elo_ratings(tmp_path: Path) -> None:
     assert set(by_name) == {"alpha", "beta"}
     assert all(e.kind == "bot" and e.n_players == 2 and e.games == 1 for e in board)
     won, lost = ["alpha", "beta"][winner], ["beta", "alpha"][winner]
-    assert by_name[won].wins == 1 and by_name[won].rating > 1500
-    assert by_name[lost].wins == 0 and by_name[lost].rating < 1500
+    assert by_name[won].wins == 1 and by_name[lost].wins == 0
+    assert by_name[won].rating > by_name[lost].rating  # the winner ranks higher
     assert board[0].rating >= board[1].rating  # best first
 
 

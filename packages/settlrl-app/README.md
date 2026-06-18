@@ -178,14 +178,17 @@ end-of-game screen's **Download replay** button saves.
 
 ## Leaderboard
 
-The menu's **Leaderboard** page (`/leaderboard`, public) ranks players by Elo,
+The menu's **Leaderboard** page (`/leaderboard`, public) ranks players by skill,
 **split by player count** — a 2-, 3-, and 4-player ladder are kept separately.
 Both registered accounts (shown by their handle) and bots (shown by name) are
-rated on the same ladders, so games against bots count. When a game ends its
-result settles the ratings: standard Elo applied pairwise with a winner-takes-all
-result (the winner beats everyone; the rest draw with each other). A seat that is
-neither an account nor a bot (an anonymous, token-only human) is not rated, and a
-bot occupying more than one seat in a game is skipped for that game. Endpoint:
+rated on the same ladders, so games against bots count. Rating uses
+[openskill](https://github.com/vivekjoshy/openskill.py) (the patent-free
+Weng-Lin / Plackett-Luce model): when a game ends its final standings are scored
+winner-takes-all (the winner ranks first, the rest tie behind) and the whole
+table is rated in one step. The displayed number is the conservative ordinal
+scaled to an Elo-like range (a fresh player shows ~1000). A seat that is neither
+an account nor a bot (an anonymous, token-only human) is not rated, and a bot
+occupying more than one seat in a game is skipped for that game. Endpoint:
 `GET /api/leaderboard`.
 
 ## Bot services
@@ -310,11 +313,11 @@ packages/settlrl-app/
 │   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots/            # the bot seam (no agent code runs here)
 │   │   └── providers.py   # Bot kinds -> the registered remote services that serve them
-│   ├── elo.py           # Pure Elo math: pairwise winner-takes-all rating updates
+│   ├── ratings.py       # Multiplayer rating via openskill: winner-takes-all skill updates
 │   └── storage/         # the one async DB: identity + persistence
 │       ├── db.py          # The async SQLAlchemy engine: users, login tokens, game journals, ratings
 │       ├── auth.py        # Optional accounts: fastapi-users (DatabaseStrategy) on the shared DB
-│       └── store.py       # Crash-recovery journals + Elo ratings on the shared DB (write-behind)
+│       └── store.py       # Crash-recovery journals + skill ratings on the shared DB (write-behind)
 ├── tests/               # Pytest: board conversion, flat-table round-trip, per-seat views, server
 └── frontend/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)

@@ -30,7 +30,12 @@ from settlrl_game.record import GameRecord, Move
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from settlrl_app.elo import INITIAL_RATING, winner_takes_all
+from settlrl_app.ratings import (
+    INITIAL_MU,
+    INITIAL_SIGMA,
+    display_rating,
+    update_winner_takes_all,
+)
 from settlrl_app.storage.db import Database, GameEvent, GameRow, Rating, User
 
 # Finished games kept as replayable history; past this the oldest are pruned.
@@ -255,15 +260,17 @@ class GameStore:
             await session.execute(delete(GameRow).where(GameRow.id.in_(stale)))
 
     async def _apply_result(self, session: AsyncSession, op: _Result) -> None:
-        """Settle one finished game's ratings (pairwise winner-takes-all) against
-        the current standings, creating rows for first-time subjects."""
+        """Settle one finished game's ratings (winner-takes-all over its seats)
+        against the current standings, creating rows for first-time subjects."""
         names = await self._display_names(session, op.subjects)
         rows = [
             await session.get(Rating, (kind, sid, op.n_players))
             for kind, sid in op.subjects
         ]
-        before = [row.rating if row else INITIAL_RATING for row in rows]
-        after = winner_takes_all(before, op.winner_index)
+        before = [
+            (row.mu, row.sigma) if row else (INITIAL_MU, INITIAL_SIGMA) for row in rows
+        ]
+        after = update_winner_takes_all(before, op.winner_index)
         for i, ((kind, sid), row) in enumerate(zip(op.subjects, rows, strict=True)):
             if row is None:
                 # Column defaults only apply at flush, so seed the counters here.
@@ -276,7 +283,7 @@ class GameStore:
                 )
                 session.add(row)
             row.name = names[(kind, sid)]
-            row.rating = after[i]
+            row.mu, row.sigma = after[i]
             row.games += 1
             row.wins += int(i == op.winner_index)
             row.updated_at = op.finished_at
@@ -295,29 +302,24 @@ class GameStore:
         return names
 
     async def leaderboard(self) -> list[RatingEntry]:
-        """Every rating, grouped by bucket (ascending) then by rating (best
-        first within a bucket)."""
+        """Every rating, grouped by bucket (ascending) then by displayed rating
+        (best first within a bucket). The display ordinal isn't a column, so the
+        within-bucket order is computed here."""
         async with self._db.sessionmaker() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(Rating).order_by(Rating.n_players, Rating.rating.desc())
-                    )
-                )
-                .scalars()
-                .all()
+            rows = (await session.execute(select(Rating))).scalars().all()
+        entries = [
+            RatingEntry(
+                n_players=row.n_players,
+                kind=row.subject_kind,
+                name=row.name,
+                rating=display_rating(row.mu, row.sigma),
+                games=row.games,
+                wins=row.wins,
             )
-            return [
-                RatingEntry(
-                    n_players=row.n_players,
-                    kind=row.subject_kind,
-                    name=row.name,
-                    rating=row.rating,
-                    games=row.games,
-                    wins=row.wins,
-                )
-                for row in rows
-            ]
+            for row in rows
+        ]
+        entries.sort(key=lambda e: (e.n_players, -e.rating))
+        return entries
 
     async def history(self) -> list[FinishedGame]:
         """Finished games kept as history, newest first."""
