@@ -29,13 +29,15 @@ import numpy as np
 import optax
 from jaxtyping import Array, Float, Int
 from settlrl_agents import POLICIES, BeliefSpec, evaluate
-from settlrl_agents.policy import PolicyPrior
+from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
+from settlrl_agents.policy import BeliefPolicy, PolicyPrior
 from settlrl_agents.search import PolicyWeights, make_search, make_search_weights
-from settlrl_agents.value import Value, ValueFunction
+from settlrl_agents.value import Value, ValueFunction, heuristic_value
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import EDGE_V, N_VERTICES, TILE_V, BoardLayout
-from settlrl_engine.board.state import BoardState, IntScalar
+from settlrl_engine.board.state import BoardState, GamePhase, IntScalar
 from settlrl_engine.env import N_FLAT, BatchedSettlrlEnv, flat_to_action
+from settlrl_engine.mechanics.action import ActionType
 
 from settlrl_learn import action_layout as al
 from settlrl_learn.features import FEATURE_DIM
@@ -127,6 +129,51 @@ def make_az_gnn(model: AZGraphNet) -> tuple[ValueFunction, PolicyPrior]:
     return value, prior
 
 
+# Flat rows that are setup placements (initial settlement/road). The net never
+# acts here -- a fixed policy plays the setup phase -- so the only legal actions
+# at a *net* decision are never these, and the policy head's setup outputs go
+# untrained. Setup is detectable from the mask alone (only placements legal).
+_SETUP_ROWS = (int(ActionType.SETUP_SETTLEMENT) == _ROW_TYPE) | (
+    int(ActionType.SETUP_ROAD) == _ROW_TYPE
+)
+
+
+def setup_policy() -> BeliefPolicy:
+    """The fixed policy for the setup phase: one-step lookahead over the heuristic,
+    which scores opening placements by production (a strong, cheap opener)."""
+    return make_search(heuristic_value, num_simulations=0)
+
+
+def make_net_agent(
+    value_fn: ValueFunction,
+    prior_fn: PolicyPrior,
+    *,
+    num_simulations: int,
+    max_num_considered_actions: int,
+) -> BeliefPolicy:
+    """The net at play: the setup phase from :func:`setup_policy`, the main loop
+    from the net's search. The phase is read off the mask (setup ⇔ the only legal
+    actions are placements)."""
+    net = make_search(
+        value_fn, prior=prior_fn, value_scale=2.0,
+        num_simulations=num_simulations,
+        max_num_considered_actions=max_num_considered_actions,
+    )  # fmt: skip
+    setup = setup_policy()
+
+    def policy(
+        key: Array, layout: BoardLayout, view: Any, player: IntScalar, mask: Array
+    ) -> Array:
+        main_legal = (mask & ~_SETUP_ROWS).any()  # a non-setup action is legal
+        return jnp.where(
+            main_legal,
+            net(key, layout, view, player, mask),
+            setup(key, layout, view, player, mask),
+        )
+
+    return policy
+
+
 class GNNSamples(NamedTuple):
     """Self-play positions: the board graph (nodes/edges/glob), the search's
     improved policy, the legality mask, and the acting seat's win (1) / loss (0)."""
@@ -162,6 +209,7 @@ def self_play(
     weights_fn: PolicyWeights,
     *,
     n_samples: int,
+    setup_fn: BeliefPolicy | None = None,
     n_players: int = 2,
     batch_size: int = 16,
     temperature: float = 1.0,
@@ -174,11 +222,23 @@ def self_play(
     warm-up). Positions from finished games are credited with the acting seat's
     outcome; unfinished games are discarded.
 
+    ``setup_fn`` (when given) plays the **setup phase** (initial placements) with
+    a fixed policy instead of the net, and those positions are *not recorded* -- so
+    the net's value/policy only ever train on (and act in) the main game loop. The
+    setup placements are rare, high-leverage, and structurally distinct; handing
+    them to a strong fixed policy keeps a weak net's bad opening from dooming every
+    game and lets the heads specialise on the main loop.
+
     ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's
     retained pending positions -- a cold/degenerate net can drag a game out
     indefinitely, so without these the pending buffer (and the eventual flush)
     grows unbounded. A capped lane keeps its most recent positions."""
     search = jax.jit(jax.vmap(weights_fn, in_axes=(0, 0, 0, 0, 0)))
+    setup_search = (
+        jax.jit(jax.vmap(setup_fn, in_axes=(0, 0, 0, 0, 0)))
+        if setup_fn is not None
+        else None
+    )
     view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
     sample_of = jax.jit(jax.vmap(board_sample, in_axes=(0, 0, 0)))
 
@@ -202,11 +262,19 @@ def self_play(
         sel = jnp.asarray(env.agent_selection)
         mask = env.flat_mask()
         view = view_of(state, beliefs, sel)
-        key, k_search, k_move = jax.random.split(key, 3)
+        key, k_search, k_move, k_setup = jax.random.split(key, 4)
         weights = search(
             jax.random.split(k_search, batch_size), layout, view, sel, mask
         )
         move = _sample_moves(k_move, weights, mask, temperature)
+        # Setup-phase lanes (initial placements) play via the fixed setup policy
+        # and are not recorded; the net only learns the main loop.
+        is_setup = np.asarray(state.phase <= int(GamePhase.SETUP_ROAD))
+        if setup_search is not None and is_setup.any():
+            setup_move = setup_search(
+                jax.random.split(k_setup, batch_size), layout, view, sel, mask
+            )
+            move = jnp.where(jnp.asarray(is_setup), setup_move, move)
 
         s = sample_of(layout, state, sel)
         n_np, e_np, g_np = (
@@ -214,6 +282,8 @@ def self_play(
         )  # fmt: skip
         w_np, sel_np, m_np = np.asarray(weights), np.asarray(sel), np.asarray(mask)
         for lane in range(batch_size):
+            if is_setup[lane]:  # the net does not train on setup positions
+                continue
             row = (n_np[lane], e_np[lane], g_np[lane], w_np[lane], m_np[lane])
             pending[lane].append((*row, int(sel_np[lane])))
             if len(pending[lane]) > max_game_len:
@@ -279,8 +349,8 @@ def arena(
     """The GNN's win rate vs. a ``POLICIES`` ``opponent``, seat-swapped at 2p
     (``lookahead`` = the Stage-1 gate; ``random`` = the lower-bound sanity check)."""
     value_fn, prior_fn = make_az_gnn(model)
-    net = make_search(
-        value_fn, prior=prior_fn, value_scale=2.0,
+    net = make_net_agent(
+        value_fn, prior_fn,
         num_simulations=num_simulations,
         max_num_considered_actions=max_num_considered_actions,
     )  # fmt: skip
@@ -462,6 +532,7 @@ def learn(
         if teacher_value is not None
         else None
     )
+    setup = setup_policy()  # the setup phase is played (unrecorded) by a fixed policy
 
     ev: GNNSamples | None = None
     for i in range(int(state.iteration), n_iterations):
@@ -477,8 +548,8 @@ def learn(
                 max_num_considered_actions=max_num_considered_actions,
             )  # fmt: skip
         fresh = self_play(
-            wfn, n_samples=selfplay_samples, batch_size=selfplay_batch,
-            temperature=temperature, seed=seed + 1 + i,
+            wfn, n_samples=selfplay_samples, setup_fn=setup,
+            batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
         )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
         nf = fresh.value.shape[0]
