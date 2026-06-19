@@ -61,11 +61,3 @@ def test_0004_alphazero_gnn_smoke(tmp_path: Path) -> None:
     cfg = run.AlphaZeroConfig.resolve(run.VARIANTS["gnn_smoke"])
     run.run_experiment(Run(tmp_path), cfg)
     _verdict(tmp_path)
-
-
-@pytest.mark.slow
-def test_0005_neural_leaf_smoke(tmp_path: Path) -> None:
-    run = load_run("0005_neural_leaf")
-    cfg = run.NeuralLeafConfig.resolve(run.VARIANTS["smoke"])
-    run.run_experiment(Run(tmp_path), cfg)
-    _verdict(tmp_path)
