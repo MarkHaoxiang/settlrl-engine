@@ -1,0 +1,72 @@
+.page {
+  position: relative;
+  width: 100vw;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+}
+
+.panel {
+  composes: panel from "../styles/ui.module.css";
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 28px;
+  max-width: 620px;
+  height: fit-content;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.menuLink {
+  color: var(--link);
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  composes: sectionLabel from "../styles/ui.module.css";
+}
+
+.dim {
+  opacity: 0.8;
+}
+
+.table {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+
+.icon {
+  font-size: 18px;
+}
+
+.actionLabel {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.actionText {
+  opacity: 0.8;
+}

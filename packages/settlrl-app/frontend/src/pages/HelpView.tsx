@@ -4,7 +4,7 @@
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { ACTION_META } from "../lib/actionMeta";
-import { LINK, panelStyle } from "../lib/ui";
+import s from "./HelpView.module.css";
 
 // What each control does, keyed by action type and grouped by where it lives:
 // directly on the board, on a hand chip, or on the bottom bar (display order).
@@ -33,12 +33,12 @@ const BAR_HELP: [string, string][] = [
 
 function ActionTable({ rows }: { rows: [string, string][] }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: "6px 12px", alignItems: "baseline" }}>
+    <div className={s.table}>
       {rows.map(([type, text]) => (
         <Fragment key={type}>
-          <span style={{ fontSize: 18 }}>{ACTION_META[type].icon}</span>
-          <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{ACTION_META[type].label}</span>
-          <span style={{ opacity: 0.8 }}>{text}</span>
+          <span className={s.icon}>{ACTION_META[type].icon}</span>
+          <span className={s.actionLabel}>{ACTION_META[type].label}</span>
+          <span className={s.actionText}>{text}</span>
         </Fragment>
       ))}
     </div>
@@ -47,10 +47,8 @@ function ActionTable({ rows }: { rows: [string, string][] }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <span style={{ fontSize: 12, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>
-        {title}
-      </span>
+    <div className={s.section}>
+      <span className={s.sectionTitle}>{title}</span>
       {children}
     </div>
   );
@@ -58,34 +56,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function HelpView() {
   return (
-    <div
-      style={{
-        position: "relative",
-        width: "100vw",
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        padding: "40px 16px",
-        overflowY: "auto",
-        boxSizing: "border-box",
-      }}
-    >
-      <div
-        style={{
-          ...panelStyle,
-          display: "flex",
-          flexDirection: "column",
-          gap: 20,
-          padding: "24px 28px",
-          maxWidth: 620,
-          height: "fit-content",
-          fontSize: 14,
-          lineHeight: 1.5,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
-          <span style={{ fontSize: 20, fontWeight: 700 }}>How to play</span>
-          <Link to="/" style={{ color: LINK, fontSize: 13, marginLeft: "auto" }}>
+    <div className={s.page}>
+      <div className={s.panel}>
+        <div className={s.header}>
+          <span className={s.title}>How to play</span>
+          <Link to="/" className={s.menuLink}>
             ← Menu
           </Link>
         </div>
@@ -106,7 +81,7 @@ export default function HelpView() {
         </Section>
 
         <Section title="Your hand">
-          <span style={{ opacity: 0.8 }}>
+          <span className={s.dim}>
             The chips in the bottom panel are the acting human's hand: resources and development
             cards by type. Glowing chips are playable — click one:
           </span>
@@ -114,7 +89,7 @@ export default function HelpView() {
         </Section>
 
         <Section title="The bar">
-          <span style={{ opacity: 0.8 }}>
+          <span className={s.dim}>
             The bottom bar keeps the turn-flow moves, one button per move currently available:
           </span>
           <ActionTable rows={BAR_HELP} />
