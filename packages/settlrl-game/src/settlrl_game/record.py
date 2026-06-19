@@ -45,6 +45,8 @@ class GameRecord:
     seed: int
     n_players: int
     number_placement: str = "random"
+    # Total VP that ends the game; default 10 so older records still replay.
+    victory_points_to_win: int = 10
     moves: tuple[Move, ...] = ()
     winner: int | None = None
     meta: dict[str, object] = field(default_factory=dict)
@@ -68,7 +70,12 @@ def initial_game(record: GameRecord) -> ref.Game:
         "spiral" if record.number_placement == "spiral" else "random"
     )
     layout = ref.random_layout(Random(record.seed), placement)
-    return ref.Game.new(layout, ref.desert_tile(layout), n_players=record.n_players)
+    return ref.Game.new(
+        layout,
+        ref.desert_tile(layout),
+        n_players=record.n_players,
+        victory_points_to_win=record.victory_points_to_win,
+    )
 
 
 def _with_outcome(action: ref.Action, move: Move) -> ref.Action:

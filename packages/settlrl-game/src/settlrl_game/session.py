@@ -52,6 +52,7 @@ class GameSetup:
     n_players: int
     number_placement: Literal["random", "spiral"]
     seats: list[SeatLike]
+    victory_points_to_win: int = 10
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -59,16 +60,19 @@ class GameSetup:
             "n_players": self.n_players,
             "number_placement": self.number_placement,
             "seats": self.seats,
+            "victory_points_to_win": self.victory_points_to_win,
         }
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> GameSetup:
-        """Read a setup back from its dict form (extra keys are ignored)."""
+        """Read a setup back from its dict form (extra keys are ignored; a header
+        without ``victory_points_to_win`` predates it and defaults to 10)."""
         return cls(
             seed=cast(int, d["seed"]),
             n_players=cast(int, d["n_players"]),
             number_placement=cast(Literal["random", "spiral"], d["number_placement"]),
             seats=list(cast("Sequence[SeatLike]", d["seats"])),
+            victory_points_to_win=cast(int, d.get("victory_points_to_win", 10)),
         )
 
 
@@ -91,9 +95,15 @@ class GameSession:
         n_players: int = 4,
         seats: Sequence[SeatLike] | None = None,
         external_kinds: frozenset[str] = frozenset(),
+        victory_points_to_win: int = 10,
     ) -> None:
         self.n_players = n_players
-        self.reset(seed, seats=seats, external_kinds=external_kinds)
+        self.reset(
+            seed,
+            seats=seats,
+            external_kinds=external_kinds,
+            victory_points_to_win=victory_points_to_win,
+        )
 
     @classmethod
     def from_setup(
@@ -105,6 +115,7 @@ class GameSession:
             n_players=setup.n_players,
             seats=setup.seats,
             external_kinds=external_kinds,
+            victory_points_to_win=setup.victory_points_to_win,
         )
         if setup.number_placement != "random":  # the ctor defaulted to "random"
             session.reset(
@@ -112,6 +123,7 @@ class GameSession:
                 number_placement=setup.number_placement,
                 seats=setup.seats,
                 external_kinds=external_kinds,
+                victory_points_to_win=setup.victory_points_to_win,
             )
         return session
 
@@ -122,6 +134,7 @@ class GameSession:
         number_placement: Literal["random", "spiral"] = "random",
         seats: Sequence[SeatLike] | None = None,
         external_kinds: frozenset[str] | None = None,
+        victory_points_to_win: int = 10,
     ) -> None:
         """Start a fresh game.
 
@@ -132,6 +145,7 @@ class GameSession:
         runs no bots itself. ``external_kinds`` None keeps the current set.
         ``number_placement`` lays the number tokens: ``"random"`` shuffles them,
         ``"spiral"`` follows the rulebook spiral (terrain / ports are unchanged).
+        ``victory_points_to_win`` is the total VP that ends the game (default 10).
         """
         if n_players is not None:
             self.n_players = n_players
@@ -147,12 +161,16 @@ class GameSession:
         self.seats: list[str] = list(seats)
         self.seed = seed
         self.number_placement: Literal["random", "spiral"] = number_placement
+        self.victory_points_to_win = victory_points_to_win
         # One seeded RNG drives the board and every later stochastic outcome, so
         # the game is reproducible from (seed, flat moves).
         self._rng = Random(seed)
         layout = ref.random_layout(self._rng, self.number_placement)
         self.game = ref.Game.new(
-            layout, ref.desert_tile(layout), n_players=self.n_players
+            layout,
+            ref.desert_tile(layout),
+            n_players=self.n_players,
+            victory_points_to_win=victory_points_to_win,
         )
         self._belief = ref.Belief.new(self.n_players)
         self._log: list[LogEntryModel] = []
@@ -211,7 +229,11 @@ class GameSession:
     def setup(self) -> GameSetup:
         """This game's reconstructable setup."""
         return GameSetup(
-            self.seed, self.n_players, self.number_placement, list(self.seats)
+            self.seed,
+            self.n_players,
+            self.number_placement,
+            list(self.seats),
+            self.victory_points_to_win,
         )
 
     def terminal(self) -> bool:
@@ -378,6 +400,7 @@ class GameSession:
             seed=self.seed,
             n_players=self.n_players,
             number_placement=self.number_placement,
+            victory_points_to_win=self.victory_points_to_win,
             moves=tuple(self._moves),
             winner=self.winner(),
             meta={"seats": self.seats},
@@ -448,5 +471,6 @@ class GameSession:
             terminal=terminal,
             winner=self.winner(),
             seats=self.seats,
+            victory_points_to_win=self.victory_points_to_win,
             trade=trade,
         )

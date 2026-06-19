@@ -174,6 +174,8 @@ class GameStatusModel(BaseModel):
     winner: int | None = None
     # What controls each seat: "human" or a bot kind (settlrl-agents policy name).
     seats: list[str] = []
+    # Total VP that ends the game (the win target; 10 by default, 15 in 2-player).
+    victory_points_to_win: int = 10
     # Set while a proposed trade awaits the partner (phase trade_response).
     trade: TradeOfferModel | None = None
 

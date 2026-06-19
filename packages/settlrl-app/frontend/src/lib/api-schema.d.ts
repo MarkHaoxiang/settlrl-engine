@@ -782,6 +782,11 @@ export interface components {
              * @default []
              */
             seats: string[];
+            /**
+             * Victory Points To Win
+             * @default 10
+             */
+            victory_points_to_win: number;
             trade?: components["schemas"]["TradeOfferModel"] | null;
         };
         /** HTTPValidationError */

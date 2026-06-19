@@ -26,7 +26,12 @@ from settlrl_game.session import HUMAN, GameSession
 
 from settlrl_app.api.deps import needs_driver
 from settlrl_app.bots.providers import ProviderRegistry
-from settlrl_app.game.games import GameHandle, GameRegistry, RegistryFullError
+from settlrl_app.game.games import (
+    GameHandle,
+    GameRegistry,
+    RegistryFullError,
+    win_threshold,
+)
 from settlrl_app.ratings import INITIAL_MU, INITIAL_SIGMA, display_rating
 from settlrl_app.storage.store import GameStore
 
@@ -193,7 +198,12 @@ class Matchmaker:
         external = self._bots.remote_kinds() | set(bot_kinds)
         session = GameSession(seed=seed, n_players=n_players)
         await anyio.to_thread.run_sync(
-            lambda: session.reset(seed, seats=seats, external_kinds=external)
+            lambda: session.reset(
+                seed,
+                seats=seats,
+                external_kinds=external,
+                victory_points_to_win=win_threshold(n_players),
+            )
         )
         try:
             handle = self._registry.create(session)

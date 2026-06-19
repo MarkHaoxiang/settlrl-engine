@@ -140,6 +140,17 @@
   opacity: 0.85;
 }
 
+/* The win target, shown only when it isn't the default 10 (e.g. 2p plays to 15). */
+.winTarget {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--selected-bg);
+  border: 1px solid var(--accent);
+  white-space: nowrap;
+}
+
 .botMove {
   display: inline-flex;
   align-items: center;

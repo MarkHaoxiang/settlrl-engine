@@ -440,6 +440,7 @@ class GameStore:
             seed=int(row.header["seed"]),
             n_players=int(row.header["n_players"]),
             number_placement=placement,
+            victory_points_to_win=int(row.header.get("victory_points_to_win", 10)),
             moves=moves,
             winner=row.winner,
             meta={"seats": row.header.get("seats", [])},

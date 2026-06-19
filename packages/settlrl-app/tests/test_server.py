@@ -52,6 +52,16 @@ def _hdr(tokens: dict[str, str]) -> dict[str, str]:
     return {"X-Seat-Tokens": ",".join(tokens.values())}
 
 
+def test_two_player_games_play_to_fifteen_others_to_ten(client: TestClient) -> None:
+    game2, t2 = _create(client, n_players=2, seats=["human", "human"])
+    st2 = client.get(f"/api/games/{game2}", headers=_hdr(t2)).json()["status"]
+    assert st2["victory_points_to_win"] == 15
+
+    game4, t4 = _create(client, n_players=4)
+    st4 = client.get(f"/api/games/{game4}", headers=_hdr(t4)).json()["status"]
+    assert st4["victory_points_to_win"] == 10
+
+
 def test_create_claims_all_human_seats_by_default(client: TestClient) -> None:
     # One human seat among bots: claim="all" (the default) claims just it.
     game, tokens = _create(client, seats=["human", "random", "random", "random"])

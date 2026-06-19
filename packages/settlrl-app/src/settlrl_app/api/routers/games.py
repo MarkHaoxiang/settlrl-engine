@@ -25,7 +25,7 @@ from starlette.responses import Response
 from settlrl_app.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
 from settlrl_app.api.routers.replay import load_replay
 from settlrl_app.api.views import game_model
-from settlrl_app.game.games import QueuePosition, RegistryFullError
+from settlrl_app.game.games import QueuePosition, RegistryFullError, win_threshold
 from settlrl_app.storage.db import User
 
 
@@ -160,6 +160,7 @@ def build(deps: Deps) -> APIRouter:
                     number_placement=req.number_placement,
                     seats=req.seats,
                     external_kinds=bots.remote_kinds(),
+                    victory_points_to_win=win_threshold(req.n_players),
                 )
             )
         except ValueError as exc:
@@ -217,7 +218,9 @@ def build(deps: Deps) -> APIRouter:
             if req.seat in handle.claims:
                 raise HTTPException(status_code=409, detail="seat is already taken")
             if req.kind != HUMAN:
-                _validate_seat_kinds([req.kind], handle.session.n_players, bots.catalog())
+                _validate_seat_kinds(
+                    [req.kind], handle.session.n_players, bots.catalog()
+                )
             try:
                 handle.session.set_seat_kind(req.seat, req.kind)
             except (ValueError, IllegalActionError) as exc:

@@ -664,6 +664,14 @@ export default function PlayView() {
             {/* Status + the turn-flow buttons share one row */}
             <div className={me ? s.statusRowDivided : s.statusRow}>
               <span className={s.phase}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
+              {status.victory_points_to_win !== 10 && (
+                <span
+                  className={s.winTarget}
+                  title={`First to ${status.victory_points_to_win} victory points wins`}
+                >
+                  🏆 {status.victory_points_to_win}
+                </span>
+              )}
               {snapshot.bot_move && (
                 <span
                   className={`fade-in ${s.botMove}`}

@@ -8,7 +8,7 @@ record export.
 
 import pytest
 from settlrl_game.record import GameRecord, replay
-from settlrl_game.session import HUMAN, GameSession, IllegalActionError
+from settlrl_game.session import HUMAN, GameSession, GameSetup, IllegalActionError
 
 _BOTS = frozenset({"random"})  # an accepted "remote" kind for these tests
 
@@ -167,3 +167,30 @@ def test_set_seat_kind_rejected_after_a_move() -> None:
     sess.auto_step()
     with pytest.raises(IllegalActionError):
         sess.set_seat_kind(1, "random")
+
+
+def test_victory_points_to_win_threads_into_game_status_and_record() -> None:
+    sess = GameSession(seed=0, n_players=2, victory_points_to_win=15)
+    assert sess.game.victory_points_to_win == 15
+    assert sess.status().victory_points_to_win == 15
+    # Persisted in the journal header and the replayable record.
+    assert sess.setup.victory_points_to_win == 15
+    assert GameSetup.from_dict(sess.setup.to_dict()).victory_points_to_win == 15
+    rec = sess.record()
+    assert rec.victory_points_to_win == 15
+    assert GameRecord.from_json(rec.to_json()).victory_points_to_win == 15
+
+
+def test_pre_threshold_records_default_to_ten() -> None:
+    # A header / record written before the field defaults to the rulebook 10.
+    setup = GameSetup.from_dict(
+        {
+            "seed": 0,
+            "n_players": 4,
+            "number_placement": "random",
+            "seats": ["human"] * 4,
+        }
+    )
+    assert setup.victory_points_to_win == 10
+    rec = GameRecord.from_json('{"seed": 0, "n_players": 4}')
+    assert rec.victory_points_to_win == 10

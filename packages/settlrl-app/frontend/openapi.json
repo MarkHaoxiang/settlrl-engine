@@ -2017,6 +2017,11 @@
       "title": "Seats",
       "default": []
      },
+     "victory_points_to_win": {
+      "type": "integer",
+      "title": "Victory Points To Win",
+      "default": 10
+     },
      "trade": {
       "anyOf": [
        {

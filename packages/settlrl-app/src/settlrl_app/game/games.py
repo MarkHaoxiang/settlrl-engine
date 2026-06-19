@@ -55,6 +55,12 @@ _TICKET_BYTES = 9
 _TICKET_TTL_S = 12.0
 
 
+def win_threshold(n_players: int) -> int:
+    """The VP target for a game the server creates: 15 for the 2-player duel
+    (the rulebook's longer two-player target), 10 otherwise."""
+    return 15 if n_players == 2 else 10
+
+
 class RegistryFullError(Exception):
     """Every slot holds a recently-active running game; creation must wait."""
 
