@@ -143,7 +143,9 @@ def test_no_legal_actions_does_not_crash() -> None:
     layout, view, p, mask = _position(7, steps=120)
     empty = np.zeros_like(mask)
     a = _move(jax.random.key(0), layout, view, p, empty, num_simulations=8)
-    assert isinstance(a, int)
+    # `-> int` is already enforced (mypy + the beartype hook); the real property
+    # is that the degenerate fallback is still an in-range action index.
+    assert 0 <= a < empty.shape[-1]
 
 
 @pytest.mark.slow

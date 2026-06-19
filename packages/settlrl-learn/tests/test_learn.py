@@ -5,9 +5,7 @@ import pathlib
 import jax
 import jax.numpy as jnp
 import numpy as np
-from settlrl_agents.policy import PolicyPrior
 from settlrl_agents.search import make_search
-from settlrl_agents.value import ValueFunction
 from settlrl_engine.board import Board, make_board
 from settlrl_engine.env import BatchedSettlrlEnv
 from settlrl_learn import (
@@ -52,10 +50,10 @@ def test_features_distinguish_players_and_jit() -> None:
 
 def test_stand_ins_satisfy_the_seams_and_play_legally() -> None:
     key = jax.random.key(0)
+    # The factories are typed `-> ValueFunction` / `-> PolicyPrior`, so seam
+    # conformance is a static guarantee; this exercises that they play legally.
     value = make_net_value(init_value_params(key))
     prior = make_net_prior(init_prior_params(key))
-    assert isinstance(value, ValueFunction)
-    assert isinstance(prior, PolicyPrior)
 
     env = BatchedSettlrlEnv(batch_size=2, n_players=2, track_beliefs=True, seed=1)
     mask = env.flat_mask()
