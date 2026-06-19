@@ -7,9 +7,9 @@ import { ACTION_META } from "../lib/actionMeta";
 import s from "./HelpView.module.css";
 
 // What each control does, keyed by action type and grouped by where it lives:
-// directly on the board, on a hand chip, or on the bottom bar (display order).
+// directly on the board / table, or on a hand chip (display order).
 const BOARD_HELP: [string, string][] = [
-  ["roll_dice", "The dice rest by the board's corner — click them when they glow to roll."],
+  ["roll_dice", "The dice rest by the board's corner — click them when they glow gold to roll."],
   ["build_settlement", "A dot on a corner: click it to build a settlement there."],
   ["build_city", "A larger dot on your settlement: click it to upgrade to a city."],
   ["build_road", "A dash on an edge: click it to build a road there."],
@@ -17,6 +17,9 @@ const BOARD_HELP: [string, string][] = [
   ["buy_development_card", "Click the bank's development deck to buy a card."],
   ["maritime_trade", "Click the bank pile of the resource you want: a picker shows what to give and how many (4:1, or better via your ports)."],
   ["propose_trade", "Click an opponent's hand pile: a two-sided composer shows your counts and what card counting proves about theirs — pick a card from each side and propose."],
+  ["accept_trade", "When you're offered a trade, a card shows the deal over the board — Accept takes it."],
+  ["reject_trade", "…or Reject turns it down."],
+  ["end_turn", "Once you've rolled, the dice glow red — click them to end your turn."],
 ];
 const HAND_HELP: [string, string][] = [
   ["play_knight", "Click the knight card or the robber pawn, then a tile to move the robber (and who to rob)."],
@@ -24,11 +27,6 @@ const HAND_HELP: [string, string][] = [
   ["play_monopoly", "Click the card and pick a resource to take from everyone."],
   ["play_year_of_plenty", "Click the card and pick two resources from the bank."],
   ["discard", "A 7 costs you half your hand: click resource cards to discard them."],
-];
-const BAR_HELP: [string, string][] = [
-  ["accept_trade", "Take a trade you've been offered."],
-  ["reject_trade", "Turn a trade down."],
-  ["end_turn", "End your turn."],
 ];
 
 function ActionTable({ rows }: { rows: [string, string][] }) {
@@ -86,13 +84,6 @@ export default function HelpView() {
             cards by type. Glowing chips are playable — click one:
           </span>
           <ActionTable rows={HAND_HELP} />
-        </Section>
-
-        <Section title="The bar">
-          <span className={s.dim}>
-            The bottom bar keeps the turn-flow moves, one button per move currently available:
-          </span>
-          <ActionTable rows={BAR_HELP} />
         </Section>
 
         <Section title="The top bar">

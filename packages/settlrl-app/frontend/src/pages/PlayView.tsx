@@ -13,6 +13,7 @@ import Hand, { DEV_PLAY_TYPE } from "../components/Hand";
 import MaritimePopover from "../components/MaritimePopover";
 import NewGameDialog from "../components/NewGameDialog";
 import TradePopover from "../components/TradePopover";
+import TradeResponsePopover from "../components/TradeResponsePopover";
 import TopBar from "../components/TopBar";
 import { BotIcon, HumanIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
@@ -51,11 +52,6 @@ const VERTEX_KIND: Record<string, "settlement" | "city"> = {
   build_city: "city",
 };
 const EDGE_TYPES = new Set(["setup_road", "build_road"]);
-
-// Turn-flow actions that stay on the bottom bar (display order). The rest
-// happen on the table: trading on the bank piles and opponents' hand piles,
-// buying a dev card on the bank deck, ending the turn here.
-const BAR_TYPES = ["accept_trade", "reject_trade", "end_turn"];
 
 const PHASE_LABEL: Record<string, string> = {
   setup_settlement: "Setup",
@@ -379,12 +375,6 @@ export default function PlayView() {
     else setChoice(matches); // monopoly / year of plenty: pick resources
   };
 
-  const onBarButton = (type: string) => {
-    const matches = byType(type);
-    if (matches.length === 1) act(matches[0].flat);
-    else setChoice(matches); // trades: pick the exchange
-  };
-
   const canAfford = (cost: ResourceKind[]): boolean => {
     if (!me?.resources) return false;
     const need: Partial<Record<ResourceKind, number>> = {};
@@ -401,8 +391,19 @@ export default function PlayView() {
     return cost;
   };
 
-  // Rolling happens on the table: the dice glow and take the click.
+  // Rolling happens on the table: the dice glow gold and take the click; once
+  // rolling is done the same dice pulse red as the end-turn control.
   const rollAction = byType("roll_dice")[0];
+  const endTurnAction = byType("end_turn")[0];
+
+  // An incoming trade offer awaiting this client's answer (it owns the seat the
+  // proposal was made to) shows as a floating card with Accept / Reject.
+  const acceptAction = byType("accept_trade")[0];
+  const rejectAction = byType("reject_trade")[0];
+  const incomingTrade =
+    !status.terminal && status.your_turn && status.phase === "trade_response" && status.trade
+      ? status.trade
+      : null;
 
   // So does trading: bank piles open the maritime exchanges for that
   // resource, opponents' hand piles open the 1:1 offer composer.
@@ -432,11 +433,6 @@ export default function PlayView() {
     !status.terminal && status.your_turn && !busy && buyDevActions.length > 0
       ? (at: BoardTargetPoint) => setPopup({ actions: buyDevActions, x: at.x, y: at.y })
       : undefined;
-
-  const barTitle = (type: string) => {
-    const cost = BUILD_COSTS[type];
-    return cost ? `${actionMeta(type).label} — costs ${cost.join(", ")}` : actionMeta(type).label;
-  };
 
   // The status line doubles as the prompt for what to click.
   const turnLabel = soloSeat && status.your_turn ? "Your turn" : `${playerName(status.acting_player)}'s turn`;
@@ -477,6 +473,8 @@ export default function PlayView() {
             sum: status.dice_roll,
             seed: snapshot.log.length,
             onRoll: rollAction && !busy ? () => act(rollAction.flat) : undefined,
+            onEndTurn:
+              endTurnAction && !busy && status.your_turn ? () => act(endTurnAction.flat) : undefined,
             seat: status.terminal ? undefined : status.current_player,
           }}
         />
@@ -566,6 +564,15 @@ export default function PlayView() {
               </Button>
             </div>
           </div>
+        )}
+
+        {incomingTrade && (acceptAction || rejectAction) && (
+          <TradeResponsePopover
+            offer={incomingTrade}
+            disabled={busy}
+            onAccept={() => acceptAction && act(acceptAction.flat)}
+            onReject={() => rejectAction && act(rejectAction.flat)}
+          />
         )}
 
         {tradeWith && me && (
@@ -671,19 +678,6 @@ export default function PlayView() {
                 </span>
               )}
               <span className={s.hint}>{hint}</span>
-              {!status.terminal &&
-                status.your_turn &&
-                BAR_TYPES.filter((t) => availableTypes.has(t)).map((type) => (
-                  <button
-                    key={type}
-                    title={barTitle(type)}
-                    className={s.barButton}
-                    disabled={busy}
-                    onClick={() => onBarButton(type)}
-                  >
-                    {actionMeta(type).icon} {actionMeta(type).label}
-                  </button>
-                ))}
             </div>
 
             {choice && (

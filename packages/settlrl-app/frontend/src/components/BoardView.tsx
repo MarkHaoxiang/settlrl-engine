@@ -34,6 +34,8 @@ export interface DiceState {
   sum: number;
   seed: number;
   onRoll?: () => void;
+  // The dice double as the end-turn control: set when passing is the move.
+  onEndTurn?: () => void;
   seat?: number;
 }
 
@@ -194,6 +196,7 @@ export default function BoardView({ board, interaction, dice, trade, robber, onB
                   sum={dice.sum}
                   seed={dice.seed}
                   onRoll={dice.onRoll}
+                  onEndTurn={dice.onEndTurn}
                 />
               </g>
             )}

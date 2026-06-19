@@ -1,5 +1,8 @@
 import { HIGHLIGHT } from "../lib/ui";
 
+// The end-turn cue: the dice pulse red when the only thing left is to pass.
+const END_TURN = "#E0533F";
+
 // Pip layout per face value (index 0 unused), in grid offsets from centre.
 // prettier-ignore
 const PIPS: [number, number][][] = [
@@ -52,8 +55,9 @@ function split(sum: number): [number, number] {
 }
 
 // Two dice resting on the table by the board's corner: they show the last
-// roll (blank and dim before the first), and glow clickable when it's the
-// viewer's turn to roll.
+// roll (blank and dim before the first), glow gold and clickable when it's the
+// viewer's turn to roll, and pulse red as the end-turn control once rolling is
+// done (clicking them then passes the turn).
 export default function TableDice({
   cx,
   cy,
@@ -61,6 +65,7 @@ export default function TableDice({
   sum,
   seed,
   onRoll,
+  onEndTurn,
 }: {
   cx: number;
   cy: number;
@@ -69,16 +74,27 @@ export default function TableDice({
   // Varies the dice's resting angles per move, so consecutive rolls move.
   seed: number;
   onRoll?: () => void;
+  onEndTurn?: () => void;
 }) {
   const [d1, d2] = sum >= 2 ? split(sum) : [0, 0];
   const r1 = ((seed * 53 + sum * 17) % 44) - 22;
   const r2 = ((seed * 31 + sum * 7) % 44) - 22;
   const gap = size * 0.75;
+  // Roll takes precedence (it can't co-occur with end-turn anyway).
+  const onClick = onRoll ?? onEndTurn;
+  const glow = onRoll ? HIGHLIGHT : onEndTurn ? END_TURN : null;
+  const title = onRoll
+    ? "Roll the dice"
+    : onEndTurn
+      ? "End turn"
+      : sum >= 2
+        ? `last roll: ${sum}`
+        : "dice";
   return (
-    <g onClick={onRoll} style={onRoll ? { cursor: "pointer" } : undefined} opacity={sum >= 2 || onRoll ? 1 : 0.45}>
-      <title>{onRoll ? "Roll the dice" : sum >= 2 ? `last roll: ${sum}` : "dice"}</title>
-      {onRoll && (
-        <circle cx={cx} cy={cy} r={size * 1.7} fill={HIGHLIGHT} fillOpacity={0.25} stroke={HIGHLIGHT} strokeWidth={2}>
+    <g onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} opacity={sum >= 2 || onClick ? 1 : 0.45}>
+      <title>{title}</title>
+      {glow && (
+        <circle cx={cx} cy={cy} r={size * 1.7} fill={glow} fillOpacity={0.25} stroke={glow} strokeWidth={2}>
           <animate
             attributeName="r"
             values={`${size * 1.55};${size * 1.8};${size * 1.55}`}

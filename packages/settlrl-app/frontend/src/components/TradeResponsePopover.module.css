@@ -1,0 +1,55 @@
+/* A floating card near the top of the board (clear of TopBar and the hand). */
+.box {
+  composes: panel from "../styles/ui.module.css";
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.header {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.deal {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.sideLabel {
+  font-size: 11px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.res {
+  font-size: 13px;
+}
+
+.arrow {
+  font-size: 22px;
+  opacity: 0.7;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}

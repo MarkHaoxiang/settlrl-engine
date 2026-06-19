@@ -160,10 +160,3 @@
 .hint {
   opacity: 0.6;
 }
-
-.barButton {
-  composes: button from "../styles/ui.module.css";
-  font-size: 13px;
-  padding: 6px 12px;
-  white-space: nowrap;
-}
