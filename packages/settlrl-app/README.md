@@ -189,6 +189,15 @@ seat from the New Game dialog (human or a specific bot) and can still retarget a
 unclaimed seat in the waiting room (`POST /api/games/{id}/seats`), so an
 under-filled game is never stuck.
 
+**Quick Match** pairs you into a game with one click (`POST /api/matchmake`,
+2- or 4-player). Waiters are pooled per player count and matched on their
+[leaderboard](#leaderboard) rating — signed-in players by their real Elo,
+anonymous players at a fresh rating — and the rest of the table is filled with
+the registered bots whose rating sits closest to the group's. The Elo window
+widens the longer you wait, and once the oldest waiter has waited long enough a
+game forms with bots so no one is ever stuck. Polling re-presents a ticket until
+a seat comes back (like the create-queue) — no new push surface.
+
 ## Leaderboard
 
 The menu's **Leaderboard** page (`/leaderboard`, public) ranks players by skill,
@@ -289,6 +298,7 @@ BASE=http://localhost:8000 npm run e2e
 | `GET /api/me/history` | The signed-in user's finished games (newest first) — replayable / downloadable by id |
 | `GET /api/leaderboard` | Elo ratings for accounts and bots, per player-count bucket, best first (public; see [Leaderboard](#leaderboard)) |
 | `GET /api/lobby` | Open games anyone can join (listed, non-terminal, with a free human seat), newest first (public; see [Lobby](#lobby)) |
+| `POST /api/matchmake` | Elo Quick Match `{ "n_players": 2 \| 4, "ticket"? }` — returns `{ "queued": true, "ticket", "waiting" }` to re-poll, or `{ "id", "seat", "token" }` once matched (bots fill the rest; see [Lobby](#lobby)) |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
@@ -326,6 +336,7 @@ packages/settlrl-app/
 │   ├── game/            # the live game runtime
 │   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens), the lobby gate
 │   │   ├── driver.py      # Per-game asyncio task: bot pacing (remote) + idle-turn timeouts
+│   │   ├── matchmaking.py  # Elo Quick Match: pool waiters per count, pair + bot-fill the table
 │   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
 │   ├── bots/            # the bot seam (no agent code runs here)
 │   │   └── providers.py   # Bot kinds -> the registered remote services that serve them

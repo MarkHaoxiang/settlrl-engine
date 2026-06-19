@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Header, HTTPException
 from settlrl_game.session import HUMAN
@@ -22,6 +22,9 @@ from settlrl_app.game.replay import ReplaySession
 from settlrl_app.storage.auth import Auth
 from settlrl_app.storage.db import User
 from settlrl_app.storage.store import GameStore
+
+if TYPE_CHECKING:
+    from settlrl_app.game.matchmaking import Matchmaker
 
 # The per-request seat-ownership proof: a comma-separated list of seat tokens.
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
@@ -64,6 +67,7 @@ class Deps:
     spawn_driver: Callable[[GameHandle], None]
     turn_timeout: float
     store: GameStore | None = None
+    matchmaker: Matchmaker | None = None
 
     def handle_of(self, game_id: str) -> GameHandle:
         handle = self.registry.get(game_id)

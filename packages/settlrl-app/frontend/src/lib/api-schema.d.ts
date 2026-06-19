@@ -423,6 +423,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/matchmake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Matchmake
+         * @description Find an Elo-matched game (bots filling the rest of the table), or return
+         *     the caller's place in line to re-poll. A signed-in caller is matched on
+         *     their rating; anonymous callers match at a fresh player's rating.
+         */
+        post: operations["matchmake_api_matchmake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1130,6 +1152,45 @@ export interface components {
             created_at: number;
         };
         /**
+         * _MatchFound
+         * @description Matched: the seat claimed for the caller in a freshly created game.
+         */
+        _MatchFound: {
+            /** Id */
+            id: string;
+            /** Seat */
+            seat: number;
+            /** Token */
+            token: string;
+        };
+        /**
+         * _MatchQueued
+         * @description Still finding a game: re-POST with ``ticket`` until matched.
+         */
+        _MatchQueued: {
+            /**
+             * Queued
+             * @default true
+             * @constant
+             */
+            queued: true;
+            /** Ticket */
+            ticket: string;
+            /** Waiting */
+            waiting: number;
+        };
+        /** _MatchRequest */
+        _MatchRequest: {
+            /**
+             * N Players
+             * @default 2
+             * @enum {integer}
+             */
+            n_players: 2 | 4;
+            /** Ticket */
+            ticket?: string | null;
+        };
+        /**
          * _MyGameModel
          * @description A live game the signed-in user owns a seat in.
          */
@@ -1810,6 +1871,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_LobbyGameModel"][];
+                };
+            };
+        };
+    };
+    matchmake_api_matchmake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_MatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_MatchQueued"] | components["schemas"]["_MatchFound"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

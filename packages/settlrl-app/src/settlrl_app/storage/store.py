@@ -355,6 +355,14 @@ class GameStore:
         entries.sort(key=lambda e: (e.n_players, -e.rating))
         return entries
 
+    async def rating_for(self, kind: str, subject_id: str, n_players: int) -> float:
+        """A subject's displayed rating in one bucket, or a fresh player's rating
+        if it has none yet — for Elo matchmaking (humans and bot-fill alike)."""
+        async with self._db.sessionmaker() as session:
+            row = await session.get(Rating, (kind, subject_id, n_players))
+        mu, sigma = (row.mu, row.sigma) if row else (INITIAL_MU, INITIAL_SIGMA)
+        return display_rating(mu, sigma)
+
     async def history(self) -> list[FinishedGame]:
         """Finished games kept as history, newest first."""
         async with self._db.sessionmaker() as session:

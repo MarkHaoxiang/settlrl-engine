@@ -23,6 +23,19 @@
   padding: 8px 4px;
 }
 
+.quickRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 6px 4px;
+}
+
+.quickButtons {
+  display: flex;
+  gap: 8px;
+}
+
 .row {
   display: flex;
   align-items: center;

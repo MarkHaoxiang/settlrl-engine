@@ -1,13 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import Button from "../components/Button";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, type AuthUser } from "../lib/auth";
+import { matchmake, type PlayerCount } from "../lib/game";
 import { useLobby, type LobbyGame } from "../lib/queries";
+import { rememberGame, saveTokens } from "../lib/seats";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyView.module.css";
+
+const POLL_MS = 2000;
 
 const ago = (epoch: number): string => {
   const secs = Math.max(0, Math.round(Date.now() / 1000 - epoch));
@@ -38,13 +42,48 @@ export default function LobbyView() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const navigate = useNavigate();
   const games = useLobby().data ?? [];
+  // The active Quick Match search, if any (its player count + how many wait).
+  const [searching, setSearching] = useState<{ n: PlayerCount; waiting: number } | null>(null);
+  const ticket = useRef<string | undefined>(undefined);
+  const timer = useRef<number | null>(null);
 
   useEffect(() => {
     void currentUser().then(setUser);
   }, []);
+  // Stop polling if the view unmounts mid-search.
+  useEffect(() => () => void (timer.current !== null && window.clearTimeout(timer.current)), []);
 
   // Joining is just a deep link: PlayView claims the first free seat on entry.
   const join = (id: string) => navigate(`/play/${id}`);
+
+  // Re-POST the ticket on an interval until a seat comes back, then drop into it.
+  const poll = async (n: PlayerCount) => {
+    try {
+      const res = await matchmake(n, ticket.current);
+      if ("queued" in res) {
+        ticket.current = res.ticket;
+        setSearching({ n, waiting: res.waiting });
+        timer.current = window.setTimeout(() => void poll(n), POLL_MS);
+      } else {
+        saveTokens(res.id, { [res.seat]: res.token });
+        rememberGame(res.id);
+        navigate(`/play/${res.id}`);
+      }
+    } catch {
+      setSearching(null);
+    }
+  };
+  const startMatch = (n: PlayerCount) => {
+    ticket.current = undefined;
+    setSearching({ n, waiting: 0 });
+    void poll(n);
+  };
+  const cancelMatch = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    ticket.current = undefined;
+    setSearching(null);
+  };
 
   return (
     <div className={s.page}>
@@ -59,6 +98,31 @@ export default function LobbyView() {
       <h1 className={s.title}>Lobby</h1>
 
       <Panel className={s.box}>
+        <span className={ui.sectionLabel}>Quick Match</span>
+        {searching ? (
+          <div className={s.quickRow}>
+            <span className={s.muted}>
+              Finding a {searching.n}-player game… {searching.waiting} waiting
+            </span>
+            <Button onClick={cancelMatch}>Cancel</Button>
+          </div>
+        ) : (
+          <div className={s.quickRow}>
+            <span className={s.muted}>Pair with players near your rating; bots fill the rest.</span>
+            <div className={s.quickButtons}>
+              <Button selected onClick={() => startMatch(2)}>
+                2 players
+              </Button>
+              <Button selected onClick={() => startMatch(4)}>
+                4 players
+              </Button>
+            </div>
+          </div>
+        )}
+      </Panel>
+
+      <Panel className={s.box}>
+        <span className={ui.sectionLabel}>Open games</span>
         {games.length === 0 ? (
           <span className={s.empty}>
             No open games right now. Create one and list it in the lobby for others to join.

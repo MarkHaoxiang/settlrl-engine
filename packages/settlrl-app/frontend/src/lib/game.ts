@@ -205,6 +205,33 @@ export async function setSeat(
   );
 }
 
+// Still finding an Elo match: re-POST with the ticket to keep polling.
+export interface MatchQueued {
+  queued: true;
+  ticket: string;
+  waiting: number;
+}
+
+// Matched: a claimed seat in a freshly created game.
+export interface MatchFound {
+  id: string;
+  seat: number;
+  token: string;
+}
+
+// One Elo Quick Match poll. Pass the prior ticket to keep your place; the result
+// is either a queued position (re-poll) or the seat you were matched into.
+export async function matchmake(
+  nPlayers: PlayerCount,
+  ticket?: string
+): Promise<MatchQueued | MatchFound> {
+  return api<MatchQueued | MatchFound>("/api/matchmake", {
+    method: "POST",
+    body: JSON.stringify({ n_players: nPlayers, ticket }),
+    headers: authHeader(),
+  });
+}
+
 // A bot's catalog entry (one per registered bot service): a display title, a
 // short description, and the player counts it supports.
 export interface BotSpec {

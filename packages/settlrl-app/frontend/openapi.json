@@ -922,6 +922,58 @@
     }
    }
   },
+  "/api/matchmake": {
+   "post": {
+    "summary": "Matchmake",
+    "description": "Find an Elo-matched game (bots filling the rest of the table), or return\nthe caller's place in line to re-poll. A signed-in caller is matched on\ntheir rating; anonymous callers match at a fresh player's rating.",
+    "operationId": "matchmake_api_matchmake_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_MatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/_MatchQueued"
+          },
+          {
+           "$ref": "#/components/schemas/_MatchFound"
+          }
+         ],
+         "title": "Response Matchmake Api Matchmake Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
+   }
+  },
   "/api/auth/login": {
    "post": {
     "tags": [
@@ -2836,6 +2888,81 @@
     ],
     "title": "_LobbyGameModel",
     "description": "One joinable game in the lobby."
+   },
+   "_MatchFound": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "seat": {
+      "type": "integer",
+      "title": "Seat"
+     },
+     "token": {
+      "type": "string",
+      "title": "Token"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "seat",
+     "token"
+    ],
+    "title": "_MatchFound",
+    "description": "Matched: the seat claimed for the caller in a freshly created game."
+   },
+   "_MatchQueued": {
+    "properties": {
+     "queued": {
+      "type": "boolean",
+      "const": true,
+      "title": "Queued",
+      "default": true
+     },
+     "ticket": {
+      "type": "string",
+      "title": "Ticket"
+     },
+     "waiting": {
+      "type": "integer",
+      "title": "Waiting"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ticket",
+     "waiting"
+    ],
+    "title": "_MatchQueued",
+    "description": "Still finding a game: re-POST with ``ticket`` until matched."
+   },
+   "_MatchRequest": {
+    "properties": {
+     "n_players": {
+      "type": "integer",
+      "enum": [
+       2,
+       4
+      ],
+      "title": "N Players",
+      "default": 2
+     },
+     "ticket": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ticket"
+     }
+    },
+    "type": "object",
+    "title": "_MatchRequest"
    },
    "_MyGameModel": {
     "properties": {

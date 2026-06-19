@@ -24,6 +24,7 @@ from settlrl_app.bots.providers import ProviderRegistry
 from settlrl_app.config import Settings
 from settlrl_app.game.driver import start_game_driver
 from settlrl_app.game.games import GameHandle, GameRegistry, restore_games
+from settlrl_app.game.matchmaking import Matchmaker
 from settlrl_app.storage.auth import Auth
 from settlrl_app.storage.db import Database
 from settlrl_app.storage.store import GameStore
@@ -101,6 +102,13 @@ def create_app(
         drivers.add(task)
         task.add_done_callback(drivers.discard)
 
+    matchmaker = Matchmaker(
+        registry,
+        bots,
+        spawn_driver,
+        store=store,
+        turn_timeout=turn_timeout,
+    )
     deps = Deps(
         registry=registry,
         bots=bots,
@@ -109,6 +117,7 @@ def create_app(
         spawn_driver=spawn_driver,
         turn_timeout=turn_timeout,
         store=store,
+        matchmaker=matchmaker,
     )
 
     @asynccontextmanager
