@@ -19,6 +19,7 @@ import { cx } from "../lib/cx";
 import ui from "../styles/ui.module.css";
 import BoardView from "./BoardView";
 import Button from "./Button";
+import Modal from "./Modal";
 import { BotIcon, HumanIcon, MapIcon } from "./icons";
 import s from "./NewGameDialog.module.css";
 
@@ -116,17 +117,17 @@ export default function NewGameDialog({
     );
   }, [nPlayers, bots]);
 
-  // Escape backs out of a sub-page (bot / map) first, then closes the dialog.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (pickerSeat !== null) setPickerSeat(null);
-      else if (mapOpen) setMapOpen(false);
-      else onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, pickerSeat, mapOpen]);
+  // Escape backs out of a sub-page (bot / map) first, then closes the dialog
+  // (Radix closes it for us once there's no sub-page to back out of).
+  const handleEscape = (e: KeyboardEvent) => {
+    if (pickerSeat !== null) {
+      e.preventDefault();
+      setPickerSeat(null);
+    } else if (mapOpen) {
+      e.preventDefault();
+      setMapOpen(false);
+    }
+  };
 
   // Keep a live board preview for the chosen seed / count / number placement.
   useEffect(() => {
@@ -187,8 +188,8 @@ export default function NewGameDialog({
   if (pickerSeat !== null) {
     const seat = seats[pickerSeat];
     return (
-      <Overlay onClose={onClose}>
-        <div className={s.dialog} onClick={(e) => e.stopPropagation()}>
+      <Modal onClose={onClose} title={`${playerName(pickerSeat)}'s bot`} onEscapeKeyDown={handleEscape}>
+        <div className={s.dialog}>
           <div className={s.pickerHeader}>
             <button className={s.backButton} onClick={() => setPickerSeat(null)}>
               ‹ Back
@@ -217,7 +218,7 @@ export default function NewGameDialog({
             </Button>
           </div>
         </div>
-      </Overlay>
+      </Modal>
     );
   }
 
@@ -225,8 +226,8 @@ export default function NewGameDialog({
   // the dice or typed in), and the live preview.
   if (mapOpen) {
     return (
-      <Overlay onClose={onClose}>
-        <div className={s.dialog} onClick={(e) => e.stopPropagation()}>
+      <Modal onClose={onClose} title="Map" onEscapeKeyDown={handleEscape}>
+        <div className={s.dialog}>
           <div className={s.pickerHeader}>
             <button className={s.backButton} onClick={() => setMapOpen(false)}>
               ‹ Back
@@ -263,13 +264,13 @@ export default function NewGameDialog({
             </Button>
           </div>
         </div>
-      </Overlay>
+      </Modal>
     );
   }
 
   return (
-    <Overlay onClose={onClose}>
-      <div className={s.dialog} onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} title="New game" onEscapeKeyDown={handleEscape}>
+      <div className={s.dialog}>
         <span className={s.heading}>New game</span>
         <Toggle label="Players" options={[2, 4] as const} value={nPlayers} onChange={setNPlayers} />
         {seats.slice(0, nPlayers).map((seat, i) => {
@@ -343,15 +344,6 @@ export default function NewGameDialog({
           </Button>
         </div>
       </div>
-    </Overlay>
-  );
-}
-
-// The shared modal backdrop; clicking it closes the dialog.
-function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className={s.overlay} onClick={onClose}>
-      {children}
-    </div>
+    </Modal>
   );
 }
