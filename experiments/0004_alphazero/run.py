@@ -37,6 +37,11 @@ class AlphaZeroConfig(Config):
     teacher: bool = False
     teacher_iters: int = 0
     teacher_sims: int = 32
+    # the setup phase is played by a probabilistic-expectimax (GNN path); the net
+    # trains/acts only on the main loop. `setup_temperature` = opponent suboptimality.
+    setup_depth: int = 3
+    setup_temperature: float = 2.0
+    setup_beam: int = 8
     # loop
     n_iterations: int = 20
     selfplay_samples: int = 2048
@@ -150,6 +155,8 @@ VARIANTS: dict[str, dict[str, object]] = {
         "teacher": True,
         "teacher_iters": 1,
         "teacher_sims": 4,
+        "setup_depth": 2,
+        "setup_beam": 4,
         "selfplay_samples": 8,
         "selfplay_batch": 4,
         "train_steps": 2,
@@ -234,6 +241,9 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             teacher_value=heuristic_value if cfg.teacher else None,
             teacher_iters=cfg.teacher_iters,
             teacher_sims=cfg.teacher_sims,
+            setup_depth=cfg.setup_depth,
+            setup_temperature=cfg.setup_temperature,
+            setup_beam=cfg.setup_beam,
             buffer_max=cfg.buffer_max,
             batch_size=cfg.batch_size,
             train_steps=cfg.train_steps,
@@ -257,7 +267,9 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     winrate = azgnn.arena(
         model, n_games=cfg.arena_games, num_simulations=cfg.arena_sims,
         batch_size=cfg.arena_batch,
-        max_num_considered_actions=cfg.max_num_considered_actions, seed=cfg.seed + 99,
+        max_num_considered_actions=cfg.max_num_considered_actions,
+        setup_depth=cfg.setup_depth, setup_temperature=cfg.setup_temperature,
+        setup_beam=cfg.setup_beam, seed=cfg.seed + 99,
     )  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
     run.finish(

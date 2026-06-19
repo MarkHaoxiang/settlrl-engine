@@ -32,6 +32,7 @@ from settlrl_agents import POLICIES, BeliefSpec, evaluate
 from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
 from settlrl_agents.policy import BeliefPolicy, PolicyPrior
 from settlrl_agents.search import PolicyWeights, make_search, make_search_weights
+from settlrl_agents.search.setup import make_setup_search
 from settlrl_agents.value import Value, ValueFunction, heuristic_value
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import EDGE_V, N_VERTICES, TILE_V, BoardLayout
@@ -138,10 +139,20 @@ _SETUP_ROWS = (int(ActionType.SETUP_SETTLEMENT) == _ROW_TYPE) | (
 )
 
 
-def setup_policy() -> BeliefPolicy:
-    """The fixed policy for the setup phase: one-step lookahead over the heuristic,
-    which scores opening placements by production (a strong, cheap opener)."""
-    return make_search(heuristic_value, num_simulations=0)
+def setup_policy(
+    n_players: int = 2,
+    *,
+    setup_depth: int = 3,
+    setup_temperature: float = 2.0,
+    setup_beam: int = 8,
+) -> BeliefPolicy:
+    """The fixed policy for the setup phase: a probabilistic expectimax over the
+    opening placements (:func:`search.setup.make_setup_search`) -- the opponents
+    Boltzmann-rational at ``setup_temperature``."""
+    return make_setup_search(
+        heuristic_value, n_players=n_players, depth=setup_depth,
+        temperature=setup_temperature, beam=setup_beam,
+    )  # fmt: skip
 
 
 def make_net_agent(
@@ -150,6 +161,10 @@ def make_net_agent(
     *,
     num_simulations: int,
     max_num_considered_actions: int,
+    n_players: int = 2,
+    setup_depth: int = 3,
+    setup_temperature: float = 2.0,
+    setup_beam: int = 8,
 ) -> BeliefPolicy:
     """The net at play: the setup phase from :func:`setup_policy`, the main loop
     from the net's search. The phase is read off the mask (setup ⇔ the only legal
@@ -159,7 +174,10 @@ def make_net_agent(
         num_simulations=num_simulations,
         max_num_considered_actions=max_num_considered_actions,
     )  # fmt: skip
-    setup = setup_policy()
+    setup = setup_policy(
+        n_players, setup_depth=setup_depth,
+        setup_temperature=setup_temperature, setup_beam=setup_beam,
+    )  # fmt: skip
 
     def policy(
         key: Array, layout: BoardLayout, view: Any, player: IntScalar, mask: Array
@@ -344,6 +362,9 @@ def arena(
     num_simulations: int = 64,
     max_num_considered_actions: int = 16,
     batch_size: int = 16,
+    setup_depth: int = 3,
+    setup_temperature: float = 2.0,
+    setup_beam: int = 8,
     seed: int = 0,
 ) -> float:
     """The GNN's win rate vs. a ``POLICIES`` ``opponent``, seat-swapped at 2p
@@ -353,6 +374,8 @@ def arena(
         value_fn, prior_fn,
         num_simulations=num_simulations,
         max_num_considered_actions=max_num_considered_actions,
+        setup_depth=setup_depth, setup_temperature=setup_temperature,
+        setup_beam=setup_beam,
     )  # fmt: skip
     net_spec = BeliefSpec(lambda: net, frozenset((2,)))
     base = POLICIES[opponent]
@@ -431,6 +454,9 @@ def learn(
     teacher_value: ValueFunction | None = None,
     teacher_iters: int = 0,
     teacher_sims: int = 32,
+    setup_depth: int = 3,
+    setup_temperature: float = 2.0,
+    setup_beam: int = 8,
     buffer_max: int = 50_000,
     batch_size: int = 256,
     train_steps: int = 200,
@@ -532,7 +558,11 @@ def learn(
         if teacher_value is not None
         else None
     )
-    setup = setup_policy()  # the setup phase is played (unrecorded) by a fixed policy
+    # the setup phase is played (unrecorded) by a fixed probabilistic-expectimax
+    setup = setup_policy(
+        2, setup_depth=setup_depth, setup_temperature=setup_temperature,
+        setup_beam=setup_beam,
+    )  # fmt: skip
 
     ev: GNNSamples | None = None
     for i in range(int(state.iteration), n_iterations):
@@ -621,14 +651,16 @@ def learn(
                 model, opponent="lookahead", n_games=arena_games,
                 num_simulations=arena_sims, batch_size=arena_batch,
                 max_num_considered_actions=max_num_considered_actions,
-                seed=seed + 20_000 + i,
+                setup_depth=setup_depth, setup_temperature=setup_temperature,
+                setup_beam=setup_beam, seed=seed + 20_000 + i,
             )  # fmt: skip
             metrics["arena_winrate"] = winrate
             metrics["arena_vs_random"] = arena(
                 model, opponent="random", n_games=arena_games,
                 num_simulations=arena_sims, batch_size=arena_batch,
                 max_num_considered_actions=max_num_considered_actions,
-                seed=seed + 30_000 + i,
+                setup_depth=setup_depth, setup_temperature=setup_temperature,
+                setup_beam=setup_beam, seed=seed + 30_000 + i,
             )  # fmt: skip
             metrics["t_arena"] = time.perf_counter() - t2
             best = max(best, winrate)
