@@ -286,9 +286,13 @@ fallback, game completion).
 per simulation, so `size` never exceeds `num_simulations + 1`.
 
 **Strength: at parity with the mctx search.** 2p seat-swapped, n≥220 on GPU:
-ISMCTS(32) **0.552 ± 0.032 vs lookahead** (mctx: 0.550) and **0.548 ± 0.034
-head-to-head vs mcts(32)** — statistically identical strength, up from the
-first cut's 0.184 (the root-prior bug). The roll-EV leaf is kept (mctx parity).
+ISMCTS(32) **0.552 ± 0.032 vs lookahead** (mctx: 0.550). Head-to-head vs
+mcts holds dead-even across budgets — **0.517 / 0.506 / 0.494 at 16 / 32 / 64
+sims** (±0.03, n≈260–310), all within ~1σ of 0.50 — so parity is not a
+single-budget fluke. Up from the first cut's 0.184 (the root-prior bug). Win
+rate vs lookahead does *not* climb with sims (the stationary-heuristic-leaf
+ceiling mctx also hits), so the head-to-head is the clean parity metric. The
+roll-EV leaf is kept (mctx parity).
 Per-simulation legal filtering (the essential ISMCTS property) replaces mctx's
 no-op edges; availability-count UCB (Cowling) is not used — the mixed-value
 completion subsumes the unvisited-action estimate.
