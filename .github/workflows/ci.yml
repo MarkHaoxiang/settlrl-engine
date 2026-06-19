@@ -48,3 +48,21 @@ jobs:
       # frameworks' smokes in parallel (each is JIT-compile-bound and otherwise
       # serial); the wall clock is then the slowest one, not their sum.
       - run: WANDB_MODE=disabled uv run pytest experiments/tests -n auto
+
+  # The SPA build (tsc + vite). Catches type errors and broken/uncommitted
+  # imports the Python suite can't see (the server runs no frontend code).
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/settlrl-app/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/settlrl-app/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
