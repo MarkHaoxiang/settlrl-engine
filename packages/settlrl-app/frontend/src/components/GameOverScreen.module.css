@@ -1,19 +1,14 @@
 .backdrop {
+  composes: overlay from "../styles/ui.module.css";
   position: absolute;
-  inset: 0;
   background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 30;
 }
 
 .dialog {
-  composes: panel from "../styles/ui.module.css";
+  composes: panel col from "../styles/ui.module.css";
   padding: 22px 26px;
   min-width: 460px;
-  display: flex;
-  flex-direction: column;
   gap: 16px;
 }
 
@@ -25,14 +20,12 @@
 }
 
 .standings {
-  display: flex;
-  flex-direction: column;
+  composes: col from "../styles/ui.module.css";
   gap: 6px;
 }
 
 .row {
-  display: flex;
-  align-items: center;
+  composes: row from "../styles/ui.module.css";
   gap: 10px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
@@ -82,7 +75,6 @@
 }
 
 .actions {
-  display: flex;
-  justify-content: center;
+  composes: center from "../styles/ui.module.css";
   gap: 10px;
 }
