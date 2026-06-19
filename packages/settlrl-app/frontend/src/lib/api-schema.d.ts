@@ -38,6 +38,7 @@ export interface paths {
          * Post Create
          * @description Create a game, or return the caller's place in line when the server
          *     is at its concurrency cap (a ``202`` they re-POST with ``ticket``).
+         *     Listing a game publicly (``listed``) requires a signed-in account.
          */
         post: operations["post_create_api_games_post"];
         delete?: never;

@@ -13,6 +13,7 @@ import {
   type PlayerCount,
   type SeatConfig,
 } from "../lib/game";
+import { authToken } from "../lib/auth";
 import { type Board, playerName } from "../lib/boardData";
 import { cx } from "../lib/cx";
 import ui from "../styles/ui.module.css";
@@ -81,7 +82,9 @@ export default function NewGameDialog({
   // join through the invite link).
   const [seating, setSeating] = useState<"hotseat" | "online">("hotseat");
   // List the game in the public lobby so anyone can take its open human seats.
+  // Listing requires a signed-in account (the server enforces it too).
   const [listed, setListed] = useState(false);
+  const signedIn = !!authToken();
   // One controller per possible seat; only the first nPlayers are used.
   const [seats, setSeats] = useState<SeatConfig[]>([
     { kind: HUMAN },
@@ -174,8 +177,9 @@ export default function NewGameDialog({
       numberPlacement,
       seats: seats.slice(0, nPlayers),
       claim: online ? "first" : "all",
-      // Only an online game leaves human seats open for others to take.
-      listed: online && listed,
+      // Only an online game leaves human seats open for others to take, and
+      // only a signed-in creator may list it publicly.
+      listed: online && signedIn && listed,
     });
   };
 
@@ -306,13 +310,20 @@ export default function NewGameDialog({
           <div className={s.row}>
             <span className={s.label}>Lobby</span>
             <button
-              className={cx(s.seatButton, listed && ui.selected)}
-              onClick={() => setListed((v) => !v)}
-              title="Show this game in the public lobby so anyone can join its open seats"
+              className={cx(s.seatButton, listed && signedIn && ui.selected)}
+              onClick={() => signedIn && setListed((v) => !v)}
+              disabled={!signedIn}
+              title={
+                signedIn
+                  ? "Show this game in the public lobby so anyone can join its open seats"
+                  : "Sign in to list a game in the public lobby"
+              }
             >
-              {listed ? "Listed" : "List in lobby"}
+              {listed && signedIn ? "Listed" : "List in lobby"}
             </button>
-            <span className={s.hint}>{listed ? "anyone can join" : "invite link only"}</span>
+            <span className={s.hint}>
+              {!signedIn ? "sign in to list" : listed ? "anyone can join" : "invite link only"}
+            </span>
           </div>
         )}
         <div className={s.row}>

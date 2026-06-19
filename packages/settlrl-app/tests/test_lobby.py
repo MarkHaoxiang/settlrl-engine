@@ -1,7 +1,8 @@
 """The public lobby and owner seat control.
 
 Listed games surface in ``GET /api/lobby`` with their open seats; a participant
-can retarget an unclaimed seat (open <-> bot) before play begins.
+can retarget an unclaimed seat (open <-> bot) before play begins. Listing a game
+publicly requires a signed-in account.
 """
 
 from collections.abc import Iterator
@@ -19,10 +20,26 @@ def client() -> Iterator[TestClient]:
         yield c
 
 
-def _create(client: TestClient, **body: object) -> dict[str, object]:
+def _token(client: TestClient, email: str = "owner@example.com") -> str:
+    client.post("/api/auth/register", json={"email": email, "password": "password1"})
+    return str(
+        client.post(
+            "/api/auth/login", data={"username": email, "password": "password1"}
+        ).json()["access_token"]
+    )
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _create(
+    client: TestClient, headers: dict[str, str] | None = None, **body: object
+) -> dict[str, object]:
     return client.post(  # type: ignore[no-any-return]
         "/api/games",
         json={"seed": 0, "n_players": 2, "seats": ["human", "human"], **body},
+        headers=headers,
     ).json()
 
 
@@ -31,11 +48,25 @@ def _hdr(doc: dict[str, object]) -> dict[str, str]:
     return {"X-Seat-Tokens": ",".join(tokens.values())}
 
 
+def test_listing_a_game_requires_signing_in(client: TestClient) -> None:
+    # Anonymous: an invite-only game is fine, but listing it is rejected.
+    assert (
+        client.post("/api/games", json={"seed": 0, "n_players": 2}).status_code == 200
+    )
+    assert (
+        client.post(
+            "/api/games", json={"seed": 0, "n_players": 2, "listed": True}
+        ).status_code
+        == 401
+    )
+
+
 def test_only_listed_games_with_open_seats_appear(client: TestClient) -> None:
+    auth = _bearer(_token(client))
     _create(client, claim="first")  # unlisted (default)
     assert client.get("/api/lobby").json() == []
 
-    doc = _create(client, seed=1, claim="first", listed=True)
+    doc = _create(client, headers=auth, seed=1, claim="first", listed=True)
     lobby = client.get("/api/lobby").json()
     assert [g["id"] for g in lobby] == [doc["id"]]
     assert lobby[0]["open_seats"] == 1 and lobby[0]["n_players"] == 2
@@ -43,7 +74,7 @@ def test_only_listed_games_with_open_seats_appear(client: TestClient) -> None:
 
 
 def test_seat_control_turns_an_open_seat_into_a_bot(client: TestClient) -> None:
-    doc = _create(client, claim="first", listed=True)
+    doc = _create(client, headers=_bearer(_token(client)), claim="first", listed=True)
     game = doc["id"]
     hdr = _hdr(doc)
 
@@ -57,7 +88,7 @@ def test_seat_control_turns_an_open_seat_into_a_bot(client: TestClient) -> None:
 
 
 def test_seat_control_guards(client: TestClient) -> None:
-    doc = _create(client, claim="first", listed=True)
+    doc = _create(client, headers=_bearer(_token(client)), claim="first", listed=True)
     game = doc["id"]
     hdr = _hdr(doc)
 

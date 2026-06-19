@@ -187,7 +187,9 @@ newest first (`GET /api/lobby`). Each row shows its player count, seats filled,
 and map; **Join** opens the game and claims a free seat. The owner controls each
 seat from the New Game dialog (human or a specific bot) and can still retarget an
 unclaimed seat in the waiting room (`POST /api/games/{id}/seats`), so an
-under-filled game is never stuck.
+under-filled game is never stuck. Listing a game publicly requires a signed-in
+account (`POST /api/games` with `listed` returns `401` otherwise); anonymous play
+stays invite-link only.
 
 **Quick Match** pairs you into a game with one click (`POST /api/matchmake`,
 2- or 4-player). Waiters are pooled per player count and matched on their
@@ -280,7 +282,7 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "listed"?, "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "listed"?, "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees. `listed` requires a signed-in account (`401` otherwise) |
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
 | `POST /api/games/{id}/seats` | Retarget an unclaimed seat before play `{ "seat", "kind": "human" \| <bot kind> }` (any player in the game) — `403` for outsiders, `409` if the seat is taken or the game has started |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |

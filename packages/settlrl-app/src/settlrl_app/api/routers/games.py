@@ -144,7 +144,12 @@ def build(deps: Deps) -> APIRouter:
         req: _CreateRequest, response: Response, user: CurrentUser = None
     ) -> _CreatedModel | _QueuedModel:
         """Create a game, or return the caller's place in line when the server
-        is at its concurrency cap (a ``202`` they re-POST with ``ticket``)."""
+        is at its concurrency cap (a ``202`` they re-POST with ``ticket``).
+        Listing a game publicly (``listed``) requires a signed-in account."""
+        if req.listed and user is None:
+            raise HTTPException(
+                status_code=401, detail="sign in to list a game in the lobby"
+            )
         catalog = bots.catalog()
         _validate_seat_kinds(req.seats, req.n_players, catalog)
         try:
