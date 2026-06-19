@@ -259,37 +259,46 @@ engine so legality at every node comes from `flat_available_for` on the live
 determinized state — true per-simulation legality, no no-op edges. The
 `while_loop` stops at the first unexpanded edge / terminal, so a simulation pays
 only its own depth of engine steps (not a fixed `max_depth` — the same dead-tail
-fix as the mctx replay). Selection is PUCT with the prior renormalized over the
-legal set + FPU; the two-sided paranoid value frame; root prior = the one-step
-value sweep, interior priors = greedy's tier table (a constant, no per-expansion
-sweep). Leaf/prior from any `ValueFunction` (the learned AZ net later). Contracts
-in `tests/test_ismcts.py` (legal move across setup/mid/late + 4p, legal-supported
+fix as the mctx replay).
+
+**Selection is mctx's Gumbel-MuZero, ported onto the true-legality tree** (the
+port that reached parity, commit 928f370): the root runs Gumbel + Sequential
+Halving (the considered-visits schedule replicated in numpy, so the search has
+*no* `mctx` dependency), interior nodes use the deterministic visit-count
+selection that tracks `softmax(prior + completed_Q)`, and Q-values are completed
+by the mixed-value transform (unvisited → prior-weighted blend of the node value
+and its children's Q) scaled by `(maxvisit_init + max_visits)·mix_scale` — all
+per node, over *this* determinization's legal set. Two-sided paranoid value
+frame: every node stores the searcher-frame value, `completed_Q` flips sign at
+opponent nodes. Root prior = the raw one-step value sweep (`values / prior_scale`,
+matching mctx — **not** a tanh/tier compression: that flattened the policy to
+near-uniform and was the entire first-cut strength gap), interior priors =
+greedy's tier table. The returned `action_weights` = `softmax(prior +
+completed_Q)` is the AZ policy target; the move is its masked argmax (as
+`make_search` argmaxes mctx's weights). `make_ismcts` / `make_ismcts_weights`
+mirror `make_search`'s seams. Leaf/prior from any `ValueFunction`. Contracts in
+`tests/test_ismcts.py` (legal move across setup/mid/late + 4p, legal-supported
 visit distribution, reproducibility, concentration above uniform, no-legal
 fallback, game completion).
 
-**Speed (the rewrite's point):** the host-driven first cut was ~1.5–5 s/move (a
-device sync per node); jitting the whole tree took it to **~5–6 ms/move on CPU
-(B=1), flat in sims** — on par with / faster than mctx's ~9 ms, ~500× over the
-host version. Capacity is exact: ≤1 node added per simulation, so `size` never
-exceeds `num_simulations + 1` and the new-node index never overflows.
+**Speed:** ~5–6 ms/move on CPU (B=1), flat in sims — **faster than mctx (5.8 vs
+7.4 ms)**, ~500× over the host-driven first cut. Capacity is exact: ≤1 node added
+per simulation, so `size` never exceeds `num_simulations + 1`.
 
-**Strength: correct but sim-inefficient — below parity, do not adopt yet.**
-2p seat-swapped (n=40, CPU): ISMCTS(32) wins **0.325 ± 0.074 vs lookahead** and
-**0.400 ± 0.077 vs mcts(32)** — i.e. it plays *below* even the 1-ply sweep at an
-equal sim budget, where the tuned mctx search beats lookahead ~0.57. It is not a
-bug: strength climbs monotonically with budget (vs lookahead: 0.21 at 32 sims →
-0.37 at 128, n=19), so the search works, it is just far less *simulation-
-efficient* than mctx's Gumbel sequential-halving (which guarantees coverage of
-the root candidates at low budgets; PUCT + argmax-visits over ~19 actions at 32
-sims is noisy). The roll-EV leaf was strength-neutral here (rolls rarely the
-leaf). The gap to parity is **root action selection**, not dice handling or the
-frame — closing it means porting Gumbel-style root selection (sequential halving)
-and/or an argmax-Q root move plus a `c_puct`/`max_depth`/FPU sweep (the same
-tuning arc the mctx search needed). Availability-count UCB (Cowling) is also
-dropped for now in favour of plain PUCT visit counts; per-simulation legal
-filtering (the essential ISMCTS property) is kept. The search isn't wired into
-`POLICIES`/`make_search` seams or `vmap`ped into self-play yet. **Keep
-`make_search` until ISMCTS clears a real strength gate.**
+**Strength: at parity with the mctx search.** 2p seat-swapped, n≥220 on GPU:
+ISMCTS(32) **0.552 ± 0.032 vs lookahead** (mctx: 0.550) and **0.548 ± 0.034
+head-to-head vs mcts(32)** — statistically identical strength, up from the
+first cut's 0.184 (the root-prior bug). The roll-EV leaf is kept (mctx parity).
+Per-simulation legal filtering (the essential ISMCTS property) replaces mctx's
+no-op edges; availability-count UCB (Cowling) is not used — the mixed-value
+completion subsumes the unvisited-action estimate.
+
+**Open: retiring `make_search`.** ISMCTS clears the parity gate, so the mctx
+search/dependency can go. The remaining port is the seams `make_search` exposes
+that `make_ismcts` does not yet: a learned `prior` (root + interior logits, for
+the AZ net), the `num_simulations=0` lookahead special case, `propose_rate` trade
+offers, and `num_trees` averaging — wire those, repoint `POLICIES`/settlrl-learn,
+then drop `mctx` from `pyproject`.
 
 ## planner/
 
