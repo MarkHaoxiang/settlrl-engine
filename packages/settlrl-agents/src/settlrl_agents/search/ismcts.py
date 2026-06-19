@@ -1,45 +1,42 @@
-"""True Single-Observer ISMCTS over the engine, as one jitted on-device program.
+"""The true Single-Observer ISMCTS tree — the core search :func:`make_search`
+drives (its public wrapper, lookahead/trade/`num_trees` logic, lives in
+``search/__init__.py``).
 
-The mctx search (``search/__init__.py``) integrates the belief by re-sampling a
-world per simulation, but its *statistics* live on mctx's fixed dense action
-axis with a root-only legality mask -- an action illegal under a given
-simulation's world is still a selectable edge that no-ops. That is the half of
-ISMCTS mctx cannot express (Cowling, Powley & Whitehouse 2012; the Canopy
-reference builds a custom tree for exactly this reason).
+mctx integrates the belief by re-sampling a world per simulation, but its
+*statistics* live on a fixed dense action axis with a root-only legality mask --
+an action illegal under a given simulation's world is still a selectable edge
+that no-ops. That is the half of ISMCTS mctx cannot express (Cowling, Powley &
+Whitehouse 2012; the Canopy reference builds a custom tree for exactly this
+reason). This is that custom tree: one XLA program over a **fixed-capacity
+arena** (node/edge arrays sized to ``num_simulations + 1`` nodes), so the whole
+search stays on device and ``vmap``s over lanes. Each simulation determinizes
+once (``sample_world``) and descends *forward* through a ``while_loop``, stepping
+the engine so the legal set at every node comes from ``flat_available_for`` on
+the live determinized state -- true per-simulation legality, no no-op edges. The
+``while_loop`` stops at the first unexpanded edge / terminal, so a simulation
+pays only its own depth of engine steps.
 
-This is that custom tree, built to run like mctx does -- a single jitted XLA
-program over a **fixed-capacity arena** (pre-allocated node/edge arrays sized to
-``num_simulations + 1`` nodes), so the whole search stays on device with no
-host round-trips and ``vmap``s over lanes. Each simulation determinizes once
-(``sample_world``) and descends *forward*, stepping the engine so the legal set
-at every node comes from ``flat_available_for`` on the live determinized state --
-selection therefore only ever considers actions legal in *this* world (true
-per-simulation legality, no no-op edges). The descent is a ``while_loop`` that
-stops at the first unexpanded edge / terminal, so each simulation pays only its
-own depth of engine steps, not a fixed ``max_depth``.
-
-**Selection is mctx's Gumbel-MuZero, on the true-legality tree** (the port that
-took it to parity with the mctx search): the root runs Gumbel + Sequential
-Halving (sample ``max_num_considered_actions`` by Gumbel + prior, give the
-budget to the survivors by a static visit schedule), interior nodes use the
+**Selection is mctx's Gumbel-MuZero, on the true-legality tree:** the root runs
+Gumbel + Sequential Halving (the considered-visits schedule replicated in numpy,
+so this module carries *no* mctx dependency), interior nodes use the
 deterministic visit-count selection that tracks ``softmax(prior + completed_Q)``,
 and Q-values are completed by the mixed-value transform (unvisited actions take a
 prior-weighted blend of the node value and its children's Q) scaled by
 ``(maxvisit_init + max_visits) * mix_scale`` -- all per node, over *this*
-determinization's legal set. The value frame is the same two-sided *paranoid*
-reduction the mctx search uses (searcher vs the table, exact zero-sum at 2p):
-every node stores the searcher-frame value, and ``completed_Q`` flips its sign at
-opponent nodes so each mover's improved policy maximizes its own side. The root
-prior is the one-step value sweep (lookahead); interior priors are greedy's tier
-table (a constant). Leaf/prior value come from any :class:`ValueFunction`. The
-returned ``action_weights`` -- ``softmax(prior + completed_Q)`` at the root -- is
-the AlphaZero policy target, identical in form to mctx's; the move is its
-masked argmax (as :func:`search.make_search` argmaxes mctx's weights).
+determinization's legal set. The value frame is the two-sided *paranoid*
+reduction (searcher vs the table, exact zero-sum at 2p): every node stores the
+searcher-frame value, and ``completed_Q`` flips its sign at opponent nodes so
+each mover's improved policy maximizes its own side.
+
+The caller supplies the **root prior logits** (the value sweep, a learned prior,
+or trade-scored proposals -- assembled in ``make_search``) and, optionally, a
+``prior`` for the *interior* expansion logits (else greedy's tier table). The
+returned ``action_weights`` -- ``softmax(root_logits + completed_Q)`` over the
+legal set -- is the AlphaZero policy target; the move is its masked argmax.
 """
 
 from __future__ import annotations
 
-import functools
 import math
 from collections.abc import Callable
 from typing import NamedTuple, cast
@@ -57,30 +54,27 @@ from settlrl_engine.mechanics.common import agent_selection_single
 from settlrl_engine.mechanics.dice import distribute_resources
 from settlrl_engine.mechanics.flat import flat_available_for
 
-from settlrl_agents.internal.rows import ROW_PARAMS, ROW_TYPE
-from settlrl_agents.policy import BeliefPolicy, FlatAction, FlatMask
+from settlrl_agents.internal.rows import ROW_TYPE
+from settlrl_agents.policy import PolicyPrior
 from settlrl_agents.sample import sample_world
 from settlrl_agents.value import Value, ValueFunction
 
-from . import (
-    _NO_PROPOSE,
-    _ROLL_P,
-    _ROLLS,
-    _TIER_LOGITS,
-    PolicyWeights,
-    _terminal,
-    _winner,
-)
+from ._common import _ROLL_P, _ROLLS, _TIER_LOGITS, _terminal, _Weights, _winner
 
 _ROLL_T = jnp.int32(ActionType.ROLL_DICE)
-
-__all__ = ["ismcts_move", "ismcts_weights", "make_ismcts", "make_ismcts_weights"]
 
 # mctx's qtransform_completed_by_mix_value defaults: the completed Q-values are
 # scaled by (_MAXVISIT_INIT + max_visits) * _MIX_SCALE before being added to the
 # prior logits (rescale_values=False -- absolute, not min-max normalized).
 _MIX_SCALE = 0.1
 _MAXVISIT_INIT = 50.0
+
+Tree = Callable[
+    [KeyScalar, BoardLayout, BeliefView, IntScalar, "_Mask", "_Mask"], _Weights
+]
+"""One ISMCTS tree: ``(key, layout, view, player, mask, root_logits)`` ->
+``action_weights``. ``mask`` is the searcher's legal set, ``root_logits`` the
+root prior over it (assembled by the caller)."""
 
 _Mask = Float[Array, f"flat={N_FLAT}"]
 _NodeI = Int[Array, "node"]
@@ -95,7 +89,7 @@ class _Arena(NamedTuple):
     """The fixed-capacity tree: ``node`` rows index up to ``num_simulations + 1``
     nodes, ``act`` columns the flat action space. ``children`` is the child node
     id per edge (-1 = unexpanded); ``prior`` the raw prior logits per node (the
-    value sweep at the root, the tier table at interior nodes); ``raw`` the
+    caller's root logits at the root, the interior prior at the rest); ``raw`` the
     searcher-frame leaf value at the node (mctx's ``raw_values``, for the
     mixed-value Q completion); ``size`` the nodes in use."""
 
@@ -217,18 +211,19 @@ def _root_select(
     return jnp.argmax(jnp.where(legal > 0, score, -jnp.inf)).astype(jnp.int32)
 
 
-@functools.lru_cache(maxsize=8)
-def _tree_fn(
+def make_tree(
     value: ValueFunction,
-    value_scale: float,
-    prior_scale: float,
+    prior: PolicyPrior | None,
+    *,
     num_simulations: int,
     max_depth: int,
     max_considered: int,
-) -> Callable[[KeyScalar, BoardLayout, BeliefView, IntScalar], _Mask]:
-    """A jitted SO-ISMCTS returning the root ``action_weights`` -- the AlphaZero
-    policy target ``softmax(prior + completed_Q)`` over the legal actions.
-    Compiled once per ``(value, ...)`` and ``vmap``-able over lanes."""
+    value_scale: float,
+) -> Tree:
+    """Build one SO-ISMCTS tree. ``prior`` (when given) is the *interior* node
+    prior — a learned policy head; otherwise interior nodes use the tier table.
+    The root prior is supplied per call (``root_logits``). The returned function
+    is pure (the caller ``jit``/``vmap``s it)."""
     n_nodes = num_simulations + 1
     table = jnp.asarray(_considered_table(max_considered, num_simulations))
 
@@ -248,15 +243,14 @@ def _tree_fn(
         nxt, _ = apply_action(layout, state, atype, aparams, avail)
         return nxt
 
-    def root_logits(
-        layout: BoardLayout, state: BoardState, player: IntScalar, legal: _Mask
+    def interior_logits(
+        layout: BoardLayout, state: BoardState, player: IntScalar
     ) -> _Mask:
-        """The one-step value sweep as prior logits (the lookahead prior)."""
-        succ, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
-            layout, state, ROW_TYPE, ROW_PARAMS, legal > 0
-        )
-        vals = jax.vmap(value, in_axes=(None, 0, None))(layout, succ, player)
-        return vals / prior_scale + _NO_PROPOSE
+        """The prior over a freshly expanded node's actions: a learned policy
+        head if one was supplied, else the constant tier table."""
+        if prior is None:
+            return _TIER_LOGITS
+        return prior(layout, state, player)
 
     def roll_ev(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
         """E over the 11 dice rolls of the post-payout value of a pre-roll
@@ -270,29 +264,33 @@ def _tree_fn(
         )(_ROLLS)
         return _ROLL_P @ vals
 
-    @jax.jit
     def tree(
-        key: KeyScalar, layout: BoardLayout, view: BeliefView, player: IntScalar
-    ) -> _Mask:
+        key: KeyScalar,
+        layout: BoardLayout,
+        view: BeliefView,
+        player: IntScalar,
+        mask: _Mask,
+        root_logits: _Mask,
+    ) -> _Weights:
         player = player.astype(jnp.int32)
         key, k_gumbel = jax.random.split(key)
         keys = jax.random.split(key, num_simulations + 1)
-        root_state = sample_world(keys[0], view, player)
-        # The searcher's own move: its legal set is invariant to the hidden state,
-        # so this one determinization fixes the root candidate set for halving.
-        r_legal, r_mover, _term, r_leaf = facts(layout, root_state, player)
-        logits = root_logits(layout, root_state, player, r_legal)
+        # Root mover is the searcher and its legal set is invariant to the hidden
+        # state (its own move), so `mask` fixes the candidate set for halving; one
+        # determinization gives the searcher-frame root value for the Q mix.
+        r_legal = mask.astype(jnp.float32)
+        _, _, _, r_leaf = facts(layout, sample_world(keys[0], view, player), player)
         gumbel = jax.random.gumbel(k_gumbel, (N_FLAT,))
         num_considered = jnp.minimum(
             max_considered, (r_legal > 0).sum().astype(jnp.int32)
         )
         arena = _Arena(
-            mover=jnp.zeros((n_nodes,), jnp.int32).at[0].set(r_mover),
+            mover=jnp.zeros((n_nodes,), jnp.int32).at[0].set(player),
             visits=jnp.zeros((n_nodes,), jnp.float32),
             children=-jnp.ones((n_nodes, N_FLAT), jnp.int32),
             n=jnp.zeros((n_nodes, N_FLAT), jnp.float32),
             w=jnp.zeros((n_nodes, N_FLAT), jnp.float32),
-            prior=jnp.zeros((n_nodes, N_FLAT), jnp.float32).at[0].set(logits),
+            prior=jnp.zeros((n_nodes, N_FLAT), jnp.float32).at[0].set(root_logits),
             raw=jnp.zeros((n_nodes,), jnp.float32).at[0].set(r_leaf),
             size=jnp.int32(1),
         )
@@ -363,7 +361,10 @@ def _tree_fn(
             d = jax.lax.while_loop(cond, body, d0)
 
             # Expansion: attach the new leaf (guarded -- a sim that only revisited
-            # the existing tree to max_depth grows nothing).
+            # the existing tree to max_depth grows nothing). The interior prior is
+            # evaluated on the leaf state (a learned head, or the constant tier
+            # table); it costs a forward whether or not the sim grew, as mctx's
+            # recurrent_fn does.
             grew = d.exp_parent >= 0
             new_id = arena.size  # always <= n_nodes - 1 (<=1 node added per sim)
             safe_parent = jnp.maximum(d.exp_parent, 0)
@@ -372,7 +373,11 @@ def _tree_fn(
                     jnp.where(grew, d.exp_mover, arena.mover[new_id])
                 ),
                 prior=arena.prior.at[new_id].set(
-                    jnp.where(grew, _TIER_LOGITS, arena.prior[new_id])
+                    jnp.where(
+                        grew,
+                        interior_logits(layout, d.state, player),
+                        arena.prior[new_id],
+                    )
                 ),
                 raw=arena.raw.at[new_id].set(
                     jnp.where(grew, d.leaf, arena.raw[new_id])
@@ -395,120 +400,8 @@ def _tree_fn(
             return cast(_Arena, jax.lax.fori_loop(0, max_depth, backup, arena))
 
         arena = cast(_Arena, jax.lax.fori_loop(0, num_simulations, simulate, arena))
-        # action_weights = softmax(prior + completed_Q) over the legal set.
+        # action_weights = softmax(root_logits + completed_Q) over the legal set.
         cq, logits_l = _completed_q(arena, jnp.int32(0), r_legal, player)
         return jax.nn.softmax(logits_l + cq)
 
     return tree
-
-
-def make_ismcts_weights(
-    value: ValueFunction,
-    *,
-    num_simulations: int = 32,
-    max_depth: int = 12,
-    max_num_considered_actions: int = 16,
-    value_scale: float = 20.0,
-    prior_scale: float = 1.0,
-) -> PolicyWeights:
-    """The SO-ISMCTS improved policy as on-device weights (the AlphaZero policy
-    target; symmetric with :func:`search.make_search_weights`). Renormalized over
-    the passed ``mask`` -- all-zero when nothing is legal."""
-    tree = _tree_fn(
-        value,  # type: ignore[arg-type]  # ValueFunction is not Hashable for lru_cache
-        value_scale, prior_scale, num_simulations, max_depth,
-        max_num_considered_actions,
-    )  # fmt: skip
-
-    def weights(
-        key: KeyScalar,
-        layout: BoardLayout,
-        view: BeliefView,
-        player: IntScalar,
-        mask: FlatMask,
-    ) -> _Mask:
-        w = jnp.where(mask, tree(key, layout, view, jnp.int32(player)), 0.0)
-        return w / jnp.maximum(w.sum(), 1e-9)
-
-    return weights
-
-
-def make_ismcts(
-    value: ValueFunction,
-    *,
-    num_simulations: int = 32,
-    max_depth: int = 12,
-    max_num_considered_actions: int = 16,
-    value_scale: float = 20.0,
-    prior_scale: float = 1.0,
-) -> BeliefPolicy:
-    """SO-ISMCTS as a :class:`BeliefPolicy`: the masked argmax of the improved
-    policy (symmetric with :func:`search.make_search`)."""
-    weights = make_ismcts_weights(
-        value,
-        num_simulations=num_simulations,
-        max_depth=max_depth,
-        max_num_considered_actions=max_num_considered_actions,
-        value_scale=value_scale,
-        prior_scale=prior_scale,
-    )
-
-    def policy(
-        key: KeyScalar,
-        layout: BoardLayout,
-        view: BeliefView,
-        player: IntScalar,
-        mask: FlatMask,
-    ) -> FlatAction:
-        noise = jax.random.uniform(key, (N_FLAT,)) * 1e-4
-        w = weights(key, layout, view, player, mask)
-        return jnp.argmax(jnp.where(mask, w + noise, -jnp.inf))
-
-    return policy
-
-
-def ismcts_weights(
-    key: KeyScalar,
-    layout: BoardLayout,
-    view: BeliefView,
-    player: IntScalar,
-    mask: FlatMask,
-    *,
-    value: ValueFunction,
-    num_simulations: int = 32,
-    max_depth: int = 12,
-    max_num_considered_actions: int = 16,
-    value_scale: float = 20.0,
-    prior_scale: float = 1.0,
-) -> np.ndarray:
-    """Host-side improved policy (the AZ policy target / move distribution)."""
-    w = make_ismcts_weights(
-        value, num_simulations=num_simulations, max_depth=max_depth,
-        max_num_considered_actions=max_num_considered_actions,
-        value_scale=value_scale, prior_scale=prior_scale,
-    )(key, layout, view, jnp.int32(player), jnp.asarray(mask))  # fmt: skip
-    return np.asarray(w, dtype=np.float64)
-
-
-def ismcts_move(
-    key: KeyScalar,
-    layout: BoardLayout,
-    view: BeliefView,
-    player: IntScalar,
-    mask: FlatMask,
-    *,
-    value: ValueFunction,
-    num_simulations: int = 32,
-    max_depth: int = 12,
-    max_num_considered_actions: int = 16,
-    value_scale: float = 20.0,
-    prior_scale: float = 1.0,
-) -> int:
-    """The masked argmax of the improved policy (the SO-ISMCTS decision)."""
-    w = ismcts_weights(
-        key, layout, view, player, mask, value=value,
-        num_simulations=num_simulations, max_depth=max_depth,
-        max_num_considered_actions=max_num_considered_actions,
-        value_scale=value_scale, prior_scale=prior_scale,
-    )  # fmt: skip
-    return int(np.argmax(np.where(np.asarray(mask) > 0, w, -np.inf)))

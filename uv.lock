@@ -1514,20 +1514,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mctx"
-version = "0.0.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "chex" },
-    { name = "jax" },
-    { name = "jaxlib" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/99/20/83393e91aa3020ed761d69480c48ffdbd2c07674556099023af568f11011/mctx-0.0.6.tar.gz", hash = "sha256:115ee45d7dc3ed5e5833b231c3ac07196bceb66673ed59039c3622ea6678a093", size = 37142, upload-time = "2025-09-02T09:59:14.913Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/97/8f972707bdc3d950d048668294b41295e077d27b9c0e9345ccee4e5613e1/mctx-0.0.6-py3-none-any.whl", hash = "sha256:4b3bef10c1b51a0b62b95b60003e40177f4d1501f0168a4c1c85012c2a75dedf", size = 45471, upload-time = "2025-09-02T09:59:13.427Z" },
-]
-
-[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2877,7 +2863,6 @@ source = { editable = "packages/settlrl-agents" }
 dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
-    { name = "mctx" },
     { name = "settlrl-engine" },
 ]
 
@@ -2892,7 +2877,6 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], marker = "extra == 'service'", specifier = ">=0.115.0" },
     { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
-    { name = "mctx", specifier = ">=0.0.6" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
     { name = "settlrl-game", marker = "extra == 'service'", editable = "packages/settlrl-game" },
 ]

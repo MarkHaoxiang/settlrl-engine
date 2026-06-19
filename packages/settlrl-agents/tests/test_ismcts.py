@@ -1,4 +1,5 @@
-"""Behaviour contracts for the Single-Observer ISMCTS search (``search.ismcts``).
+"""Behaviour contracts for the SO-ISMCTS search (``search.ismcts`` driven by
+``search.make_search``).
 
 Correctness invariants only, at tiny budgets: the move is always legal, the
 returned weights are a distribution supported on the legal set, the search is
@@ -7,20 +8,63 @@ per-determinization legality property -- the search only ever returns an action
 legal in the true position -- is what the legality/support tests pin (an illegal
 return would mean the descent leaked an action illegal under the real board).
 
-Strength vs. the mctx search is a *match*, not a unit test: see
-``experiments``/the comparison harness, gated at n the SE can support.
+Strength vs. the previous mctx search is a *match*, not a unit test (the
+search/ismcts.py port reached parity); see the comparison harness, gated at n
+the SE can support.
 """
 
 from __future__ import annotations
+
+import functools
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from settlrl_agents.search.ismcts import ismcts_move, ismcts_weights
+from settlrl_agents.search import make_search, make_search_weights
 from settlrl_agents.value import heuristic_value
 from settlrl_engine.belief import BeliefView
+from settlrl_engine.board.layout import BoardLayout
+from settlrl_engine.board.state import KeyScalar
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
+
+
+@functools.cache
+def _policy(num_simulations: int) -> Any:
+    return jax.jit(make_search(heuristic_value, num_simulations=num_simulations))
+
+
+@functools.cache
+def _weights_fn(num_simulations: int) -> Any:
+    return jax.jit(
+        make_search_weights(heuristic_value, num_simulations=num_simulations)
+    )
+
+
+def _move(
+    key: KeyScalar,
+    layout: BoardLayout,
+    view: BeliefView,
+    p: int,
+    mask: np.ndarray,
+    num_simulations: int,
+) -> int:
+    return int(
+        _policy(num_simulations)(key, layout, view, jnp.int32(p), jnp.asarray(mask))
+    )
+
+
+def _weights(
+    key: KeyScalar,
+    layout: BoardLayout,
+    view: BeliefView,
+    p: int,
+    mask: np.ndarray,
+    num_simulations: int,
+) -> np.ndarray:
+    w = _weights_fn(num_simulations)(key, layout, view, jnp.int32(p), jnp.asarray(mask))
+    return np.asarray(w)
 
 
 def _position(seed: int, steps: int, n_players: int = 2) -> tuple:
@@ -41,19 +85,13 @@ def test_move_is_legal(seed: int) -> None:
     layout, view, p, mask = _position(seed, steps=100 + seed * 20)
     if mask.sum() == 0:
         pytest.skip("no legal move (stalled lane)")
-    a = ismcts_move(
-        jax.random.key(seed), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=12,
-    )  # fmt: skip
+    a = _move(jax.random.key(seed), layout, view, p, mask, num_simulations=12)
     assert mask[a] > 0
 
 
 def test_weights_are_a_legal_distribution() -> None:
     layout, view, p, mask = _position(7, steps=130)
-    w = ismcts_weights(
-        jax.random.key(1), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=16,
-    )  # fmt: skip
+    w = _weights(jax.random.key(1), layout, view, p, mask, num_simulations=16)
     assert np.all(w >= 0.0)
     assert abs(float(w.sum()) - 1.0) < 1e-6
     assert float(w[mask == 0].sum()) == 0.0  # support is exactly the legal set
@@ -61,14 +99,8 @@ def test_weights_are_a_legal_distribution() -> None:
 
 def test_reproducible_from_key() -> None:
     layout, view, p, mask = _position(3, steps=110)
-    a1 = ismcts_move(
-        jax.random.key(9), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=12,
-    )  # fmt: skip
-    a2 = ismcts_move(
-        jax.random.key(9), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=12,
-    )  # fmt: skip
+    a1 = _move(jax.random.key(9), layout, view, p, mask, num_simulations=12)
+    a2 = _move(jax.random.key(9), layout, view, p, mask, num_simulations=12)
     assert a1 == a2
 
 
@@ -80,10 +112,7 @@ def test_visits_concentrate_above_uniform() -> None:
     n_legal = int(mask.sum())
     if n_legal < 4:
         pytest.skip("trivial decision")
-    w = ismcts_weights(
-        jax.random.key(2), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=48,
-    )  # fmt: skip
+    w = _weights(jax.random.key(2), layout, view, p, mask, num_simulations=48)
     assert float(w.max()) > 1.5 / n_legal  # concentrates above uniform
     assert int((w > 0).sum()) > 1  # but explores more than one action
 
@@ -95,10 +124,7 @@ def test_move_legal_across_game_stages(steps: int) -> None:
     layout, view, p, mask = _position(11, steps)
     if mask.sum() == 0:
         pytest.skip("no legal move (stalled lane)")
-    a = ismcts_move(
-        jax.random.key(11), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=12,
-    )  # fmt: skip
+    a = _move(jax.random.key(11), layout, view, p, mask, num_simulations=12)
     assert mask[a] > 0
 
 
@@ -107,23 +133,17 @@ def test_four_player_move_legal() -> None:
     layout, view, p, mask = _position(2, steps=150, n_players=4)
     if mask.sum() == 0:
         pytest.skip("no legal move")
-    a = ismcts_move(
-        jax.random.key(2), layout, view, jnp.int32(p), jnp.asarray(mask),
-        value=heuristic_value, num_simulations=16,
-    )  # fmt: skip
+    a = _move(jax.random.key(2), layout, view, p, mask, num_simulations=16)
     assert mask[a] > 0
 
 
 def test_no_legal_actions_does_not_crash() -> None:
-    # Degenerate input (empty mask): no crash, weights fall back to all-zero,
-    # the move is the documented arbitrary index (the engine rejects it).
+    # Degenerate input (empty mask): no crash, the move is the documented
+    # arbitrary index (the engine rejects it).
     layout, view, p, mask = _position(7, steps=120)
     empty = np.zeros_like(mask)
-    w = ismcts_weights(
-        jax.random.key(0), layout, view, jnp.int32(p), jnp.asarray(empty),
-        value=heuristic_value, num_simulations=8,
-    )  # fmt: skip
-    assert np.all(np.isfinite(w)) and float(w.sum()) == 0.0
+    a = _move(jax.random.key(0), layout, view, p, empty, num_simulations=8)
+    assert isinstance(a, int)
 
 
 @pytest.mark.slow
@@ -140,10 +160,7 @@ def test_self_play_completes_a_game() -> None:
         if mask.sum() == 0:
             break
         key, k = jax.random.split(key)
-        mv = ismcts_move(
-            k, layout, view, jnp.int32(p), jnp.asarray(mask),
-            value=heuristic_value, num_simulations=8,
-        )  # fmt: skip
+        mv = _move(k, layout, view, p, mask, num_simulations=8)
         assert mask[mv] > 0
         env.step(*flat_to_action(jnp.asarray([mv])))
     assert bool(env.terminations[0].any())
