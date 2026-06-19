@@ -161,50 +161,69 @@ hook — render's conftest never checked engine types, so an int32 slipped by).
 
 ## search/
 
-One search algorithm lives in `search/__init__.py` — `make_search`, a
-re-determinizing Gumbel-MuZero (the ISMCTS fix for hidden state). It replaced
-the former `mcts` (frozen-world PIMC) / `smcts` (chance-node) / `ismcts` /
-`lookahead` quartet; the consolidation rationale and the evidence retired with
-each are below. `make_search` argmaxes the improved policy; `make_search_weights`
-returns the distribution itself (the AlphaZero policy target — experiment 0004),
-both sharing one body.
+`make_search` / `make_search_weights` (`search/__init__.py`) are the
+re-determinizing **Single-Observer ISMCTS**: a custom fixed-capacity tree
+(`search/ismcts.py`, `make_tree`) whose every simulation draws a fresh
+`sample_world` determinization and descends *forward* under it, filtering
+legality per simulation. `make_search` argmaxes the improved policy;
+`make_search_weights` returns the distribution (the AlphaZero policy target —
+experiment 0004). It replaced a former `mcts`/`smcts`/`ismcts`/`lookahead`
+quartet (2026-06-17) and then the `mctx` engine that backed it (2026-06-19,
+commit 742b94b — `make_search` *is* the custom tree now); shared frame/prior/
+dice constants live in `search/_common.py`, the trade/lookahead/`num_trees`
+wrapper in `__init__.py`, and the tree in `ismcts.py`.
 
-The embedding is the **action path from the root**, not a state: `mctx` calls
-`recurrent_fn` exactly once per simulation with a fresh rng, so that call draws
-a fresh `sample_world` determinization and replays the stored path under it
-before evaluating the new edge. Every simulation therefore integrates the leaf
-over an independently sampled world instead of one frozen world — re-determini-
-zation once per simulation, expressed through mctx primitives. `num_trees`
-averages independent such trees. It is *not* full ISMCTS: mctx's fixed action
-axis + visit-count selection give no per-simulation legality restriction or
-availability-count UCB (an opponent path-action illegal under the resampled
-world no-ops), and `max_depth` bounds the replayed history. The immediate dice
-roll is valued by its exact 11-roll expectation at the leaf (`ROLL_DICE`
-children); deeper chance is integrated by the resampling.
+**The tree (`ismcts.py`).** One XLA program over a fixed-capacity `_Arena`
+(node/edge arrays sized to `num_simulations + 1`), so the whole search stays on
+device and `vmap`s over lanes. Each simulation determinizes once and descends a
+`while_loop`, stepping the engine so legality at every node comes from
+`flat_available_for` on the live determinized state — **true per-simulation
+legality, no no-op edges** (the half mctx's fixed action axis could not express;
+Cowling 2012 / the Canopy custom tree). The loop stops at the first unexpanded
+edge / terminal, so a simulation pays only its own depth of engine steps.
+Selection is **mctx's Gumbel-MuZero, ported onto this tree**: Gumbel + Sequential
+Halving at the root (considered-visits schedule replicated in numpy — no `mctx`
+dependency), deterministic interior selection tracking `softmax(prior +
+completed_Q)`, and the mixed-value completed-Q transform (unvisited →
+prior-weighted blend of the node value and its children's Q, scaled
+`(maxvisit_init + max_visits)·mix_scale`), all over *this* determinization's
+legal set. The caller (`make_search`) assembles the **root prior logits** — the
+raw one-step value sweep, a learned `prior`, or trade-scored proposals — and
+passes them in; the interior prior is the learned `prior` if given, else greedy's
+tier table. `action_weights = softmax(root_logits + completed_Q)` is the policy
+target; the move is its masked argmax. The immediate dice roll is valued by its
+exact 11-roll expectation at the leaf (`ROLL_DICE` children); deeper chance is
+integrated by the per-simulation resampling. ~5–6 ms/move (B=1 CPU), faster than
+the retired mctx search (5.8 vs 7.4 ms); ≤1 node added per simulation so `size`
+never overflows. `num_trees` averages independent such trees.
 
-**Why this is the only search (the merge).** Three prior agents each tied the
-others at ~parity because the binding constraint is the stationary heuristic
-leaf, not search machinery — so the most *principled* one wins on cleanliness
-at no strength cost:
+**Strength: parity with the retired mctx search, ~0.55–0.58 vs lookahead** (2p
+seat-swapped, n≥220 GPU; head-to-head vs old mctx held 0.49–0.52 across 16/32/64
+sims, ±0.03 — not a single-budget fluke). The decisive bug in the first cut of
+the port was the root prior: a tanh+tier *compression* flattened the policy to
+near-uniform (0.184 vs lookahead); the raw value sweep (`values / prior_scale`,
+±20 spread) restored it (commits 928f370 / 742b94b). Contracts in
+`tests/test_ismcts.py` (legal move across setup/mid/late + 4p, legal-supported
+distribution, reproducibility, concentration above uniform, no-legal fallback,
+game completion).
+
+**Why one search (the merges).** The binding constraint is the stationary
+heuristic leaf, not search machinery, so prior agents tied at ~parity and the
+*principled* one wins on cleanliness — the lever stays the leaf (experiment 0003
+/ settlrl-learn), and win rate vs lookahead does **not** climb with sims:
 - `smcts`'s explicit dice/dev chance nodes were **falsified as a strength
   lever** (56.7% vs lookahead pooled n=319, 49.3% h2h, ~2× wall-clock; dev
   chance node strength-neutral 50.5% n=210; 64→128 sims 53.3%→49.5%). Roll-EV
-  leaves + per-simulation resampling subsume their purpose, so they were
-  dropped, not ported.
-- `mcts` (frozen-world) re-determinizes nothing; re-determinization is its
-  principled superset. Measured re-determinization (the shipped search) is
-  *parity, not a win*, vs frozen-world at 3p (0.352 ± 0.031, n=244, 32 sims;
-  64 worlds `0.307` — more worlds doesn't help), and ~ties at 2p (belief ~exact
-  there). Shipping it is the principled-but-not-stronger choice on record; the
-  lever remains the leaf (experiment 0003 / settlrl-learn). Cost: one
-  `sample_world` (cheap — 0.05 ms; the dynamic resource deal is not the
-  bottleneck) + the **leaf's own depth** of engine steps per simulation. The
-  replay loop is bounded by the path depth, not `max_depth`: at ~32 sims the
-  tree is a few plies, so replaying the fixed `max_depth=12` history spent ~58%
-  of the move on masked-no-op `apply_action`s (a no-op transition still runs).
-  Bounding it is output-identical (the body already guards `i < depth`, and the
-  skipped tail consumes no RNG) and ~1.8× faster (B=1 CPU: 16.4 → 9.2 ms at the
-  mcts default; latency now near-flat in `max_depth`, so the cap is ~free).
+  leaves + per-simulation resampling subsume their purpose — dropped, not ported.
+- `mcts` (frozen-world) re-determinizes nothing; per-simulation determinization
+  is its principled superset (*parity, not a win* at 3p: 0.352 ± 0.031, n=244,
+  32 sims; 64 worlds 0.307 — more worlds doesn't help; ~ties at 2p where the
+  belief is ~exact). Cost: one `sample_world` (~0.05 ms) + the leaf's own depth
+  of engine steps per simulation.
+- the **mctx engine** itself: the re-determinizing Gumbel-MuZero ran on mctx's
+  fixed action axis (root-only legality, illegal path-actions no-op). The custom
+  tree reaches its strength with true per-simulation legality and *faster*, so
+  mctx (and its dependency) were retired.
 
 `num_simulations=0` is the **lookahead** special case: no tree, just the masked
 argmax of the root one-step value sweep over `num_trees` sampled worlds. It is
@@ -229,12 +248,13 @@ Frame and tuning evidence (carried over; the search inherits all of it):
   turn and measured below chance vs 3× lookahead (20%, n=80) — the side frame
   took the same seeds to 32.3% (n=161, chance 25%) and 62.2% vs 2× lookahead at
   3p (n=90).
-- mctx-default deviations, each fixing a measured ply-2 bias: root prior = the
-  one-step value sweep (uniform made Gumbel's candidates a random subset — 6% vs
-  lookahead); interior prior = greedy's tempered tier table (uniform +
-  deterministic interior argmax expanded the lowest-index legal action);
-  `ROLL_DICE` 11-roll expectation; `rescale_values=False` (the min-max rescale
-  amplified any Q ranking to ~8 nats regardless of noise). The month-long
+- Deviations from a naive Gumbel search, each fixing a measured ply-2 bias: root
+  prior = the one-step value sweep (uniform made Gumbel's candidates a random
+  subset — 6% vs lookahead); interior prior = greedy's tempered tier table
+  (uniform + deterministic interior argmax expanded the lowest-index legal
+  action); `ROLL_DICE` 11-roll expectation; the completed-Q transform does **not**
+  min-max rescale (it amplified any Q ranking to ~8 nats regardless of noise).
+  The month-long
   "search subtracts value" bug (34–43% vs lookahead, flat across sims/
   candidates/scale): at ~32 sims trees are ~2 plies and full-depth selection
   flipped ~9% of decisions, 92% losing 1-ply value, concentrated
@@ -244,65 +264,6 @@ Frame and tuning evidence (carried over; the search inherits all of it):
   can't pay through the leaf), considered peaks at 16, prior_scale 5 loses,
   value_scale 12/38 tie-or-lose to 20. Diagnose decision-level, not by ~20-game
   matches (SE ±11%); 4p evals need matched seeds or n ≥ 240.
-
-### `ismcts.py` — true SO-ISMCTS (the half mctx cannot express)
-
-The mctx search is *not* full ISMCTS: its statistics live on mctx's fixed dense
-action axis with a root-only legality mask, so an action illegal under a given
-simulation's world is still a selectable edge that no-ops (the half mctx cannot
-express; Canopy builds a custom tree for it). `ismcts.py` is that custom tree,
-written to run *like* mctx — **one jitted XLA program over a fixed-capacity
-arena** (`_Arena`: node/edge arrays sized to `num_simulations + 1`), so the whole
-search stays on device and `vmap`s over lanes. Each simulation determinizes once
-(`sample_world`) and descends *forward* through a `while_loop`, stepping the
-engine so legality at every node comes from `flat_available_for` on the live
-determinized state — true per-simulation legality, no no-op edges. The
-`while_loop` stops at the first unexpanded edge / terminal, so a simulation pays
-only its own depth of engine steps (not a fixed `max_depth` — the same dead-tail
-fix as the mctx replay).
-
-**Selection is mctx's Gumbel-MuZero, ported onto the true-legality tree** (the
-port that reached parity, commit 928f370): the root runs Gumbel + Sequential
-Halving (the considered-visits schedule replicated in numpy, so the search has
-*no* `mctx` dependency), interior nodes use the deterministic visit-count
-selection that tracks `softmax(prior + completed_Q)`, and Q-values are completed
-by the mixed-value transform (unvisited → prior-weighted blend of the node value
-and its children's Q) scaled by `(maxvisit_init + max_visits)·mix_scale` — all
-per node, over *this* determinization's legal set. Two-sided paranoid value
-frame: every node stores the searcher-frame value, `completed_Q` flips sign at
-opponent nodes. Root prior = the raw one-step value sweep (`values / prior_scale`,
-matching mctx — **not** a tanh/tier compression: that flattened the policy to
-near-uniform and was the entire first-cut strength gap), interior priors =
-greedy's tier table. The returned `action_weights` = `softmax(prior +
-completed_Q)` is the AZ policy target; the move is its masked argmax (as
-`make_search` argmaxes mctx's weights). `make_ismcts` / `make_ismcts_weights`
-mirror `make_search`'s seams. Leaf/prior from any `ValueFunction`. Contracts in
-`tests/test_ismcts.py` (legal move across setup/mid/late + 4p, legal-supported
-visit distribution, reproducibility, concentration above uniform, no-legal
-fallback, game completion).
-
-**Speed:** ~5–6 ms/move on CPU (B=1), flat in sims — **faster than mctx (5.8 vs
-7.4 ms)**, ~500× over the host-driven first cut. Capacity is exact: ≤1 node added
-per simulation, so `size` never exceeds `num_simulations + 1`.
-
-**Strength: at parity with the mctx search.** 2p seat-swapped, n≥220 on GPU:
-ISMCTS(32) **0.552 ± 0.032 vs lookahead** (mctx: 0.550). Head-to-head vs
-mcts holds dead-even across budgets — **0.517 / 0.506 / 0.494 at 16 / 32 / 64
-sims** (±0.03, n≈260–310), all within ~1σ of 0.50 — so parity is not a
-single-budget fluke. Up from the first cut's 0.184 (the root-prior bug). Win
-rate vs lookahead does *not* climb with sims (the stationary-heuristic-leaf
-ceiling mctx also hits), so the head-to-head is the clean parity metric. The
-roll-EV leaf is kept (mctx parity).
-Per-simulation legal filtering (the essential ISMCTS property) replaces mctx's
-no-op edges; availability-count UCB (Cowling) is not used — the mixed-value
-completion subsumes the unvisited-action estimate.
-
-**Open: retiring `make_search`.** ISMCTS clears the parity gate, so the mctx
-search/dependency can go. The remaining port is the seams `make_search` exposes
-that `make_ismcts` does not yet: a learned `prior` (root + interior logits, for
-the AZ net), the `num_simulations=0` lookahead special case, `propose_rate` trade
-offers, and `num_trees` averaging — wire those, repoint `POLICIES`/settlrl-learn,
-then drop `mctx` from `pyproject`.
 
 ## planner/
 

@@ -98,8 +98,9 @@ A Rust AlphaZero framework whose flagship example is a 1v1 Catan agent
 ours). It is the point past our leaf-is-the-ceiling gate: learned policy + WDL
 value head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
 root (800 sims), explicit chance nodes for dice and dev draws, and Single-Observer
-ISMCTS that filters per-simulation legality in a custom tree — the part our
-mctx-based search can't express. It is 1v1 only, so it never meets the 3-4p
+ISMCTS that filters per-simulation legality in a custom tree (our search now does
+this too — `settlrl_agents.search.ismcts`, which retired the mctx engine). It is
+1v1 only, so it never meets the 3-4p
 paranoid-frame / opponent-model problem, and it *disables determinization during
 self-play* (the net learns the Bayesian-average-over-hands policy; determinize
 only at play time).

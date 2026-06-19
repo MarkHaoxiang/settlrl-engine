@@ -69,13 +69,6 @@ _ROLL_T = jnp.int32(ActionType.ROLL_DICE)
 _MIX_SCALE = 0.1
 _MAXVISIT_INIT = 50.0
 
-Tree = Callable[
-    [KeyScalar, BoardLayout, BeliefView, IntScalar, "_Mask", "_Mask"], _Weights
-]
-"""One ISMCTS tree: ``(key, layout, view, player, mask, root_logits)`` ->
-``action_weights``. ``mask`` is the searcher's legal set, ``root_logits`` the
-root prior over it (assembled by the caller)."""
-
 _Mask = Float[Array, f"flat={N_FLAT}"]
 _NodeI = Int[Array, "node"]
 _NodeF = Float[Array, "node"]
@@ -83,6 +76,11 @@ _EdgeI = Int[Array, "node act"]
 _Table = Int[Array, "m sims"]
 _EdgeF = Float[Array, "node act"]
 _PathI = Int[Array, "depth"]
+
+Tree = Callable[[KeyScalar, BoardLayout, BeliefView, IntScalar, _Mask, _Mask], _Weights]
+"""One ISMCTS tree: ``(key, layout, view, player, mask, root_logits)`` ->
+``action_weights``. ``mask`` is the searcher's legal set, ``root_logits`` the
+root prior over it (assembled by the caller)."""
 
 
 class _Arena(NamedTuple):
