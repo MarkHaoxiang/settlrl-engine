@@ -26,6 +26,7 @@ from settlrl_agents.search import (
     make_search,
     search_policy,
 )
+from settlrl_agents.search.ismcts import make_ismcts
 from settlrl_agents.value import (
     TUNED_WEIGHTS,
     Value,
@@ -60,6 +61,14 @@ POLICIES: dict[str, ObservationSpec | BeliefSpec | StatefulSpec] = {
             "num_simulations": 8,
             "max_num_considered_actions": 8,
         },
+    ),
+    # True SO-ISMCTS (per-simulation legality), mctx's Gumbel-MuZero selection on
+    # a custom tree. At parity with "mcts" and faster (see search/ismcts.py).
+    "ismcts": BeliefSpec(
+        make_ismcts,
+        _ANY_COUNT,
+        defaults={"value": heuristic_value},
+        for_testing={"num_simulations": 8, "max_num_considered_actions": 8},
     ),
 }
 """Every shipped agent by name (the family at its ``defaults``)."""
