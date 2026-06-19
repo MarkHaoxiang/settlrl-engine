@@ -14,27 +14,13 @@ import {
   type SeatConfig,
 } from "../lib/game";
 import { type Board, playerName } from "../lib/boardData";
-import { buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
+import ui from "../styles/ui.module.css";
 import BoardView from "./BoardView";
+import Button from "./Button";
 import { BotIcon, HumanIcon, MapIcon } from "./icons";
+import s from "./NewGameDialog.module.css";
 
-const labelStyle: React.CSSProperties = {
-  fontSize: 11,
-  opacity: 0.6,
-  textTransform: "uppercase",
-  letterSpacing: 1,
-  width: 80,
-};
-
-// Seat Human/Bot buttons: an icon beside the label.
-const seatButtonStyle: React.CSSProperties = {
-  ...buttonStyle,
-  padding: "5px 12px",
-  fontSize: 12,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-};
+const cls = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
 const botLabel = (kind: string, spec?: BotSpec) =>
   spec?.title ?? (kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1));
@@ -57,13 +43,13 @@ function Toggle<T extends string | number>({
   optionTitle?: (o: T) => string;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={labelStyle}>{label}</span>
+    <div className={s.row}>
+      <span className={s.label}>{label}</span>
       {options.map((o) => (
         <button
           key={o}
           title={optionTitle?.(o)}
-          style={{ ...buttonStyle, padding: "5px 12px", fontSize: 12, ...(value === o ? selectedStyle : {}) }}
+          className={cls(s.toggleButton, value === o && ui.selected)}
           onClick={() => onChange(o)}
         >
           {o}
@@ -179,7 +165,7 @@ export default function NewGameDialog({
 
   const start = () => {
     onStart({
-      seed,  // the seed the preview showed
+      seed, // the seed the preview showed
       nPlayers,
       numberPlacement,
       seats: seats.slice(0, nPlayers),
@@ -187,27 +173,17 @@ export default function NewGameDialog({
     });
   };
 
-  const panelInner: React.CSSProperties = {
-    ...panelStyle,
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
-    padding: "20px 24px",
-    minWidth: 320,
-    maxWidth: 380,
-  };
-
   // The bot-picker page for one seat.
   if (pickerSeat !== null) {
     const seat = seats[pickerSeat];
     return (
       <Overlay onClose={onClose}>
-        <div style={panelInner} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button style={{ ...buttonStyle, padding: "4px 10px", fontSize: 12 }} onClick={() => setPickerSeat(null)}>
+        <div className={s.dialog} onClick={(e) => e.stopPropagation()}>
+          <div className={s.pickerHeader}>
+            <button className={s.backButton} onClick={() => setPickerSeat(null)}>
               ‹ Back
             </button>
-            <span style={{ fontSize: 16, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span className={s.pickerTitle}>
               <BotIcon size={17} /> {playerName(pickerSeat)}'s bot
             </span>
           </div>
@@ -218,27 +194,17 @@ export default function NewGameDialog({
               <button
                 key={name}
                 onClick={() => setSeat(pickerSeat, { kind: name })}
-                style={{
-                  ...buttonStyle,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: 3,
-                  padding: "8px 12px",
-                  textAlign: "left",
-                  width: "100%",
-                  ...(selected ? selectedStyle : {}),
-                }}
+                className={cls(s.botOption, selected && ui.selected)}
               >
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{botLabel(name, spec)}</span>
-                <span style={{ fontSize: 11, opacity: 0.75, fontWeight: 400 }}>{spec.description}</span>
+                <span className={s.botName}>{botLabel(name, spec)}</span>
+                <span className={s.botDesc}>{spec.description}</span>
               </button>
             );
           })}
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button style={{ ...buttonStyle, ...selectedStyle }} onClick={() => setPickerSeat(null)}>
+          <div className={s.footerEnd}>
+            <Button selected onClick={() => setPickerSeat(null)}>
               Done
-            </button>
+            </Button>
           </div>
         </div>
       </Overlay>
@@ -250,12 +216,12 @@ export default function NewGameDialog({
   if (mapOpen) {
     return (
       <Overlay onClose={onClose}>
-        <div style={panelInner} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button style={{ ...buttonStyle, padding: "4px 10px", fontSize: 12 }} onClick={() => setMapOpen(false)}>
+        <div className={s.dialog} onClick={(e) => e.stopPropagation()}>
+          <div className={s.pickerHeader}>
+            <button className={s.backButton} onClick={() => setMapOpen(false)}>
               ‹ Back
             </button>
-            <span style={{ fontSize: 16, fontWeight: 700 }}>Map</span>
+            <span className={s.pickerTitle}>Map</span>
           </div>
           <Toggle
             label="Numbers"
@@ -264,13 +230,9 @@ export default function NewGameDialog({
             onChange={pickPlacement}
             optionTitle={(o) => PLACEMENT_HELP[o]}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={labelStyle}>Seed</span>
-            <button
-              style={{ ...buttonStyle, padding: "5px 10px", fontSize: 14 }}
-              onClick={reroll}
-              title="Roll a new random map"
-            >
+          <div className={s.row}>
+            <span className={s.label}>Seed</span>
+            <button className={s.diceButton} onClick={reroll} title="Roll a new random map">
               🎲
             </button>
             <input
@@ -281,25 +243,14 @@ export default function NewGameDialog({
                 if (e.target.value !== "" && Number.isFinite(v)) setSeed(Math.max(0, Math.round(v)));
               }}
               title="The map seed — reroll for a new one, or type a specific seed"
-              style={{ ...buttonStyle, cursor: "text", width: 110, padding: "5px 10px", fontSize: 12 }}
+              className={s.seedInput}
             />
           </div>
-          <div
-            style={{
-              position: "relative",
-              width: "100%",
-              height: 240,
-              borderRadius: 8,
-              overflow: "hidden",
-              background: "#0D3B66",
-            }}
-          >
-            {previewBoard && <BoardView board={previewBoard} />}
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button style={{ ...buttonStyle, ...selectedStyle }} onClick={() => setMapOpen(false)}>
+          <div className={s.preview}>{previewBoard && <BoardView board={previewBoard} />}</div>
+          <div className={s.footerEnd}>
+            <Button selected onClick={() => setMapOpen(false)}>
               Done
-            </button>
+            </Button>
           </div>
         </div>
       </Overlay>
@@ -308,23 +259,23 @@ export default function NewGameDialog({
 
   return (
     <Overlay onClose={onClose}>
-      <div style={panelInner} onClick={(e) => e.stopPropagation()}>
-        <span style={{ fontSize: 18, fontWeight: 700 }}>New game</span>
+      <div className={s.dialog} onClick={(e) => e.stopPropagation()}>
+        <span className={s.heading}>New game</span>
         <Toggle label="Players" options={[2, 4] as const} value={nPlayers} onChange={setNPlayers} />
         {seats.slice(0, nPlayers).map((seat, i) => {
           const isHuman = seat.kind === HUMAN;
           return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={labelStyle}>{playerName(i)}</span>
+            <div key={i} className={s.row}>
+              <span className={s.label}>{playerName(i)}</span>
               <button
-                style={{ ...seatButtonStyle, ...(isHuman ? selectedStyle : {}) }}
+                className={cls(s.seatButton, isHuman && ui.selected)}
                 onClick={() => setSeat(i, { kind: HUMAN })}
               >
                 <HumanIcon /> Human
               </button>
               <button
                 title="Choose and configure a bot"
-                style={{ ...seatButtonStyle, ...(isHuman ? {} : selectedStyle) }}
+                className={cls(s.seatButton, !isHuman && ui.selected)}
                 onClick={() => openPicker(i)}
               >
                 <BotIcon /> {isHuman ? "Bot" : botLabel(seat.kind, bots[seat.kind])}
@@ -339,36 +290,27 @@ export default function NewGameDialog({
             value={seating}
             onChange={setSeating}
             trailing={
-              <span style={{ fontSize: 11, opacity: 0.5 }}>
+              <span className={s.hint}>
                 {seating === "online" ? "others join via the invite link" : "all on this screen"}
               </span>
             }
           />
         )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={labelStyle}>Map</span>
+        <div className={s.row}>
+          <span className={s.label}>Map</span>
           <button
-            style={{
-              ...buttonStyle,
-              padding: "5px 12px",
-              fontSize: 12,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
+            className={s.mapButton}
             onClick={() => setMapOpen(true)}
             title="Choose the map: seed and number layout"
           >
-            <MapIcon /> <span style={{ opacity: 0.8 }}>{numberPlacement} · #{seed}</span>
+            <MapIcon /> <span className={s.dim}>{numberPlacement} · #{seed}</span>
           </button>
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button style={buttonStyle} onClick={onClose}>
-            Cancel
-          </button>
-          <button style={{ ...buttonStyle, ...selectedStyle }} onClick={start}>
+        <div className={s.footer}>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button selected onClick={start}>
             Start
-          </button>
+          </Button>
         </div>
       </div>
     </Overlay>
@@ -378,18 +320,7 @@ export default function NewGameDialog({
 // The shared modal backdrop; clicking it closes the dialog.
 function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 20,
-      }}
-      onClick={onClose}
-    >
+    <div className={s.overlay} onClick={onClose}>
       {children}
     </div>
   );
