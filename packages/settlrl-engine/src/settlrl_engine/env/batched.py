@@ -293,6 +293,8 @@ class BatchedSettlrlEnv:
         n_players: players seated per game (2..4, default 4; same for every
             lane). Sizes the per-player axis of the state, observations, and
             ``rewards`` / ``terminations`` / ``truncations``.
+        victory_points_to_win: total VP that ends a game (default 10; same for
+            every lane). A lane terminates when its current player reaches it.
         reward: ``"sparse"`` (+1 to the winner on the terminal step, 0 else) or
             ``"vp_delta"`` (each player's change in total VP this step).
         auto_reset: when True (default), a lane that terminates is replaced with a
@@ -323,6 +325,7 @@ class BatchedSettlrlEnv:
         auto_reset: bool = True,
         number_placement: Literal["random", "spiral"] = "random",
         n_players: int = N_PLAYERS,
+        victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
         track_beliefs: bool = False,
     ) -> None:
         if reward not in ("sparse", "vp_delta"):
@@ -334,11 +337,16 @@ class BatchedSettlrlEnv:
             )
         if not 2 <= n_players <= N_PLAYERS:
             raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
+        if victory_points_to_win < 1:
+            raise ValueError(
+                f"victory_points_to_win must be >= 1, got {victory_points_to_win}"
+            )
         self.batch_size = batch_size
         self.reward_mode = reward
         self.auto_reset = auto_reset
         self.number_placement = number_placement
         self.n_players = n_players
+        self.victory_points_to_win = victory_points_to_win
         self.track_beliefs = track_beliefs
         self.possible_agents = [f"player_{i}" for i in range(n_players)]
         self.agents = list(self.possible_agents)
@@ -400,6 +408,7 @@ class BatchedSettlrlEnv:
             self.auto_reset,
             self.number_placement,
             self.n_players,
+            self.victory_points_to_win,
         )
         self._layout, self._state = out.layout, out.state
         self._reward, self._terminations = out.reward, out.terminations
@@ -520,7 +529,9 @@ class BatchedSettlrlEnv:
             "vertex_type": Box((N_VERTICES,), "uint8", 0, 2),
             "edge_road": Box((N_EDGES,), "uint8", 0, self.n_players),
             "robber": Discrete(N_TILES),
-            "victory_points": Box((self.n_players,), "uint8", 0, VICTORY_POINTS_TO_WIN),
+            "victory_points": Box(
+                (self.n_players,), "uint8", 0, self.victory_points_to_win
+            ),
             "knights_played": Box((self.n_players,), "uint8", 0, 14),
             "hand_size": Box((self.n_players,), "int32", 0, 255),
             "dev_card_count": Box((self.n_players,), "int32", 0, 25),
@@ -630,6 +641,7 @@ class BatchedSettlrlEnv:
             self.auto_reset,
             self.number_placement,
             self.n_players,
+            self.victory_points_to_win,
         )
         return cast(RewardArray, cum_reward)
 
@@ -779,6 +791,7 @@ class _StepOut(NamedTuple):
         "auto_reset",
         "number_placement",
         "n_players",
+        "victory_points_to_win",
     ),
 )
 def _env_step_core(
@@ -795,6 +808,7 @@ def _env_step_core(
     auto_reset: bool,
     number_placement: Literal["random", "spiral"],
     n_players: int,
+    victory_points_to_win: int,
 ) -> _StepOut:
     """One whole ``BatchedSettlrlEnv.step``: gate the chosen action with the
     cached flat legality, apply it, score reward / termination, advance the
@@ -821,11 +835,14 @@ def _env_step_core(
     # gate never fires.
     was_done = jnp.any(
         (state.current_player[:, None] == jnp.arange(n_players))
-        & (vps_before >= VICTORY_POINTS_TO_WIN),
+        & (vps_before >= victory_points_to_win),
         axis=1,
     )  # (B,)
     legal = legal & ~was_done
-    applied, result = _apply_action_v(layout, state, action_type, params, legal)
+    applied, result = jax.vmap(
+        functools.partial(apply_action, victory_points_to_win=victory_points_to_win),
+        in_axes=(0, 0, 0, 0, 0),
+    )(layout, state, action_type, params, legal)
 
     vps_after = _total_vp_v(applied)
     # Rulebook p.5: a player only wins during their own turn, so a lane ends
@@ -834,7 +851,7 @@ def _env_step_core(
     # END_TURN's rotation makes this the turn-start claim). Mirrors
     # ``awards.current_player_won``, which upgrades the result code.
     is_current = applied.current_player[:, None] == jnp.arange(n_players)  # (B, P)
-    done_lane = jnp.any(is_current & (vps_after >= VICTORY_POINTS_TO_WIN), axis=1)
+    done_lane = jnp.any(is_current & (vps_after >= victory_points_to_win), axis=1)
 
     if belief is not None:
         # Diff the pre-reset transition (sound for every lane); auto-reset
@@ -917,6 +934,7 @@ beliefs. Runs inside the rollout's ``lax.scan``, so it must be pure."""
         "auto_reset",
         "number_placement",
         "n_players",
+        "victory_points_to_win",
         "actor",
     ),
 )
@@ -936,6 +954,7 @@ def _rollout_core(
     auto_reset: bool,
     number_placement: Literal["random", "spiral"],
     n_players: int,
+    victory_points_to_win: int,
 ) -> tuple[
     BoardLayout,
     BoardState,
@@ -987,6 +1006,7 @@ def _rollout_core(
             auto_reset,
             number_placement,
             n_players,
+            victory_points_to_win,
         )
         new_extras: _StepExtras = (
             out.reward,

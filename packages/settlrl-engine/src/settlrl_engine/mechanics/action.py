@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_engine.board.state import BoardState
+from settlrl_engine.board.state import VICTORY_POINTS_TO_WIN, BoardState
 from settlrl_engine.mechanics.awards import (
     resolve_step,
     road_build_needed,
@@ -198,6 +198,7 @@ def apply_action(
     action_type: ActionTypeArray,
     params: ActionParams,
     available: Mask,
+    victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
 ) -> tuple[BoardState, ResultCode]:
     """Apply ``action_type`` (single game) and return (new state, ActionResult code).
 
@@ -221,7 +222,7 @@ def apply_action(
             False,
         ),
     )
-    return resolve_step(state, result, lr_needed)
+    return resolve_step(state, result, lr_needed, victory_points_to_win)
 
 
 def action_available(

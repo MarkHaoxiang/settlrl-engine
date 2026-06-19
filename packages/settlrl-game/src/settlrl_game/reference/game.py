@@ -238,6 +238,7 @@ class Game:
     phase: Phase = Phase.SETUP_SETTLEMENT
     current_player: int = 0
     n_players: int = N_PLAYERS  # seated players (2..4); len(players)
+    victory_points_to_win: int = VICTORY_POINTS_TO_WIN  # total VP that ends the game
     setup_index: int = 0  # 0..2*n_players; settlements placed so far in setup
     dice_roll: int = 0  # last roll, 0 if not rolled this turn
     has_rolled: bool = False
@@ -264,7 +265,12 @@ class Game:
     # -- construction ----------------------------------------------------
 
     @staticmethod
-    def new(layout: Layout, robber: int, n_players: int = N_PLAYERS) -> Game:
+    def new(
+        layout: Layout,
+        robber: int,
+        n_players: int = N_PLAYERS,
+        victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
+    ) -> Game:
         """A fresh game in the setup phase (robber starts on the desert tile)."""
         if not 2 <= n_players <= N_PLAYERS:
             raise ValueError(f"n_players must be in [2, {N_PLAYERS}], got {n_players}")
@@ -273,6 +279,7 @@ class Game:
             robber=robber,
             players=[Player() for _ in range(n_players)],
             n_players=n_players,
+            victory_points_to_win=victory_points_to_win,
         )
 
     # -- derived counts --------------------------------------------------
@@ -1088,6 +1095,7 @@ class Game:
 
     def _check_win(self) -> None:
         """End the game if the *current* player is at the win threshold; an
-        opponent at 10+ VP keeps waiting (you only win during your own turn)."""
-        if self.total_vp(self.current_player) >= VICTORY_POINTS_TO_WIN:
+        opponent at the threshold keeps waiting (you only win during your own
+        turn). The threshold is ``victory_points_to_win`` (default 10)."""
+        if self.total_vp(self.current_player) >= self.victory_points_to_win:
             self.phase = Phase.GAME_OVER

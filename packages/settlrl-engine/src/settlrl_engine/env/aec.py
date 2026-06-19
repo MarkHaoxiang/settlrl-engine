@@ -20,6 +20,7 @@ import numpy as np
 from pettingzoo.utils.env import AECEnv
 
 from settlrl_engine.board.resources import N_PLAYERS
+from settlrl_engine.board.state import VICTORY_POINTS_TO_WIN
 from settlrl_engine.env.batched import N_FLAT, BatchedSettlrlEnv, flat_to_action
 
 __all__ = ["SettlrlAECEnv", "env"]
@@ -39,6 +40,7 @@ class SettlrlAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any
         number_placement: ``"random"`` or ``"spiral"`` number-token placement
             (see ``BatchedSettlrlEnv``).
         n_players: players seated (2..4, default 4); sets the agent list.
+        victory_points_to_win: total VP that ends the game (default 10).
         track_beliefs: maintain per-observer card counting (see
             ``BatchedSettlrlEnv``).
     """
@@ -55,6 +57,7 @@ class SettlrlAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any
         render_mode: str | None = None,
         number_placement: Literal["random", "spiral"] = "random",
         n_players: int = N_PLAYERS,
+        victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
         track_beliefs: bool = False,
     ) -> None:
         super().__init__()
@@ -67,6 +70,7 @@ class SettlrlAECEnv(AECEnv):  # type: ignore[misc]  # pettingzoo is untyped (Any
             auto_reset=False,
             number_placement=number_placement,
             n_players=n_players,
+            victory_points_to_win=victory_points_to_win,
             track_beliefs=track_beliefs,
         )
         self.possible_agents = list(self._env.possible_agents)
@@ -186,6 +190,7 @@ def env(
     render_mode: str | None = None,
     number_placement: Literal["random", "spiral"] = "random",
     n_players: int = N_PLAYERS,
+    victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
     track_beliefs: bool = False,
 ) -> SettlrlAECEnv:
     """PettingZoo-style constructor returning a :class:`SettlrlAECEnv`."""
@@ -195,5 +200,6 @@ def env(
         render_mode=render_mode,
         number_placement=number_placement,
         n_players=n_players,
+        victory_points_to_win=victory_points_to_win,
         track_beliefs=track_beliefs,
     )

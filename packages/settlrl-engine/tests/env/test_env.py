@@ -220,6 +220,39 @@ class TestBatchedSettlrlEnv:
             assert float(e.rewards[0, 0]) == 0.0
             assert np.array_equal(np.asarray(e._state.current_player), frozen)
 
+    def _sit_at_vp_offturn(self, e: BatchedSettlrlEnv, vp: int) -> None:
+        """Park player 1 at ``vp`` building VP off-turn, player 0 current in MAIN,
+        and refresh the caches the step gate reads (mirrors the win-timing setup)."""
+        from settlrl_engine.env.batched import _total_vp_b
+
+        e._state = e._state._replace(
+            phase=e._state.phase.at[0].set(int(GamePhase.MAIN)),
+            has_rolled=e._state.has_rolled.at[0].set(1),
+            current_player=e._state.current_player.at[0].set(0),
+            victory_points=e._state.victory_points.at[0, 1].set(vp),
+        )
+        e._avail = flat_available_b(e._layout, e._state)
+        e._vps = _total_vp_b(e._state)
+
+    def test_lower_victory_threshold_ends_at_the_lower_total(self) -> None:
+        # victory_points_to_win=4: a player at 4 VP wins on their own turn.
+        e = BatchedSettlrlEnv(
+            batch_size=1, seed=8, n_players=2, auto_reset=False, victory_points_to_win=4
+        )
+        self._sit_at_vp_offturn(e, 4)
+        end = jnp.asarray([int(ActionType.END_TURN)], jnp.int32)
+        e.step(end, _batch_params([0]))  # player 1's turn begins -> they claim
+        assert bool(e.terminations[0, 0])
+        assert float(e.rewards[0, 1]) == 1.0  # won at 4 VP, not 10
+
+    def test_default_threshold_does_not_win_below_ten(self) -> None:
+        e = BatchedSettlrlEnv(batch_size=1, seed=8, n_players=2, auto_reset=False)
+        assert e.victory_points_to_win == 10
+        self._sit_at_vp_offturn(e, 4)
+        end = jnp.asarray([int(ActionType.END_TURN)], jnp.int32)
+        e.step(end, _batch_params([0]))
+        assert not bool(e.terminations[0, 0])  # 4 < 10: play continues
+
     def test_vp_delta_reward(self) -> None:
         from settlrl_engine.env.batched import _total_vp_b
 

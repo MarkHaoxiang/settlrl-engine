@@ -63,8 +63,8 @@ def end_turn_available(board: Board, params: None = None) -> Mask:
 def end_turn_step(board: Board, params: None = None) -> tuple[BoardState, ResultCode]:
     """End the current player's turn per game. Advances to the next player.
 
-    Resolves any win: a player who reached 10 VP out of turn claims victory at
-    the start of their own turn (see :func:`awards.current_player_won`).
+    Resolves any win: a player who reached the win threshold out of turn claims
+    victory at the start of their own turn (see :func:`awards.current_player_won`).
     """
     available = _end_turn_avail_b(board[0], board[1], None)
     state, result = _end_turn_apply_b(board[0], board[1], None, available)

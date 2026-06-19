@@ -185,23 +185,27 @@ def recompute_awards(
     return recompute_largest_army(recompute_longest_road(state, longest_road_needed))
 
 
-def current_player_won(state: BoardState) -> BoolScalar:
-    """True if the state's current player has reached the win threshold.
+def current_player_won(
+    state: BoardState, victory_points_to_win: int = VICTORY_POINTS_TO_WIN
+) -> BoolScalar:
+    """True if the state's current player has reached the win threshold
+    (``victory_points_to_win`` VP, default 10).
 
     The rulebook (p.5) only lets a player win *during their own turn*: an
-    opponent crowned with Longest Road by a settlement break may sit at 10+ VP
-    while play continues. Checking the *post-step* current player implements
-    this exactly -- END_TURN's rotation makes it the turn-start claim of an
-    off-turn 10.
+    opponent crowned with Longest Road by a settlement break may sit at the
+    threshold while play continues. Checking the *post-step* current player
+    implements this exactly -- END_TURN's rotation makes it the turn-start claim
+    of an off-turn winner.
     """
     cur = state.current_player.astype(jnp.int32)
-    return player_total_vp(state, cur) >= VICTORY_POINTS_TO_WIN
+    return player_total_vp(state, cur) >= victory_points_to_win
 
 
 def resolve_step(
     state: BoardState,
     result: IntScalar,
     longest_road_needed: BoolScalar | bool = True,
+    victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
 ) -> tuple[BoardState, IntScalar]:
     """Stage 2 of an action: recompute awards, then resolve the win.
 
@@ -215,7 +219,7 @@ def resolve_step(
     any road length.
     """
     state = recompute_awards(state, longest_road_needed)
-    won = current_player_won(state)
+    won = current_player_won(state, victory_points_to_win)
     upgraded = jnp.where((result == SUCCESS) & won, GAME_COMPLETE, result)
     return state, upgraded
 
