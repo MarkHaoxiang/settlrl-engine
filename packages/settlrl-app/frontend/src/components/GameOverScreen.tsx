@@ -5,6 +5,7 @@ import type { Board, Player } from "../lib/boardData";
 import { PLAYER_COLORS, playerName } from "../lib/boardData";
 import { downloadRecord } from "../lib/game";
 import Button from "./Button";
+import Modal from "./Modal";
 import s from "./GameOverScreen.module.css";
 
 // Final victory points: building points + the two awards + victory-point dev
@@ -46,7 +47,7 @@ export default function GameOverScreen({
   const roads = (player: number) => board.roads.filter((r) => r.player === player).length;
 
   return (
-    <div className={s.backdrop}>
+    <Modal onClose={onDismiss} title={headline}>
       <div className={s.dialog}>
         <span className={s.headline}>{headline}</span>
         <div className={s.standings}>
@@ -80,6 +81,6 @@ export default function GameOverScreen({
           </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
