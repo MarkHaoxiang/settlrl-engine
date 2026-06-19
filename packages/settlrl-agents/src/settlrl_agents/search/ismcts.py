@@ -83,6 +83,9 @@ Tree = Callable[[KeyScalar, BoardLayout, BeliefView, IntScalar, _Mask, _Mask], _
 root prior over it (assembled by the caller)."""
 
 
+# --- tree state ---
+
+
 class _Arena(NamedTuple):
     """The fixed-capacity tree: ``node`` rows index up to ``num_simulations + 1``
     nodes, ``act`` columns the flat action space. ``children`` is the child node
@@ -118,6 +121,9 @@ class _Descent(NamedTuple):
     exp_mover: IntScalar
 
 
+# --- Sequential Halving: the considered-visits schedule (static, baked) ---
+
+
 def _considered_visits_seq(m: int, n: int) -> tuple[int, ...]:
     """Sequential Halving's visit schedule (Karnin 2013; mctx's
     ``get_sequence_of_considered_visits``): length-``n`` list whose entry ``s`` is
@@ -143,6 +149,9 @@ def _considered_table(m: int, n: int) -> np.ndarray:
     """Row ``k`` is the schedule for ``k`` considered actions (shape
     ``[m + 1, n]``); indexed by ``min(m, num_legal)`` at search time."""
     return np.asarray([_considered_visits_seq(k, n) for k in range(m + 1)], np.int32)
+
+
+# --- Gumbel-MuZero selection + arena mutation, over the determinized legal set ---
 
 
 def _completed_q(
@@ -209,6 +218,43 @@ def _root_select(
     return jnp.argmax(jnp.where(legal > 0, score, -jnp.inf)).astype(jnp.int32)
 
 
+def _expand(arena: _Arena, d: _Descent, leaf_prior: _Mask) -> _Arena:
+    """Attach the descent's new leaf node (``grew`` guards the case where the sim
+    only revisited the existing tree to ``max_depth`` and grew nothing): store its
+    mover, prior logits, and searcher-frame value at the next free slot."""
+    grew = d.exp_parent >= 0
+    new_id = arena.size  # always <= n_nodes - 1 (<=1 node added per sim)
+    safe_parent = jnp.maximum(d.exp_parent, 0)
+    return arena._replace(
+        mover=arena.mover.at[new_id].set(jnp.where(grew, d.exp_mover, arena.mover[new_id])),
+        prior=arena.prior.at[new_id].set(jnp.where(grew, leaf_prior, arena.prior[new_id])),
+        raw=arena.raw.at[new_id].set(jnp.where(grew, d.leaf, arena.raw[new_id])),
+        children=arena.children.at[safe_parent, d.exp_act].set(
+            jnp.where(grew, new_id, arena.children[safe_parent, d.exp_act])
+        ),
+        size=arena.size + grew.astype(jnp.int32),
+    )  # fmt: skip
+
+
+def _backup(arena: _Arena, d: _Descent, max_depth: int) -> _Arena:
+    """Add the descent's leaf value to every edge on its path (the visit count and
+    value sum), so each node's Q averages the leaves reached through it."""
+
+    def body(j: IntScalar, ar: _Arena) -> _Arena:
+        node, act = d.path_node[j], d.path_act[j]
+        use = (j < d.depth).astype(jnp.float32)  # past the real depth -> no-op
+        return ar._replace(
+            visits=ar.visits.at[node].add(use),
+            n=ar.n.at[node, act].add(use),
+            w=ar.w.at[node, act].add(use * d.leaf),
+        )
+
+    return cast(_Arena, jax.lax.fori_loop(0, max_depth, body, arena))
+
+
+# --- the search: one re-determinizing tree, built over the engine ---
+
+
 def make_tree(
     value: ValueFunction,
     prior: PolicyPrior | None,
@@ -224,6 +270,9 @@ def make_tree(
     is pure (the caller ``jit``/``vmap``s it)."""
     n_nodes = num_simulations + 1
     table = jnp.asarray(_considered_table(max_considered, num_simulations))
+
+    # Engine interface (closes over value / prior / value_scale): a determinized
+    # state's legal set + frame, one engine step, the interior prior, the roll EV.
 
     def facts(
         layout: BoardLayout, state: BoardState, player: IntScalar
@@ -294,6 +343,8 @@ def make_tree(
         )
 
         def simulate(s: IntScalar, arena: _Arena) -> _Arena:
+            # One simulation: determinize a world, take the schedule's root action,
+            # descend by interior selection to a leaf, expand it, back the value up.
             state = sample_world(keys[s + 1], view, player)
             legal, _, term, leaf = facts(layout, state, player)
             sim_index = jnp.minimum(
@@ -358,44 +409,12 @@ def make_tree(
 
             d = jax.lax.while_loop(cond, body, d0)
 
-            # Expansion: attach the new leaf (guarded -- a sim that only revisited
-            # the existing tree to max_depth grows nothing). The interior prior is
-            # evaluated on the leaf state (a learned head, or the constant tier
+            # Expand the leaf, then back its value up the path. The interior prior
+            # is evaluated on the leaf state (a learned head, or the constant tier
             # table); it costs a forward whether or not the sim grew, as mctx's
             # recurrent_fn does.
-            grew = d.exp_parent >= 0
-            new_id = arena.size  # always <= n_nodes - 1 (<=1 node added per sim)
-            safe_parent = jnp.maximum(d.exp_parent, 0)
-            arena = arena._replace(
-                mover=arena.mover.at[new_id].set(
-                    jnp.where(grew, d.exp_mover, arena.mover[new_id])
-                ),
-                prior=arena.prior.at[new_id].set(
-                    jnp.where(
-                        grew,
-                        interior_logits(layout, d.state, player),
-                        arena.prior[new_id],
-                    )
-                ),
-                raw=arena.raw.at[new_id].set(
-                    jnp.where(grew, d.leaf, arena.raw[new_id])
-                ),
-                children=arena.children.at[safe_parent, d.exp_act].set(
-                    jnp.where(grew, new_id, arena.children[safe_parent, d.exp_act])
-                ),
-                size=arena.size + grew.astype(jnp.int32),
-            )
-
-            def backup(j: IntScalar, ar: _Arena) -> _Arena:
-                node, act = d.path_node[j], d.path_act[j]
-                use = (j < d.depth).astype(jnp.float32)
-                return ar._replace(
-                    visits=ar.visits.at[node].add(use),
-                    n=ar.n.at[node, act].add(use),
-                    w=ar.w.at[node, act].add(use * d.leaf),
-                )
-
-            return cast(_Arena, jax.lax.fori_loop(0, max_depth, backup, arena))
+            arena = _expand(arena, d, interior_logits(layout, d.state, player))
+            return _backup(arena, d, max_depth)
 
         arena = cast(_Arena, jax.lax.fori_loop(0, num_simulations, simulate, arena))
         # action_weights = softmax(root_logits + completed_Q) over the legal set.
