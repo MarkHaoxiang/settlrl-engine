@@ -1,28 +1,20 @@
 import { actionMeta, confirmLabel } from "../lib/actionMeta";
 import type { GameAction } from "../lib/game";
 import { TERRAIN_FILL, TERRAIN_STROKE, type ResourceKind } from "../lib/boardData";
-import { buttonStyle } from "../lib/ui";
 import Anchored from "./Anchored";
+import s from "./BoardPopover.module.css";
 import ResourceGlyph from "./ResourceGlyph";
 
 // A build price as a row of mini resource chips.
 function CostRow({ cost }: { cost: ResourceKind[] }) {
   return (
-    <span style={{ display: "inline-flex", gap: 2, marginLeft: 4 }}>
+    <span className={s.costRow}>
       {cost.map((r, i) => (
         <span
           key={i}
           title={r}
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: 4,
-            background: TERRAIN_FILL[r],
-            border: `1px solid ${TERRAIN_STROKE[r]}`,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
+          className={s.costChip}
+          style={{ background: TERRAIN_FILL[r], border: `1px solid ${TERRAIN_STROKE[r]}` }}
         >
           <ResourceGlyph kind={r} px={12} scale={0.9} opacity={0.5} />
         </span>
@@ -55,10 +47,10 @@ export default function BoardPopover({ x, y, actions, costFor, disabled, onPick,
           <button
             key={a.flat}
             disabled={disabled}
-            style={{ ...buttonStyle, display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}
+            className={s.actionButton}
             onClick={() => onPick(a.flat)}
           >
-            <span style={{ fontSize: 16 }}>{actionMeta(a.type).icon}</span>
+            <span className={s.icon}>{actionMeta(a.type).icon}</span>
             <span>{confirmLabel(a)}</span>
             {cost && <CostRow cost={cost} />}
           </button>

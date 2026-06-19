@@ -1,0 +1,25 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.options {
+  display: flex;
+  gap: 6px;
+}
+
+/* The give chip's static box; its background / border are the resource colour,
+   set inline. */
+.chip {
+  position: relative;
+  width: 42px;
+  height: 38px;
+  border-radius: 7px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

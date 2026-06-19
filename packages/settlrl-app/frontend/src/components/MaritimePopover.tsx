@@ -10,6 +10,7 @@ import {
 } from "../lib/boardData";
 import Anchored from "./Anchored";
 import CountBadge from "./CountBadge";
+import s from "./MaritimePopover.module.css";
 import ResourceGlyph from "./ResourceGlyph";
 
 // Anchored at the bank pile of the resource you clicked: pick what to give for
@@ -45,12 +46,12 @@ export default function MaritimePopover({
 
   return (
     <Anchored x={x} y={y} onClose={onClose}>
-      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700 }}>
+      <span className={s.header}>
         Trade for 1
         <ResourceGlyph kind={receive} px={20} scale={0.95} />
         {RESOURCE_LABELS[receive]}
       </span>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div className={s.options}>
         {options.map(({ action, give }) => {
           const rate = maritimeRate(board, player, give);
           const fill = TERRAIN_FILL[give];
@@ -60,18 +61,11 @@ export default function MaritimePopover({
               title={`Give ${rate} ${RESOURCE_LABELS[give].toLowerCase()} for 1 ${RESOURCE_LABELS[receive].toLowerCase()}`}
               disabled={disabled}
               onClick={() => onPick(action.flat)}
+              className={s.chip}
               style={{
-                position: "relative",
-                width: 42,
-                height: 38,
-                borderRadius: 7,
                 background: fill,
                 border: `2px solid ${TERRAIN_STROKE[give]}`,
                 cursor: disabled ? "default" : "pointer",
-                padding: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
               }}
             >
               <ResourceGlyph kind={give} px={26} scale={1.15} />

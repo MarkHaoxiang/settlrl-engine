@@ -1,0 +1,28 @@
+.costRow {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+/* The mini cost chip's static box; background / border are the resource colour,
+   set inline. */
+.costChip {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.actionButton {
+  composes: button from "../styles/ui.module.css";
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.icon {
+  font-size: 16px;
+}
