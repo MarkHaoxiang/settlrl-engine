@@ -1,0 +1,43 @@
+.help {
+  composes: panel from "../styles/ui.module.css";
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--link);
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 700;
+  z-index: 10;
+}
+
+.bar {
+  composes: panel from "../styles/ui.module.css";
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  z-index: 10;
+}
+
+.menuLink {
+  color: var(--link);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.mode {
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}

@@ -1,54 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
+import Button from "../components/Button";
+import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, type AuthUser } from "../lib/auth";
 import { useLeaderboard, type LeaderboardEntry } from "../lib/queries";
-import { ACCENT, DIVIDER, LINK, panelStyle, selectedStyle, smallButtonStyle } from "../lib/ui";
+import ui from "../styles/ui.module.css";
+import s from "./LeaderboardView.module.css";
 
 const winRate = (e: LeaderboardEntry) =>
   e.games ? `${Math.round((100 * e.wins) / e.games)}%` : "—";
 
 function Ladder({ rows }: { rows: LeaderboardEntry[] }) {
-  if (rows.length === 0)
-    return <span style={{ fontSize: 13, opacity: 0.6 }}>No rated games yet.</span>;
+  if (rows.length === 0) return <span className={s.empty}>No rated games yet.</span>;
   return (
-    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
+    <table className={s.table}>
       <thead>
-        <tr style={{ textAlign: "left", opacity: 0.6, fontSize: 12 }}>
-          <th style={{ padding: "6px 10px" }}>#</th>
-          <th style={{ padding: "6px 10px" }}>Player</th>
-          <th style={{ padding: "6px 10px", textAlign: "right" }}>Rating</th>
-          <th style={{ padding: "6px 10px", textAlign: "right" }}>Games</th>
-          <th style={{ padding: "6px 10px", textAlign: "right" }}>Win</th>
+        <tr className={s.headRow}>
+          <th className={s.cell}>#</th>
+          <th className={s.cell}>Player</th>
+          <th className={s.cellRight}>Rating</th>
+          <th className={s.cellRight}>Games</th>
+          <th className={s.cellRight}>Win</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((e, i) => (
-          <tr key={`${e.kind}:${e.name}`} style={{ borderTop: `1px solid ${DIVIDER}` }}>
-            <td style={{ padding: "6px 10px", opacity: 0.6 }}>{i + 1}</td>
-            <td style={{ padding: "6px 10px" }}>
-              {e.name}{" "}
-              <span
-                style={{
-                  fontSize: 10,
-                  opacity: 0.6,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                }}
-              >
-                {e.kind === "bot" ? "bot" : "human"}
-              </span>
+          <tr key={`${e.kind}:${e.name}`} className={s.row}>
+            <td className={s.rank}>{i + 1}</td>
+            <td className={s.cell}>
+              {e.name} <span className={s.kindTag}>{e.kind === "bot" ? "bot" : "human"}</span>
             </td>
-            <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700 }}>
-              {Math.round(e.rating)}
-            </td>
-            <td style={{ padding: "6px 10px", textAlign: "right", opacity: 0.75 }}>
-              {e.games}
-            </td>
-            <td style={{ padding: "6px 10px", textAlign: "right", opacity: 0.75 }}>
-              {winRate(e)}
-            </td>
+            <td className={s.rating}>{Math.round(e.rating)}</td>
+            <td className={s.muted}>{e.games}</td>
+            <td className={s.muted}>{winRate(e)}</td>
           </tr>
         ))}
       </tbody>
@@ -77,47 +63,33 @@ export default function LeaderboardView() {
   );
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 28,
-        padding: 24,
-        color: "var(--text)",
-        fontFamily: "Georgia, serif",
-      }}
-    >
-      <div style={{ position: "fixed", top: 16, right: 16, display: "flex", gap: 10 }}>
+    <div className={s.page}>
+      <div className={ui.toolbarTopRight}>
         <AccountMenu user={user} onUser={setUser} />
         <ThemeToggle />
       </div>
-      <Link to="/" style={{ position: "fixed", top: 16, left: 16, color: LINK }}>
+      <Link to="/" className={ui.backLink}>
         ‹ Menu
       </Link>
 
-      <h1 style={{ fontSize: 36, margin: 0 }}>Leaderboard</h1>
+      <h1 className={s.title}>Leaderboard</h1>
 
-      <div
-        style={{ ...panelStyle, padding: "16px 20px", borderRadius: 12, minWidth: 420 }}
-      >
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      <Panel className={s.box}>
+        <div className={s.tabs}>
           {buckets.map((n) => (
-            <button
+            <Button
               key={n}
+              variant="small"
+              selected={n === active}
+              className={n === active ? s.accentText : undefined}
               onClick={() => setBucket(n)}
-              style={{
-                ...smallButtonStyle,
-                ...(n === active ? selectedStyle : {}),
-                color: n === active ? ACCENT : "var(--text)",
-              }}
             >
               {n} players
-            </button>
+            </Button>
           ))}
         </div>
         <Ladder rows={rows} />
-      </div>
+      </Panel>
     </div>
   );
 }

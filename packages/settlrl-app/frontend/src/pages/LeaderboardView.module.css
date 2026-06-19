@@ -1,0 +1,77 @@
+.page {
+  composes: page from "../styles/ui.module.css";
+  gap: 28px;
+}
+
+.title {
+  font-size: 36px;
+  margin: 0;
+}
+
+.box {
+  composes: panel from "../styles/ui.module.css";
+  padding: 16px 20px;
+  min-width: 420px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.accentText {
+  color: var(--accent);
+}
+
+.empty {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+.headRow {
+  text-align: left;
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.row {
+  border-top: 1px solid var(--divider);
+}
+
+.cell {
+  padding: 6px 10px;
+}
+
+.cellRight {
+  composes: cell;
+  text-align: right;
+}
+
+.rank {
+  composes: cell;
+  opacity: 0.6;
+}
+
+.rating {
+  composes: cellRight;
+  font-weight: 700;
+}
+
+.muted {
+  composes: cellRight;
+  opacity: 0.75;
+}
+
+.kindTag {
+  font-size: 10px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}

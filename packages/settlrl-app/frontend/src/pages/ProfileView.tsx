@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
+import Button from "../components/Button";
 import MyGames from "../components/MyGames";
+import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, type AuthUser } from "../lib/auth";
 import { downloadRecord } from "../lib/game";
 import { useHistory, type PastGame } from "../lib/queries";
 import { loadReplayFromGame } from "../lib/replay";
-import { LINK, buttonStyle, panelStyle, smallButtonStyle } from "../lib/ui";
+import ui from "../styles/ui.module.css";
+import s from "./ProfileView.module.css";
 
 const outcome = (g: PastGame) =>
   g.winner == null
@@ -35,85 +38,62 @@ export default function ProfileView() {
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 28,
-        padding: 24,
-        color: "var(--text)",
-        fontFamily: "Georgia, serif",
-      }}
-    >
-      <div style={{ position: "fixed", top: 16, right: 16, display: "flex", gap: 10 }}>
+    <div className={s.page}>
+      <div className={ui.toolbarTopRight}>
         <AccountMenu user={user} onUser={setUser} />
         <ThemeToggle />
       </div>
-      <Link to="/" style={{ position: "fixed", top: 16, left: 16, color: LINK }}>
+      <Link to="/" className={ui.backLink}>
         ‹ Menu
       </Link>
 
-      <h1 style={{ fontSize: 36, margin: 0 }}>Profile</h1>
+      <h1 className={s.title}>Profile</h1>
 
       {checked && !user && (
-        <div style={{ ...panelStyle, padding: "20px 24px", borderRadius: 12 }}>
-          <Link to="/login" style={{ color: LINK }}>
+        <Panel className={s.signinBox}>
+          <Link to="/login" className={ui.link}>
             Sign in
           </Link>{" "}
           to see your games.
-        </div>
+        </Panel>
       )}
 
       {user && <MyGames user={user} />}
 
       {user && (
-        <div style={{ ...panelStyle, padding: "16px 20px", borderRadius: 12, minWidth: 360 }}>
-          <div
-            style={{
-              fontSize: 12,
-              opacity: 0.6,
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              marginBottom: 10,
-            }}
-          >
-            Past games
-          </div>
+        <Panel className={s.pastBox}>
+          <div className={s.label}>Past games</div>
           {past.length === 0 ? (
-            <span style={{ fontSize: 13, opacity: 0.6 }}>No finished games yet.</span>
+            <span className={s.empty}>No finished games yet.</span>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className={s.list}>
               {past.map((g) => (
-                <div
-                  key={g.id}
-                  style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}
-                >
-                  <span style={{ flex: 1 }}>
+                <div key={g.id} className={s.gameRow}>
+                  <span className={s.gameInfo}>
                     <b>{outcome(g)}</b>{" "}
-                    <span style={{ opacity: 0.6 }}>
+                    <span className={s.meta}>
                       · {g.n_players}p · seat{g.seats.length > 1 ? "s" : ""}{" "}
                       {g.seats.map((s) => s + 1).join(", ")}
                     </span>
                     <br />
-                    <span style={{ opacity: 0.5, fontSize: 11 }}>
+                    <span className={s.date}>
                       {new Date(g.finished_at * 1000).toLocaleString()}
                     </span>
                   </span>
-                  <button style={smallButtonStyle} onClick={() => void replay(g.id)}>
+                  <Button variant="small" onClick={() => void replay(g.id)}>
                     Replay
-                  </button>
-                  <button style={smallButtonStyle} onClick={() => void downloadRecord(g.id)}>
+                  </Button>
+                  <Button variant="small" onClick={() => void downloadRecord(g.id)}>
                     Download
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Panel>
       )}
 
-      <Link to="/play" style={{ ...buttonStyle, color: LINK, textDecoration: "none" }}>
+      <Link to="/play" className={ui.buttonLink}>
         New game
       </Link>
     </div>

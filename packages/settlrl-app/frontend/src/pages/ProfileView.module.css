@@ -1,0 +1,56 @@
+.page {
+  composes: page from "../styles/ui.module.css";
+  gap: 28px;
+}
+
+.title {
+  font-size: 36px;
+  margin: 0;
+}
+
+.signinBox {
+  composes: panel from "../styles/ui.module.css";
+  padding: 20px 24px;
+}
+
+.pastBox {
+  composes: panel from "../styles/ui.module.css";
+  padding: 16px 20px;
+  min-width: 360px;
+}
+
+.label {
+  composes: sectionLabel from "../styles/ui.module.css";
+  margin-bottom: 10px;
+}
+
+.empty {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gameRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.gameInfo {
+  flex: 1;
+}
+
+.meta {
+  opacity: 0.6;
+}
+
+.date {
+  opacity: 0.5;
+  font-size: 11px;
+}

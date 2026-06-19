@@ -95,3 +95,11 @@
   display: flex;
   gap: 10px;
 }
+
+/* The fixed "‹ Menu" back link in a page's top-left corner. */
+.backLink {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  color: var(--link);
+}

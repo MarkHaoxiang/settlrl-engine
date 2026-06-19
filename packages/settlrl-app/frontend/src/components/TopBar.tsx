@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
-import { LINK, panelStyle } from "../lib/ui";
 import SoundToggle from "./SoundToggle";
 import ThemeToggle from "./ThemeToggle";
+import s from "./TopBar.module.css";
 
 // The top bar shared by the game views: a help link in the top-left corner,
 // and a back-to-menu link with the current mode label top-centre, followed by
@@ -10,49 +10,14 @@ import ThemeToggle from "./ThemeToggle";
 export default function TopBar({ mode, children }: { mode: string; children?: React.ReactNode }) {
   return (
     <>
-      <Link
-        to="/help"
-        title="Help"
-        style={{
-          ...panelStyle,
-          position: "absolute",
-          top: 16,
-          left: 16,
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: LINK,
-          textDecoration: "none",
-          fontSize: 16,
-          fontWeight: 700,
-          zIndex: 10,
-        }}
-      >
+      <Link to="/help" title="Help" className={s.help}>
         ?
       </Link>
-      <div
-        style={{
-          ...panelStyle,
-          position: "absolute",
-          top: 16,
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "6px 14px",
-          zIndex: 10,
-        }}
-      >
-        <Link to="/" style={{ color: LINK, textDecoration: "none", fontSize: 14 }}>
+      <div className={s.bar}>
+        <Link to="/" className={s.menuLink}>
           ← Menu
         </Link>
-        <span style={{ fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: 1 }}>
-          {mode}
-        </span>
+        <span className={s.mode}>{mode}</span>
         {children}
         <SoundToggle />
         <ThemeToggle />
