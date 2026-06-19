@@ -29,35 +29,40 @@ const FIXTURES = {
 };
 
 const browser = await chromium.launch({ executablePath: CHROME });
-const ctx = await browser.newContext({
-  viewport: { width: 1100, height: 850 },
-  deviceScaleFactor: 2,
-});
-await ctx.route("**/api/**", (route) => {
-  const path = new URL(route.request().url()).pathname;
-  route.fulfill({ json: FIXTURES[path] ?? [] });
-});
 
+// [name, path, signedIn] — signed-out screens (login) must not be redirected.
 const SCREENS = [
-  ["menu", "/"],
-  ["leaderboard", "/leaderboard"],
-  ["profile", "/profile"],
+  ["menu", "/", true],
+  ["leaderboard", "/leaderboard", true],
+  ["profile", "/profile", true],
+  ["login", "/login", false],
+  ["help", "/help", true],
 ];
 
-for (const [name, path] of SCREENS) {
+for (const [name, path, signedIn] of SCREENS) {
   for (const theme of ["light", "dark"]) {
+    const ctx = await browser.newContext({
+      viewport: { width: 1100, height: 850 },
+      deviceScaleFactor: 2,
+    });
+    await ctx.route("**/api/**", (route) => {
+      const p = new URL(route.request().url()).pathname;
+      if (p === "/api/users/me" && !signedIn)
+        return route.fulfill({ status: 401, json: { detail: "Unauthorized" } });
+      route.fulfill({ json: FIXTURES[p] ?? [] });
+    });
     const page = await ctx.newPage();
     await page.addInitScript(
-      ([t]) => {
+      ([t, auth]) => {
         localStorage.setItem("settlrl-theme", t);
-        localStorage.setItem("settlrl-auth-token", "faketoken");
+        if (auth) localStorage.setItem("settlrl-auth-token", "faketoken");
       },
-      [theme]
+      [theme, signedIn]
     );
     await page.goto(BASE + path, { waitUntil: "networkidle" });
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/${name}-${theme}.png`, fullPage: true });
-    await page.close();
+    await ctx.close();
     console.log(`shot ${name}-${theme}`);
   }
 }

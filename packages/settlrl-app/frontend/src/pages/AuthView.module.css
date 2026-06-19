@@ -1,0 +1,76 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px;
+  color: var(--text);
+  font-family: var(--font-serif);
+}
+
+.backLink {
+  composes: backLink from "../styles/ui.module.css";
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.title {
+  font-size: 40px;
+  margin: 0;
+  letter-spacing: 1px;
+}
+
+.form {
+  composes: panel from "../styles/ui.module.css";
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px;
+  width: 320px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.heading {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.input {
+  composes: panel from "../styles/ui.module.css";
+  padding: 10px 12px;
+  font-size: 14px;
+  width: 100%;
+  user-select: text;
+}
+
+.inputError {
+  composes: input;
+  border-color: var(--error);
+}
+
+.error {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.swapRow {
+  font-size: 13px;
+  opacity: 0.8;
+  text-align: center;
+}
+
+.swap {
+  composes: linkButton from "../styles/ui.module.css";
+  font-size: 13px;
+}

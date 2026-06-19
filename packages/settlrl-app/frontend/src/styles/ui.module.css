@@ -38,6 +38,30 @@
   line-height: 1.2;
 }
 
+/* The accent (primary) button. Dims itself when disabled. */
+.buttonPrimary {
+  composes: button;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1206;
+  font-weight: 700;
+}
+
+.buttonPrimary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A bare button that reads as an inline link (mode switches, etc.). */
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--link);
+  cursor: pointer;
+  font-family: var(--font-serif);
+}
+
 /* A Link that looks like a button (no underline, link colour). */
 .buttonLink {
   composes: button;

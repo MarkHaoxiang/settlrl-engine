@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, login, register } from "../lib/auth";
-import { ACCENT, FONT, LINK, buttonStyle, panelStyle } from "../lib/ui";
+import ui from "../styles/ui.module.css";
+import s from "./AuthView.module.css";
 
 type Mode = "login" | "register";
 
@@ -70,62 +71,32 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: Mode
     setConfirm("");
   };
 
-  const inputStyle: React.CSSProperties = {
-    ...panelStyle,
-    padding: "10px 12px",
-    fontSize: 14,
-    width: "100%",
-    boxSizing: "border-box",
-    userSelect: "text",
-  };
-
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 24,
-        padding: 24,
-        color: "var(--text)",
-        fontFamily: FONT,
-      }}
-    >
-      <div style={{ position: "fixed", top: 16, right: 16 }}>
+    <div className={s.page}>
+      <div className={ui.toolbarTopRight}>
         <ThemeToggle />
       </div>
-      <Link to="/" style={{ position: "fixed", top: 16, left: 16, color: LINK, textDecoration: "none", fontSize: 14 }}>
+      <Link to="/" className={s.backLink}>
         ← Menu
       </Link>
 
-      <h1 style={{ fontSize: 40, margin: 0, letterSpacing: 1 }}>Settlrl</h1>
+      <h1 className={s.title}>Settlrl</h1>
 
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
-        style={{
-          ...panelStyle,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          padding: "28px 28px",
-          width: 320,
-          borderRadius: 16,
-          boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
-        }}
+        className={s.form}
       >
-        <span style={{ fontSize: 22, fontWeight: 700 }}>
+        <span className={s.heading}>
           {registering ? "Create your account" : "Welcome back"}
         </span>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, opacity: 0.7 }}>
+        <label className={s.label}>
           Email
           <input
-            style={inputStyle}
+            className={s.input}
             type="email"
             autoComplete="email"
             value={email}
@@ -133,10 +104,10 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: Mode
           />
         </label>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, opacity: 0.7 }}>
+        <label className={s.label}>
           Password
           <input
-            style={inputStyle}
+            className={s.input}
             type="password"
             autoComplete={registering ? "new-password" : "current-password"}
             placeholder={registering ? "8+ characters" : undefined}
@@ -146,10 +117,10 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: Mode
         </label>
 
         {registering && (
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, opacity: 0.7 }}>
+          <label className={s.label}>
             Confirm password
             <input
-              style={{ ...inputStyle, ...(mismatch ? { borderColor: "var(--error)" } : {}) }}
+              className={mismatch ? s.inputError : s.input}
               type="password"
               autoComplete="new-password"
               value={confirm}
@@ -159,33 +130,21 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: Mode
         )}
 
         {(error || mismatch) && (
-          <span style={{ color: "var(--error)", fontSize: 12 }}>
+          <span className={s.error}>
             {mismatch ? "Passwords don't match." : error}
           </span>
         )}
 
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          style={{
-            ...buttonStyle,
-            background: ACCENT,
-            borderColor: ACCENT,
-            color: "#1a1206",
-            fontWeight: 700,
-            opacity: canSubmit ? 1 : 0.5,
-            cursor: canSubmit ? "pointer" : "default",
-          }}
-        >
+        <button type="submit" disabled={!canSubmit} className={ui.buttonPrimary}>
           {registering ? "Create account" : "Log in"}
         </button>
 
-        <div style={{ fontSize: 13, opacity: 0.8, textAlign: "center" }}>
+        <div className={s.swapRow}>
           {registering ? "Already have an account? " : "New here? "}
           <button
             type="button"
             onClick={() => swap(registering ? "login" : "register")}
-            style={{ background: "none", border: "none", color: LINK, cursor: "pointer", fontFamily: FONT, fontSize: 13, padding: 0 }}
+            className={s.swap}
           >
             {registering ? "Log in" : "Create an account"}
           </button>
