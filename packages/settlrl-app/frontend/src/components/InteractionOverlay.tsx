@@ -3,8 +3,8 @@ import { PLAYER_COLORS } from "../lib/boardData";
 import { HIGHLIGHT } from "../lib/ui";
 import { housePath } from "./Building";
 
-// A popover anchor in the board container's coordinates (top-centre of the
-// clicked element, valid for the pan/zoom at click time).
+// A popover anchor in viewport coordinates (top-centre of the clicked element).
+// Floating UI positions the popover against it and keeps it on-screen.
 export interface BoardTargetPoint {
   x: number;
   y: number;

@@ -97,12 +97,11 @@ export default function BoardView({ board, interaction, dice, trade, robber, onB
   const { containerRef, sceneTransform, rotationTransform, rotate } =
     useTableViewport(width, height, faceAngle);
 
-  // Anchor for the caller's popover: top-centre of the clicked SVG element,
-  // converted to this container's coordinate space.
+  // Anchor for the caller's popover: top-centre of the clicked SVG element, in
+  // viewport coordinates (Floating UI positions and keeps it on-screen).
   const anchorOf = (el: SVGGraphicsElement): BoardTargetPoint => {
-    const c = containerRef.current!.getBoundingClientRect();
     const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2 - c.x, y: r.y - c.y };
+    return { x: r.x + r.width / 2, y: r.y };
   };
 
   // The dice glide to rest in the empty table corner beside whoever's turn it
