@@ -1,10 +1,17 @@
-// Shared look-and-feel: the standard panel, button, and overlay message,
-// reused by every view. Spread these into a style object and override what
-// differs. Colours resolve through the theme variables in index.css
-// (body[data-theme]), so everything here follows the light/dark toggle.
+// Board-layer style helpers still used by the SVG renderers (Anchored,
+// BoardView, Robber, …) where styling is computed/positioned per element. The
+// rest of the app styles through styles/ui.module.css over the design tokens in
+// index.css.
 
-export const FONT = "Georgia, serif";
+const FONT = "Georgia, serif";
 
+// Bright board click-target highlight (ghost strokes, robber tiles): a literal,
+// readable against the tile colours in either theme.
+export const HIGHLIGHT = "#FCE38A";
+// Its on-panel counterpart (the accent token).
+export const ACCENT = "var(--accent)";
+
+// The shared panel surface, for board-anchored popovers (Anchored).
 export const panelStyle: React.CSSProperties = {
   borderRadius: 12,
   background: "var(--panel-bg)",
@@ -14,44 +21,3 @@ export const panelStyle: React.CSSProperties = {
   backdropFilter: "blur(2px)",
   userSelect: "none",
 };
-
-export const buttonStyle: React.CSSProperties = {
-  background: "var(--button-bg)",
-  border: "1px solid var(--button-border)",
-  color: "var(--text)",
-  borderRadius: 8,
-  padding: "9px 16px",
-  fontSize: 14,
-  fontFamily: FONT,
-  cursor: "pointer",
-};
-
-// Highlight for board click targets (ghost strokes, robber tiles): bright
-// against the tile colours in either theme, so it stays a literal.
-export const HIGHLIGHT = "#FCE38A";
-// Its readable counterpart on panels: selected buttons, glowing chips, the
-// winner banner.
-export const ACCENT = "var(--accent)";
-export const ACCENT_GLOW = "0 0 8px 2px var(--accent-glow)";
-export const selectedStyle: React.CSSProperties = {
-  background: "var(--selected-bg)",
-  borderColor: "var(--accent)",
-};
-
-// Links on panels.
-export const LINK = "var(--link)";
-
-export const overlayMsgStyle: React.CSSProperties = {
-  color: "var(--text)",
-  padding: 24,
-  fontFamily: FONT,
-};
-
-export const smallButtonStyle: React.CSSProperties = {
-  ...buttonStyle,
-  padding: "5px 12px",
-  fontSize: 12,
-};
-
-// Hairline separators inside panels.
-export const DIVIDER = "var(--divider)";

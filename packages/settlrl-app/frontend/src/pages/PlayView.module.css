@@ -1,0 +1,172 @@
+.fullscreen {
+  width: 100vw;
+  height: 100vh;
+}
+
+.queueSub {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-top: 6px;
+}
+
+.queueCancel {
+  margin-top: 12px;
+}
+
+.layout {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.boardArea {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.waitBackdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 15;
+}
+
+.waitDialog {
+  composes: panel from "../styles/ui.module.css";
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px 28px;
+  border-radius: var(--radius-lg);
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.waitTitle {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.waitSub {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.seatList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* opacity (filled) is set inline. */
+.seatRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+/* background is the player colour, set inline. */
+.seatDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.seatName {
+  font-weight: 700;
+}
+
+.seatStatus {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
+/* color is the accent; cursor toggles when dismissed (inline). */
+.winnerBanner {
+  composes: panel from "../styles/ui.module.css";
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  color: var(--accent);
+  font-weight: 700;
+  z-index: 10;
+}
+
+.bottomStrip {
+  position: absolute;
+  bottom: 16px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.bottomPanel {
+  composes: panel from "../styles/ui.module.css";
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  max-width: 94%;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.statusRowDivided {
+  composes: statusRow;
+  border-top: 1px solid var(--divider);
+  padding-top: 8px;
+}
+
+.phase {
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.botMove {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* background is the player colour, set inline. */
+.botDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.botIcon {
+  font-size: 16px;
+}
+
+.hint {
+  opacity: 0.6;
+}
+
+.barButton {
+  composes: button from "../styles/ui.module.css";
+  font-size: 13px;
+  padding: 6px 12px;
+  white-space: nowrap;
+}

@@ -11,18 +11,10 @@ import {
   type ReplayState,
 } from "../lib/replay";
 import { lastGameId } from "../lib/seats";
-import { HIGHLIGHT, buttonStyle, panelStyle } from "../lib/ui";
+import ui from "../styles/ui.module.css";
+import s from "./ReplayView.module.css";
 
 const PLAY_INTERVAL_MS = 600;
-
-const btnStyle: React.CSSProperties = {
-  ...buttonStyle,
-  width: 36,
-  height: 32,
-  padding: 0,
-  fontSize: 14,
-  lineHeight: 1,
-};
 
 // The pair of ways to load a record: a saved .json file, or the live game as
 // played so far. Rendered both on the empty state and (small) in the bar.
@@ -36,7 +28,7 @@ function LoadButtons({
   onError: (msg: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const style = small ? { ...btnStyle, width: undefined, padding: "0 10px" } : buttonStyle;
+  const cn = small ? s.ctrlWide : ui.button;
 
   const openFile = async (file: File) => {
     try {
@@ -59,11 +51,11 @@ function LoadButtons({
           if (file) void openFile(file);
         }}
       />
-      <button style={style} title="Open a saved record file" onClick={() => fileRef.current?.click()}>
+      <button className={cn} title="Open a saved record file" onClick={() => fileRef.current?.click()}>
         {small ? "📂" : "📂 Open record file…"}
       </button>
       <button
-        style={style}
+        className={cn}
         title="Replay the live game as played so far"
         onClick={() => {
           const last = lastGameId();
@@ -144,31 +136,17 @@ export default function ReplayView() {
   // No record loaded yet: offer the two ways to get one.
   if (!state) {
     return (
-      <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
+      <div className={s.page}>
         <TopBar mode="Replay" />
-        <div
-          style={{
-            ...panelStyle,
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
-            padding: "26px 30px",
-            alignItems: "center",
-            maxWidth: 380,
-          }}
-        >
-          <span style={{ fontWeight: 700, fontSize: 16 }}>Replay a game</span>
-          <span style={{ fontSize: 13, opacity: 0.75, textAlign: "center" }}>
+        <div className={s.loadDialog}>
+          <span className={s.loadTitle}>Replay a game</span>
+          <span className={s.loadSub}>
             Open a saved game record, or replay the game currently in Play from its first move.
           </span>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div className={s.loadRow}>
             <LoadButtons onLoad={loaded} onError={setError} />
           </div>
-          {error && <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>}
+          {error && <span className={s.error}>{error}</span>}
         </div>
       </div>
     );
@@ -178,74 +156,36 @@ export default function ReplayView() {
   const last = state.move > 0 ? state.log[state.log.length - 1] : undefined;
 
   return (
-    <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
-      <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
+    <div className={s.layout}>
+      <div className={s.boardArea}>
         <BoardView board={state.board} />
         <TopBar mode="Replay" />
 
         {atEnd && state.winner != null && (
-          <div
-            style={{
-              ...panelStyle,
-              position: "absolute",
-              top: 70,
-              left: "50%",
-              transform: "translateX(-50%)",
-              padding: "10px 20px",
-              color: HIGHLIGHT,
-              fontWeight: 700,
-              zIndex: 10,
-            }}
-          >
-            {playerName(state.winner)} wins
-          </div>
+          <div className={s.winnerBanner}>{playerName(state.winner)} wins</div>
         )}
 
         {/* Bottom centre: playback controls */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 16,
-            left: 0,
-            right: 0,
-            display: "flex",
-            justifyContent: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              ...panelStyle,
-              pointerEvents: "auto",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 16px",
-              borderRadius: 16,
-              boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
-              maxWidth: "94%",
-              flexWrap: "wrap",
-              justifyContent: "center",
-            }}
-          >
-            <button style={btnStyle} title="Back to start" disabled={state.move === 0} onClick={() => seek(0)}>
+        <div className={s.bottomStrip}>
+          <div className={s.bar}>
+            <button className={s.ctrl} title="Back to start" disabled={state.move === 0} onClick={() => seek(0)}>
               ⏮
             </button>
-            <button style={btnStyle} title="Step back" disabled={state.move === 0} onClick={() => seek(state.move - 1)}>
+            <button className={s.ctrl} title="Step back" disabled={state.move === 0} onClick={() => seek(state.move - 1)}>
               ◀
             </button>
             <button
-              style={btnStyle}
+              className={s.ctrl}
               title={playing ? "Pause" : "Play"}
               disabled={atEnd && !playing}
               onClick={() => setPlaying((p) => !p)}
             >
               {playing ? "▮▮" : "▶"}
             </button>
-            <button style={btnStyle} title="Step forward" disabled={atEnd} onClick={() => seek(state.move + 1)}>
+            <button className={s.ctrl} title="Step forward" disabled={atEnd} onClick={() => seek(state.move + 1)}>
               ▶▏
             </button>
-            <button style={btnStyle} title="Skip to end" disabled={atEnd} onClick={() => seek(state.n_moves)}>
+            <button className={s.ctrl} title="Skip to end" disabled={atEnd} onClick={() => seek(state.n_moves)}>
               ⏭
             </button>
             <input
@@ -254,43 +194,37 @@ export default function ReplayView() {
               max={state.n_moves}
               value={state.move}
               onChange={(e) => seek(Number(e.target.value))}
-              style={{ width: 220 }}
+              className={s.slider}
             />
-            <span style={{ fontSize: 12, opacity: 0.7, minWidth: 86, textAlign: "center" }}>
+            <span className={s.counter}>
               move {state.move} / {state.n_moves}
             </span>
             {last && (
-              <span
-                className="fade-in"
-                key={last.id}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
-              >
+              <span className={`fade-in ${s.lastMove}`} key={last.id}>
                 <span
+                  className={s.lastDot}
                   style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
                     background: last.player != null ? (PLAYER_COLORS[last.player] ?? "#888") : "#888",
                   }}
                 />
-                <span style={{ fontSize: 16 }}>
+                <span className={s.lastIcon}>
                   {last.kind === "win" ? "🏆" : actionMeta(last.action_type ?? "").icon}
                 </span>
-                <span style={{ opacity: 0.8 }}>{last.text}</span>
+                <span className={s.lastText}>{last.text}</span>
               </span>
             )}
-            <span style={{ display: "inline-flex", gap: 6, marginLeft: 8 }}>
+            <span className={s.loadGroup}>
               <LoadButtons small onLoad={loaded} onError={setError} />
               <a
                 href="/api/replay/record"
                 download="settlrl-game.json"
                 title="Save this record to a file"
-                style={{ ...btnStyle, width: undefined, padding: "0 10px", display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+                className={s.saveLink}
               >
                 💾
               </a>
             </span>
-            {error && <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>}
+            {error && <span className={s.error}>{error}</span>}
           </div>
         </div>
       </div>

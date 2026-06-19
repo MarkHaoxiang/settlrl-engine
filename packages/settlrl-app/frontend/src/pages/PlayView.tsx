@@ -30,7 +30,9 @@ import {
 } from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
-import { ACCENT, DIVIDER, buttonStyle, overlayMsgStyle, panelStyle, smallButtonStyle } from "../lib/ui";
+import Button from "../components/Button";
+import ui from "../styles/ui.module.css";
+import s from "./PlayView.module.css";
 
 // Board-targeted action types, by the target geometry they carry. These are
 // always marked directly on the board — no arming step.
@@ -273,17 +275,17 @@ export default function PlayView() {
 
   if (!gameId)
     return (
-      <div style={{ width: "100vw", height: "100vh" }}>
-        {createError && <div style={overlayMsgStyle}>{createError}</div>}
+      <div className={s.fullscreen}>
+        {createError && <div className={ui.overlayMsg}>{createError}</div>}
         {queue && (
-          <div style={overlayMsgStyle}>
+          <div className={ui.overlayMsg}>
             You're #{queue.position} of {queue.total} in line…
-            <div style={{ fontSize: "0.85rem", opacity: 0.7, marginTop: 6 }}>
+            <div className={s.queueSub}>
               The server is busy; your game starts automatically.
             </div>
-            <button style={{ ...smallButtonStyle, marginTop: 12 }} onClick={cancelQueue}>
+            <Button variant="small" className={s.queueCancel} onClick={cancelQueue}>
               Cancel
-            </button>
+            </Button>
           </div>
         )}
         {configuring && (
@@ -291,8 +293,8 @@ export default function PlayView() {
         )}
       </div>
     );
-  if (error) return <div style={overlayMsgStyle}>{error}</div>;
-  if (!snapshot) return <div style={overlayMsgStyle}>Loading game…</div>;
+  if (error) return <div className={ui.overlayMsg}>{error}</div>;
+  if (!snapshot) return <div className={ui.overlayMsg}>Loading game…</div>;
 
   const { status, board } = snapshot;
   // Lobby gate: an online game waits until every human seat is claimed (the
@@ -432,9 +434,9 @@ export default function PlayView() {
           )[status.phase] ?? turnLabel;
 
   return (
-    <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
+    <div className={s.layout}>
       {/* Board area: the chrome inside is anchored to it, not the viewport */}
-      <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
+      <div className={s.boardArea}>
         <BoardView
           board={board}
           interaction={interaction}
@@ -453,90 +455,56 @@ export default function PlayView() {
           }}
         />
         <TopBar mode="Play">
-          <button
-            style={smallButtonStyle}
+          <Button
+            variant="small"
             title="Copy the invite link (others join free human seats)"
             onClick={() => void navigator.clipboard.writeText(window.location.href)}
           >
             🔗
-          </button>
+          </Button>
           {gameId && mySeats.length > 0 && (
-            <button
-              style={smallButtonStyle}
+            <Button
+              variant="small"
               title="Copy a link that restores your seat on another device or after clearing storage"
               onClick={() => void navigator.clipboard.writeText(resumeLink(gameId, tokens))}
             >
               🔑
-            </button>
+            </Button>
           )}
-          <button style={smallButtonStyle} onClick={() => setConfiguring(true)}>
+          <Button variant="small" onClick={() => setConfiguring(true)}>
             New game
-          </button>
+          </Button>
         </TopBar>
 
         {waiting && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "rgba(0,0,0,0.35)",
-              zIndex: 15,
-            }}
-          >
-            <div
-              style={{
-                ...panelStyle,
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                padding: "24px 28px",
-                borderRadius: 16,
-                minWidth: 320,
-                maxWidth: 420,
-                boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
-              }}
-            >
-              <span style={{ fontSize: 20, fontWeight: 700 }}>Waiting for players…</span>
-              <span style={{ fontSize: 13, opacity: 0.7 }}>
+          <div className={s.waitBackdrop}>
+            <div className={s.waitDialog}>
+              <span className={s.waitTitle}>Waiting for players…</span>
+              <span className={s.waitSub}>
                 {humanSeats.filter((s) => claimedSeats.has(s)).length} / {humanSeats.length} joined — the
                 game starts once every seat is filled.
               </span>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className={s.seatList}>
                 {status.seats.map((kind, i) => {
                   const human = kind === "human";
                   const filled = !human || claimedSeats.has(i);
                   const mine = mySeats.includes(i);
                   return (
-                    <div
-                      key={i}
-                      style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, opacity: filled ? 1 : 0.55 }}
-                    >
-                      <span
-                        style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: "50%",
-                          flexShrink: 0,
-                          background: PLAYER_COLORS[i] ?? "#888",
-                        }}
-                      />
+                    <div key={i} className={s.seatRow} style={{ opacity: filled ? 1 : 0.55 }}>
+                      <span className={s.seatDot} style={{ background: PLAYER_COLORS[i] ?? "#888" }} />
                       {human ? <HumanIcon size={16} /> : <BotIcon size={16} />}
-                      <span style={{ fontWeight: 700 }}>
+                      <span className={s.seatName}>
                         {playerName(i)}
                         {mine ? " (you)" : ""}
                       </span>
-                      <span style={{ marginLeft: "auto", opacity: 0.7 }}>
+                      <span className={s.seatStatus}>
                         {!human ? kind : filled ? "joined" : "open"}
                       </span>
                     </div>
                   );
                 })}
               </div>
-              <button
-                style={buttonStyle}
+              <Button
                 title="Others join the open seats by opening this link"
                 onClick={() => {
                   void navigator.clipboard.writeText(window.location.href);
@@ -545,7 +513,7 @@ export default function PlayView() {
                 }}
               >
                 {linkCopied ? "Copied!" : "🔗 Copy invite link"}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -601,18 +569,8 @@ export default function PlayView() {
 
         {status.terminal && (
           <div
-            style={{
-              ...panelStyle,
-              position: "absolute",
-              top: 70,
-              left: "50%",
-              transform: "translateX(-50%)",
-              padding: "10px 20px",
-              color: ACCENT,
-              fontWeight: 700,
-              zIndex: 10,
-              cursor: endDismissed ? "pointer" : "default",
-            }}
+            className={s.winnerBanner}
+            style={{ cursor: endDismissed ? "pointer" : "default" }}
             onClick={endDismissed ? () => setEndDismissed(false) : undefined}
             title={endDismissed ? "Show final standings" : undefined}
           >
@@ -632,30 +590,8 @@ export default function PlayView() {
 
         {/* Full-width flex strip so the panel centres without halving the
             shrink-to-fit width (which would wrap the hand). */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 16,
-            left: 0,
-            right: 0,
-            display: "flex",
-            justifyContent: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              ...panelStyle,
-              pointerEvents: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              padding: "10px 16px",
-              borderRadius: 16,
-              boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
-              maxWidth: "94%",
-            }}
-          >
+        <div className={s.bottomStrip}>
+          <div className={s.bottomPanel}>
             {me && (
               <Hand
                 player={me}
@@ -669,43 +605,29 @@ export default function PlayView() {
             )}
 
             {/* Status + the turn-flow buttons share one row */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                fontSize: 13,
-                flexWrap: "wrap",
-                ...(me ? { borderTop: `1px solid ${DIVIDER}`, paddingTop: 8 } : {}),
-              }}
-            >
-              <span style={{ fontWeight: 700, opacity: 0.85 }}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
+            <div className={me ? s.statusRowDivided : s.statusRow}>
+              <span className={s.phase}>{PHASE_LABEL[status.phase] ?? status.phase}</span>
               {snapshot.bot_move && (
                 <span
-                  className="fade-in"
+                  className={`fade-in ${s.botMove}`}
                   title={`${playerName(snapshot.bot_move.player)} · ${snapshot.bot_move.action.label}`}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                 >
                   <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: "50%",
-                      background: PLAYER_COLORS[snapshot.bot_move.player] ?? "#888",
-                    }}
+                    className={s.botDot}
+                    style={{ background: PLAYER_COLORS[snapshot.bot_move.player] ?? "#888" }}
                   />
                   <BotIcon size={15} />
-                  <span style={{ fontSize: 16 }}>{actionMeta(snapshot.bot_move.action.type).icon}</span>
+                  <span className={s.botIcon}>{actionMeta(snapshot.bot_move.action.type).icon}</span>
                 </span>
               )}
-              <span style={{ opacity: 0.6 }}>{hint}</span>
+              <span className={s.hint}>{hint}</span>
               {!status.terminal &&
                 status.your_turn &&
                 BAR_TYPES.filter((t) => availableTypes.has(t)).map((type) => (
                   <button
                     key={type}
                     title={barTitle(type)}
-                    style={{ ...buttonStyle, fontSize: 13, padding: "6px 12px", whiteSpace: "nowrap" }}
+                    className={s.barButton}
                     disabled={busy}
                     onClick={() => onBarButton(type)}
                   >
