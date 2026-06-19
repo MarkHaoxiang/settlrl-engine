@@ -21,8 +21,10 @@ from __future__ import annotations
 import os
 import threading
 from collections import OrderedDict
+from typing import Annotated
 
 import anyio.to_thread
+import typer
 from fastapi import FastAPI, HTTPException
 from settlrl_game.actions import flat_for_move
 from settlrl_game.botproto import ActRequest, ActResponse, BotInfo
@@ -125,23 +127,26 @@ def bundled_app() -> FastAPI:
     return create_app(make_bot(os.environ.get("SETTLRL_BOT", "greedy")))
 
 
-def main() -> None:
-    import argparse
-
+def serve(
+    bot: Annotated[
+        str, typer.Option(envvar="SETTLRL_BOT", help="the bundled bot to serve")
+    ] = "greedy",
+    host: Annotated[str, typer.Option(envvar="BOT_HOST")] = "0.0.0.0",
+    port: Annotated[int, typer.Option(envvar="BOT_PORT")] = 8100,
+    reload: Annotated[
+        bool, typer.Option(envvar="RELOAD", help="dev autoreload")
+    ] = False,
+) -> None:
+    """Run a Settlrl bot service for one bundled bot."""
     import uvicorn
 
     from settlrl_agents.service.bots import BUNDLED, make_bot
 
-    parser = argparse.ArgumentParser(description="Run a Settlrl bot service.")
-    parser.add_argument(
-        "--bot", choices=BUNDLED, default=os.environ.get("SETTLRL_BOT", "greedy")
-    )
-    args = parser.parse_args()
-    os.environ["SETTLRL_BOT"] = args.bot  # so a reload worker builds the same bot
-
-    host = os.environ.get("BOT_HOST", "0.0.0.0")
-    port = int(os.environ.get("BOT_PORT", "8100"))
-    reload = bool(int(os.environ.get("RELOAD", "0")))
+    if bot not in BUNDLED:
+        raise typer.BadParameter(
+            f"unknown bot {bot!r} (choose from {sorted(BUNDLED)})", param_hint="--bot"
+        )
+    os.environ["SETTLRL_BOT"] = bot  # so a reload worker's factory builds the same bot
     if reload:
         uvicorn.run(
             "settlrl_agents.service.app:bundled_app",
@@ -151,4 +156,8 @@ def main() -> None:
             reload=True,
         )
     else:
-        uvicorn.run(create_app(make_bot(args.bot)), host=host, port=port)
+        uvicorn.run(create_app(make_bot(bot)), host=host, port=port)
+
+
+def main() -> None:
+    typer.run(serve)

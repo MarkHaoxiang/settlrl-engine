@@ -301,6 +301,7 @@ Tile position uses **axial coordinates** with a pointy-top hex orientation. The 
 packages/settlrl-app/
 ├── src/settlrl_app/      # grouped by layer; server.py wires them together
 │   ├── __init__.py      # CLI entry point (uvicorn)
+│   ├── config.py        # Settings (pydantic-settings): the env-var config, typed in one place
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
 │   ├── api/             # the HTTP layer (game model + serialization is settlrl-game)
 │   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over

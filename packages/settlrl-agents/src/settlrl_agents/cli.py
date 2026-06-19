@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import json
 import math
-from collections.abc import Sequence
-from typing import NamedTuple
+from typing import Annotated, NamedTuple
+
+import typer
 
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import evaluate
@@ -176,55 +176,63 @@ def _format(result: CompareResult) -> str:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        prog="settlrl-agents", description="Tools over the shipped agent registry."
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-    cmp_p = sub.add_parser(
-        "compare", help="head-to-head between two agents (seat-swapped)"
-    )
-    cmp_p.add_argument("agent_a", choices=sorted(POLICIES))
-    cmp_p.add_argument("agent_b", choices=sorted(POLICIES))
-    cmp_p.add_argument("--games", type=int, default=100)
-    cmp_p.add_argument("--batch-size", type=int, default=32)
-    cmp_p.add_argument("--seed", type=int, default=0)
-    bench_p = sub.add_parser(
-        "bench",
-        help="head-to-head between configured agents (names or JSON specs; "
-        "seat-swapped at 2 players, seat-rotated at 3-4)",
-    )
-    bench_p.add_argument("spec_a")
-    bench_p.add_argument("spec_b")
-    bench_p.add_argument("--games", type=int, default=200)
-    bench_p.add_argument("--players", type=int, default=2, choices=(2, 3, 4))
-    bench_p.add_argument("--batch-size", type=int, default=32)
-    bench_p.add_argument("--seed", type=int, default=0)
-    bench_p.add_argument(
-        "--json",
-        action="store_true",
-        help="emit the result as one JSON object (for experiment gates)",
-    )
-    args = parser.parse_args(argv)
-    if args.command == "bench":
-        result = bench(
-            args.spec_a,
-            args.spec_b,
-            n_games=args.games,
-            players=args.players,
-            batch_size=args.batch_size,
-            seed=args.seed,
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help="Tools over the shipped agent registry.",
+)
+
+
+@app.command(name="compare", help="head-to-head between two agents (seat-swapped)")
+def _compare_cmd(
+    agent_a: str,
+    agent_b: str,
+    games: int = 100,
+    batch_size: int = 32,
+    seed: int = 0,
+) -> None:
+    try:
+        result = compare(
+            agent_a, agent_b, n_games=games, batch_size=batch_size, seed=seed
         )
-        if args.json:
-            print(json.dumps({**result._asdict(), "players": args.players}))
-        else:
-            print(_format_bench(result, args.players))
-        return
-    result_c = compare(
-        args.agent_a,
-        args.agent_b,
-        n_games=args.games,
-        batch_size=args.batch_size,
-        seed=args.seed,
-    )
-    print(_format(result_c))
+    except ValueError as exc:  # unknown agent -> a clean CLI error, not a traceback
+        raise typer.BadParameter(str(exc)) from exc
+    print(_format(result))
+
+
+@app.command(
+    name="bench",
+    help="head-to-head between configured agents (names or JSON specs; "
+    "seat-swapped at 2 players, seat-rotated at 3-4)",
+)
+def _bench_cmd(
+    spec_a: str,
+    spec_b: str,
+    games: int = 200,
+    players: int = 2,
+    batch_size: int = 32,
+    seed: int = 0,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="emit one JSON object (for experiment gates)"),
+    ] = False,
+) -> None:
+    try:
+        result = bench(
+            spec_a,
+            spec_b,
+            n_games=games,
+            players=players,
+            batch_size=batch_size,
+            seed=seed,
+        )
+    except ValueError as exc:  # unknown spec -> a clean CLI error
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        print(json.dumps({**result._asdict(), "players": players}))
+    else:
+        print(_format_bench(result, players))
+
+
+def main() -> None:
+    app()

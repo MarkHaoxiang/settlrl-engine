@@ -7,7 +7,6 @@ their own registries instead of sharing module state.
 """
 
 import asyncio
-import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +21,7 @@ from starlette.types import Scope
 from settlrl_app.api import routers
 from settlrl_app.api.deps import Deps, ReplaySlot, needs_driver
 from settlrl_app.bots.providers import ProviderRegistry
+from settlrl_app.config import Settings
 from settlrl_app.game.driver import start_game_driver
 from settlrl_app.game.games import GameHandle, GameRegistry, restore_games
 from settlrl_app.storage.auth import Auth
@@ -177,18 +177,14 @@ class _SPAStaticFiles(StaticFiles):
 _dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 
-# The uvicorn entry point (settlrl_app.server:app). ROOT_PATH is the proxy
-# prefix when served under a path (e.g. /settlrl behind Caddy's handle_path).
-def _admin_emails() -> frozenset[str]:
-    raw = os.environ.get("SETTLRL_APP_ADMIN_EMAILS", "")
-    return frozenset(e.strip() for e in raw.split(",") if e.strip())
-
-
+# The uvicorn entry point (settlrl_app.server:app), configured from the
+# environment (see settlrl_app.config.Settings).
+_settings = Settings()
 app = create_app(
-    root_path=os.environ.get("ROOT_PATH", ""),
-    state_dir=os.environ.get("SETTLRL_APP_STATE_DIR") or None,
-    turn_timeout=float(os.environ.get("SETTLRL_APP_TURN_TIMEOUT_S", "0")),
-    max_active=int(os.environ.get("SETTLRL_APP_MAX_ACTIVE", "16")),
-    user_db=os.environ.get("SETTLRL_APP_USER_DB") or None,
-    admin_emails=_admin_emails(),
+    root_path=_settings.root_path,
+    state_dir=_settings.state_dir,
+    turn_timeout=_settings.turn_timeout_s,
+    max_active=_settings.max_active,
+    user_db=_settings.user_db,
+    admin_emails=_settings.admin_emails,
 )

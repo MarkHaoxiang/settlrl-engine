@@ -2,6 +2,8 @@ import os
 
 import uvicorn
 
+from settlrl_app.config import Settings
+
 
 def main() -> None:
     # The server drives one game at a time; default JAX to CPU so importing it
@@ -12,9 +14,10 @@ def main() -> None:
     # Defaults suit development; deployments override via env (RELOAD=0 in
     # production — the reloader is a dev file-watcher). Single worker only:
     # the game registry is in-memory.
+    settings = Settings()
     uvicorn.run(
         "settlrl_app.server:app",
-        host=os.environ.get("HOST", "0.0.0.0"),
-        port=int(os.environ.get("PORT", "8000")),
-        reload=os.environ.get("RELOAD", "1") == "1",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.reload,
     )

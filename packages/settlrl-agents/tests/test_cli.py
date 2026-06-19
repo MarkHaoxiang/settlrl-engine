@@ -1,8 +1,13 @@
 """Tests for the ``settlrl-agents`` CLI and the episode budget behind it."""
 
+import json
+
 import pytest
 from settlrl_agents import POLICIES, evaluate
-from settlrl_agents.cli import compare, main
+from settlrl_agents.cli import app, compare
+from typer.testing import CliRunner
+
+runner = CliRunner()
 
 
 def test_evaluate_requires_exactly_one_budget() -> None:
@@ -37,11 +42,13 @@ def test_compare_rejects_unknown_agent() -> None:
         compare("random", "clever")
 
 
-def test_main_prints_a_result(capsys: pytest.CaptureFixture[str]) -> None:
-    main(["compare", "random", "greedy", "--games", "2", "--batch-size", "8"])
-    out = capsys.readouterr().out
-    assert "random vs greedy" in out
-    assert "seated first" in out
+def test_main_prints_a_result() -> None:
+    result = runner.invoke(
+        app, ["compare", "random", "greedy", "--games", "2", "--batch-size", "8"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "random vs greedy" in result.output
+    assert "seated first" in result.output
 
 
 def test_build_spec_accepts_names_and_json() -> None:
@@ -68,21 +75,20 @@ def test_bench_two_player_seat_swaps() -> None:
     assert sum(n for _, n in result.by_position) == result.episodes
 
 
-def test_bench_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    import json
-
-    from settlrl_agents.cli import main
-
-    main(["bench", "random", "random", "--games", "2", "--batch-size", "8", "--json"])
-    doc = json.loads(capsys.readouterr().out)
+def test_bench_json_output() -> None:
+    result = runner.invoke(
+        app,
+        ["bench", "random", "random", "--games", "2", "--batch-size", "8", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    doc = json.loads(result.stdout.strip().splitlines()[-1])
     assert doc["wins_a"] + doc["wins_b"] == doc["episodes"]
     assert doc["players"] == 2
 
 
-def test_bench_rotates_three_player_seats(capsys: pytest.CaptureFixture[str]) -> None:
-    from settlrl_agents.cli import main
-
-    main(
+def test_bench_rotates_three_player_seats() -> None:
+    result = runner.invoke(
+        app,
         [
             "bench",
             "random",
@@ -93,8 +99,8 @@ def test_bench_rotates_three_player_seats(capsys: pytest.CaptureFixture[str]) ->
             "3",
             "--batch-size",
             "8",
-        ]
+        ],
     )
-    out = capsys.readouterr().out
-    assert "chance 33.3%" in out
-    assert "seat 2" in out
+    assert result.exit_code == 0, result.output
+    assert "chance 33.3%" in result.output
+    assert "seat 2" in result.output

@@ -2864,6 +2864,7 @@ dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
     { name = "settlrl-engine" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -2879,6 +2880,7 @@ requires-dist = [
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
     { name = "settlrl-game", marker = "extra == 'service'", editable = "packages/settlrl-game" },
+    { name = "typer", specifier = ">=0.12.0" },
 ]
 provides-extras = ["service"]
 
@@ -2894,6 +2896,7 @@ dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
     { name = "openskill" },
+    { name = "pydantic-settings" },
     { name = "settlrl-game" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "sse-starlette" },
@@ -2905,6 +2908,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=13.0.0" },
     { name = "openskill", specifier = ">=5.1" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "settlrl-game", editable = "packages/settlrl-game" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
     { name = "sse-starlette", specifier = ">=2.1.0" },
