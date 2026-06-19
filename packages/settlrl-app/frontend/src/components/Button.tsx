@@ -1,3 +1,4 @@
+import { cx } from "../lib/cx";
 import ui from "../styles/ui.module.css";
 
 type Variant = "default" | "small";
@@ -14,12 +15,10 @@ export default function Button({
   variant?: Variant;
   selected?: boolean;
 }) {
-  const cls = [
+  const cls = cx(
     variant === "small" ? ui.buttonSmall : ui.button,
     selected && ui.selected,
-    className,
-  ]
-    .filter(Boolean)
-    .join(" ");
+    className
+  );
   return <button className={cls} {...rest} />;
 }

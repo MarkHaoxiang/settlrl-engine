@@ -1,3 +1,4 @@
+import { cx } from "../lib/cx";
 import ui from "../styles/ui.module.css";
 
 // The standard panel surface (paper/glass over the tokens). Per-instance layout
@@ -6,7 +7,5 @@ export default function Panel({
   className,
   ...rest
 }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div className={[ui.panel, className].filter(Boolean).join(" ")} {...rest} />
-  );
+  return <div className={cx(ui.panel, className)} {...rest} />;
 }

@@ -14,13 +14,12 @@ import {
   type SeatConfig,
 } from "../lib/game";
 import { type Board, playerName } from "../lib/boardData";
+import { cx } from "../lib/cx";
 import ui from "../styles/ui.module.css";
 import BoardView from "./BoardView";
 import Button from "./Button";
 import { BotIcon, HumanIcon, MapIcon } from "./icons";
 import s from "./NewGameDialog.module.css";
-
-const cls = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
 const botLabel = (kind: string, spec?: BotSpec) =>
   spec?.title ?? (kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1));
@@ -49,7 +48,7 @@ function Toggle<T extends string | number>({
         <button
           key={o}
           title={optionTitle?.(o)}
-          className={cls(s.toggleButton, value === o && ui.selected)}
+          className={cx(s.toggleButton, value === o && ui.selected)}
           onClick={() => onChange(o)}
         >
           {o}
@@ -194,7 +193,7 @@ export default function NewGameDialog({
               <button
                 key={name}
                 onClick={() => setSeat(pickerSeat, { kind: name })}
-                className={cls(s.botOption, selected && ui.selected)}
+                className={cx(s.botOption, selected && ui.selected)}
               >
                 <span className={s.botName}>{botLabel(name, spec)}</span>
                 <span className={s.botDesc}>{spec.description}</span>
@@ -268,14 +267,14 @@ export default function NewGameDialog({
             <div key={i} className={s.row}>
               <span className={s.label}>{playerName(i)}</span>
               <button
-                className={cls(s.seatButton, isHuman && ui.selected)}
+                className={cx(s.seatButton, isHuman && ui.selected)}
                 onClick={() => setSeat(i, { kind: HUMAN })}
               >
                 <HumanIcon /> Human
               </button>
               <button
                 title="Choose and configure a bot"
-                className={cls(s.seatButton, !isHuman && ui.selected)}
+                className={cx(s.seatButton, !isHuman && ui.selected)}
                 onClick={() => openPicker(i)}
               >
                 <BotIcon /> {isHuman ? "Bot" : botLabel(seat.kind, bots[seat.kind])}
