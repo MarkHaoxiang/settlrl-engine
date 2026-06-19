@@ -339,7 +339,10 @@ packages/settlrl-app/
         ├── lib/seats.ts      # Seat tokens this browser holds, per game (localStorage)
         ├── lib/viewport.ts   # useTableViewport: pan / zoom / rotate (mouse, touch, keyboard)
         ├── lib/theme.ts      # Light / dark theme switching (persisted)
-        ├── lib/ui.ts         # Shared panel / button / highlight styles (theme variables)
+        ├── lib/ui.ts         # The few board-layer style helpers the SVG renderers still need
+        ├── index.css         # Design tokens (theme colours + spacing/radii/type) + keyframes
+        ├── styles/ui.module.css # Shared CSS-module classes (panel, button, page/toolbar, …)
+        ├── components/Button.tsx · Panel.tsx # Primitives over styles/ui.module.css
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play or Replay
         │   ├── PlayView.tsx   # Play mode: game state + handlers wiring the components below
