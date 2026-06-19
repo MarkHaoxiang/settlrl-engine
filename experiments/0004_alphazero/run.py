@@ -32,6 +32,11 @@ class AlphaZeroConfig(Config):
     num_simulations: int = 64
     max_num_considered_actions: int = 16
     temperature: float = 1.0
+    # warm-up: the first `teacher_iters` iterations draw data from a fixed strong
+    # heuristic search (GNN path only), the cold-start fix.
+    teacher: bool = False
+    teacher_iters: int = 0
+    teacher_sims: int = 32
     # loop
     n_iterations: int = 20
     selfplay_samples: int = 2048
@@ -111,13 +116,38 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_sims": 24,
         "checkpoint_every": 2,
     },
+    # Warm-started run: the first `teacher_iters` iterations learn from a fixed
+    # strong heuristic search (the cold-start fix), then self-play takes over.
+    "gnn_warm": {
+        "net": "gnn",
+        "width": 96,
+        "layers": 4,
+        "n_iterations": 30,
+        "teacher": True,
+        "teacher_iters": 8,
+        "teacher_sims": 32,
+        "selfplay_samples": 4096,
+        "selfplay_batch": 256,
+        "num_simulations": 32,
+        "max_num_considered_actions": 16,
+        "reuse": 2.0,
+        "batch_size": 512,
+        "arena_games": 64,
+        "arena_every": 3,
+        "arena_batch": 256,
+        "arena_sims": 32,
+        "checkpoint_every": 2,
+    },
     "gnn_smoke": {
         "net": "gnn",
         "width": 16,
         "layers": 2,
         "num_simulations": 4,
         "max_num_considered_actions": 4,
-        "n_iterations": 1,
+        "n_iterations": 2,
+        "teacher": True,
+        "teacher_iters": 1,
+        "teacher_sims": 4,
         "selfplay_samples": 8,
         "selfplay_batch": 4,
         "train_steps": 2,
@@ -151,6 +181,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     flashbax/orbax infra)."""
     import equinox as eqx
     import numpy as np
+    from settlrl_agents.value import heuristic_value
     from settlrl_learn import azgnn
     from settlrl_learn.graphnet import PRESETS
 
@@ -198,6 +229,9 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             num_simulations=cfg.num_simulations,
             max_num_considered_actions=cfg.max_num_considered_actions,
             temperature=cfg.temperature,
+            teacher_value=heuristic_value if cfg.teacher else None,
+            teacher_iters=cfg.teacher_iters,
+            teacher_sims=cfg.teacher_sims,
             buffer_max=cfg.buffer_max,
             batch_size=cfg.batch_size,
             train_steps=cfg.train_steps,

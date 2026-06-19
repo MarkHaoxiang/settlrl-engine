@@ -30,7 +30,7 @@ import optax
 from jaxtyping import Array, Float, Int
 from settlrl_agents import POLICIES, BeliefSpec, evaluate
 from settlrl_agents.policy import PolicyPrior
-from settlrl_agents.search import make_search, make_search_weights
+from settlrl_agents.search import PolicyWeights, make_search, make_search_weights
 from settlrl_agents.value import Value, ValueFunction
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import EDGE_V, N_VERTICES, TILE_V, BoardLayout
@@ -159,27 +159,25 @@ def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -
 
 
 def self_play(
-    model: AZGraphNet,
+    weights_fn: PolicyWeights,
     *,
     n_samples: int,
     n_players: int = 2,
-    num_simulations: int = 64,
-    max_num_considered_actions: int = 16,
     batch_size: int = 16,
     temperature: float = 1.0,
     seed: int = 0,
+    max_steps: int = 4000,
+    max_game_len: int = 800,
 ) -> GNNSamples:
-    """Collect >= ``n_samples`` self-play positions under ``model`` (the GNN
-    guiding the re-determinizing search). Positions from finished games are
-    credited with the acting seat's outcome; unfinished games are discarded."""
-    value_fn, prior_fn = make_az_gnn(model)
-    weights_fn = make_search_weights(
-        value_fn,
-        prior=prior_fn,
-        value_scale=2.0,
-        num_simulations=num_simulations,
-        max_num_considered_actions=max_num_considered_actions,
-    )
+    """Collect >= ``n_samples`` self-play positions, the moves and policy targets
+    drawn from ``weights_fn`` (the net's search, or a fixed teacher's during the
+    warm-up). Positions from finished games are credited with the acting seat's
+    outcome; unfinished games are discarded.
+
+    ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's
+    retained pending positions -- a cold/degenerate net can drag a game out
+    indefinitely, so without these the pending buffer (and the eventual flush)
+    grows unbounded. A capped lane keeps its most recent positions."""
     search = jax.jit(jax.vmap(weights_fn, in_axes=(0, 0, 0, 0, 0)))
     view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
     sample_of = jax.jit(jax.vmap(board_sample, in_axes=(0, 0, 0)))
@@ -195,7 +193,9 @@ def self_play(
     vals: list[float] = []
     key = jax.random.key(seed)
 
-    while len(vals) < n_samples:
+    for _step in range(max_steps):
+        if len(vals) >= n_samples:
+            break
         layout, state = env.board
         beliefs = env.beliefs
         assert beliefs is not None
@@ -216,6 +216,8 @@ def self_play(
         for lane in range(batch_size):
             row = (n_np[lane], e_np[lane], g_np[lane], w_np[lane], m_np[lane])
             pending[lane].append((*row, int(sel_np[lane])))
+            if len(pending[lane]) > max_game_len:
+                del pending[lane][:-max_game_len]
 
         env.step(*flat_to_action(move))
         rewards = np.asarray(env.rewards)
@@ -229,6 +231,13 @@ def self_play(
                 vals.append(float(rewards[lane, int(seat)] > 0))
             pending[lane] = []
 
+    if not vals:  # no game finished within the budget (a degenerate cold net)
+        z = np.zeros
+        return GNNSamples(
+            z((0, N_VERTICES, NODE_DIM), np.float32), z((0, N_DIR_EDGES, EDGE_DIM), np.float32),
+            z((0, GLOBAL_DIM), np.float32), z((0, N_FLAT), np.float32),
+            z((0, N_FLAT), np.float32), z((0,), np.float32),
+        )  # fmt: skip
     return GNNSamples(
         np.stack(out["nodes"]), np.stack(out["edges"]), np.stack(out["glob"]),
         np.stack(out["pol"]), np.stack(out["mask"]), np.asarray(vals, np.float32),
@@ -349,6 +358,9 @@ def learn(
     num_simulations: int = 64,
     max_num_considered_actions: int = 16,
     temperature: float = 1.0,
+    teacher_value: ValueFunction | None = None,
+    teacher_iters: int = 0,
+    teacher_sims: int = 32,
     buffer_max: int = 50_000,
     batch_size: int = 256,
     train_steps: int = 200,
@@ -376,7 +388,14 @@ def learn(
     (the AlphaZero sample-reuse factor) instead of a fixed ``train_steps`` -- the
     fix for value-head overfitting on a small early replay. A held-out
     ``eval_frac`` of each iteration's fresh positions (never trained, not
-    checkpointed) gives the ``val_*`` metrics, including ``val_value_acc``."""
+    checkpointed) gives the ``val_*`` metrics, including ``val_value_acc``.
+
+    ``teacher_value`` (with ``teacher_iters`` > 0) warm-starts the loop: the first
+    ``teacher_iters`` iterations draw their moves and policy targets from a fixed
+    strong search over ``teacher_value`` (``teacher_sims`` simulations) instead of
+    the cold net, so the heads learn from strong play before self-play takes
+    over — the standard fix for AlphaZero's cold-start (a random net's games are
+    noise to learn from)."""
     opt = optax.adamw(lr, weight_decay=weight_decay)
     buffer = fbx.make_item_buffer(
         max_length=buffer_max, min_length=batch_size,
@@ -431,18 +450,44 @@ def learn(
     def _param_norm(m: Any) -> Array:
         return cast(Array, optax.global_norm(eqx.filter(m, eqx.is_inexact_array)))
 
+    # The warm-up teacher: a fixed strong search (heuristic value) that generates
+    # the first `teacher_iters` iterations' data, so the value/policy heads learn
+    # from strong play instead of a cold random net's garbage games.
+    teacher_weights = (
+        make_search_weights(
+            teacher_value,
+            num_simulations=teacher_sims,
+            max_num_considered_actions=max_num_considered_actions,
+        )
+        if teacher_value is not None
+        else None
+    )
+
     ev: GNNSamples | None = None
     for i in range(int(state.iteration), n_iterations):
         t0 = time.perf_counter()
+        teaching = teacher_weights is not None and i < teacher_iters
+        if teaching:
+            wfn = cast(PolicyWeights, teacher_weights)
+        else:
+            v_fn, p_fn = make_az_gnn(model)
+            wfn = make_search_weights(
+                v_fn, prior=p_fn, value_scale=2.0,
+                num_simulations=num_simulations,
+                max_num_considered_actions=max_num_considered_actions,
+            )  # fmt: skip
         fresh = self_play(
-            model, n_samples=selfplay_samples, num_simulations=num_simulations,
-            max_num_considered_actions=max_num_considered_actions,
-            batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
+            wfn, n_samples=selfplay_samples, batch_size=selfplay_batch,
+            temperature=temperature, seed=seed + 1 + i,
         )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
+        nf = fresh.value.shape[0]
+        if nf == 0:  # degenerate net dragged every game past the budget; skip
+            if on_iter is not None:
+                on_iter(i, {"samples": 0.0, "teaching": float(teaching)}, model)
+            continue
         # hold out a never-trained eval slice (reproducible per iteration), buffer
         # the rest into flashbax.
-        nf = fresh.value.shape[0]
         perm = np.random.default_rng(seed + 50_000 + i).permutation(nf)
         n_ev = int(nf * eval_frac)
         fr, fe = _index(fresh, perm[n_ev:]), _index(fresh, perm[:n_ev])
@@ -465,6 +510,7 @@ def learn(
             "buffer_size": float(buf_state.current_index) if hasattr(buf_state, "current_index") else float("nan"),
             "lr": float(lr), "target_entropy": target_entropy,
             "param_norm": float(_param_norm(model)), "t_selfplay": t_selfplay,
+            "teaching": float(teaching),
         }  # fmt: skip
         key = jax.random.key(seed + 10_000 + i)
         t1 = time.perf_counter()
