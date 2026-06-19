@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { actionMeta } from "../lib/actionMeta";
 import { PLAYER_COLORS, playerName, type Player } from "../lib/boardData";
 import type { Belief, LogEntry } from "../lib/game";
-import { DIVIDER, buttonStyle, panelStyle } from "../lib/ui";
+import s from "./ChatPanel.module.css";
 import PlayersPanel from "./PlayersPanel";
 
 interface Props {
@@ -37,86 +37,46 @@ export default function ChatPanel({ entries, onSend, title = "Chat", players, ac
   };
 
   return (
-    <div
-      style={{
-        ...panelStyle,
-        width: 260,
-        margin: 12,
-        marginLeft: 0,
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div className={s.panel}>
       {players && (
         <>
           <PlayersPanel players={players} acting={acting} you={you} belief={belief} />
-          <div style={{ height: 1, background: DIVIDER, margin: "0 14px 2px" }} />
+          <div className={s.divider} />
         </>
       )}
-      <span
-        style={{
-          fontSize: 11,
-          opacity: 0.6,
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          padding: "12px 14px 8px",
-        }}
-      >
-        {title}
-      </span>
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-          padding: "2px 14px",
-        }}
-      >
+      <span className={s.title}>{title}</span>
+      <div className={s.log}>
         {entries.map((m) => (
           <div
             key={m.id}
-            className="fade-in"
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 6,
-              fontSize: 12,
-              opacity: m.kind === "move" ? 0.75 : 1,
-            }}
+            className={`fade-in ${m.kind === "move" ? s.entryMove : s.entry}`}
           >
             <span
+              className={s.dot}
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                flexShrink: 0,
-                alignSelf: "center",
                 background: m.player != null ? (PLAYER_COLORS[m.player] ?? "#888") : "#888",
               }}
             />
             {m.kind === "win" && <span>🏆</span>}
             {m.action_type && <span>{actionMeta(m.action_type).icon}</span>}
             {m.kind !== "move" && (
-              <span style={{ fontWeight: 700 }}>
+              <span className={s.author}>
                 {m.player != null ? playerName(m.player) : "Spectator"}
               </span>
             )}
-            <span style={{ overflowWrap: "anywhere" }}>{m.text}</span>
+            <span className={s.text}>{m.text}</span>
           </div>
         ))}
         <div ref={endRef} />
       </div>
       {onSend && (
-        <div style={{ padding: 10 }}>
+        <div className={s.inputRow}>
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder="Say something…"
-            style={{ ...buttonStyle, cursor: "text", width: "100%", fontSize: 12, padding: "7px 10px" }}
+            className={s.input}
           />
         </div>
       )}

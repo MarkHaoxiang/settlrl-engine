@@ -11,8 +11,8 @@ import {
   type Player,
   type ResourceKind,
 } from "../lib/boardData";
-import { ACCENT, ACCENT_GLOW, DIVIDER } from "../lib/ui";
 import CountBadge from "./CountBadge";
+import s from "./Hand.module.css";
 import ResourceGlyph from "./ResourceGlyph";
 
 const DEV_CARDS: { key: DevCardKind; label: string; icon: string }[] = [
@@ -56,24 +56,16 @@ function Chip({
     <div
       title={label}
       onClick={onClick}
+      className={s.chip}
       style={{
-        position: "relative",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 40,
-        height: 34,
-        borderRadius: 8,
         background: fill,
         border: `2px solid ${stroke}`,
         opacity: count === 0 ? 0.4 : 1,
-        ...(onClick ? { cursor: "pointer", boxShadow: ACCENT_GLOW } : {}),
-        ...(selected ? { outline: `2px solid ${ACCENT}`, outlineOffset: 1 } : {}),
+        ...(onClick ? { cursor: "pointer", boxShadow: "var(--accent-glow-shadow)" } : {}),
+        ...(selected ? { outline: "2px solid var(--accent)", outlineOffset: 1 } : {}),
       }}
     >
-      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {icon}
-      </span>
+      <span className={s.chipIcon}>{icon}</span>
       <CountBadge value={count} />
     </div>
   );
@@ -102,10 +94,10 @@ export default function Hand({
   const color = PLAYER_COLORS[player.player] ?? "#888";
   const stroke = PLAYER_STROKES[player.player] ?? "#444";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 8 }}>
-        <span style={{ width: 14, height: 14, borderRadius: "50%", background: color, border: `2px solid ${stroke}` }} />
-        <span style={{ fontWeight: 700, fontSize: 13 }}>
+    <div className={s.hand}>
+      <div className={s.nameGroup}>
+        <span className={s.dot} style={{ background: color, border: `2px solid ${stroke}` }} />
+        <span className={s.name}>
           {playerName(player.player)}
           {you ? " (you)" : ""}
         </span>
@@ -125,7 +117,7 @@ export default function Hand({
           />
         );
       })}
-      <span style={{ width: 1, alignSelf: "stretch", background: DIVIDER, margin: "0 8px" }} />
+      <span className={s.divider} />
       {DEV_CARDS.map((d) => {
         const canPlay = playableDev?.has(d.key) ?? false;
         return (
@@ -133,7 +125,7 @@ export default function Hand({
             key={d.key}
             count={player.devCardTypes?.[d.key] ?? 0}
             label={canPlay ? `${d.label} — click to play` : d.label}
-            icon={<span style={{ fontSize: 17, opacity: 0.8 }}>{d.icon}</span>}
+            icon={<span className={s.devIcon}>{d.icon}</span>}
             fill={DEV_CARD_BACK.fill}
             stroke={DEV_CARD_BACK.stroke}
             onClick={canPlay ? () => onDev?.(d.key) : undefined}

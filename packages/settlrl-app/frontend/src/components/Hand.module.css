@@ -1,0 +1,57 @@
+.hand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nameGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+/* background / border are the player colour, set inline. */
+.dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* The chip's static box; background / border / glow / outline are data-driven
+   and set inline. */
+.chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 34px;
+  border-radius: 8px;
+}
+
+.chipIcon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--divider);
+  margin: 0 8px;
+}
+
+.devIcon {
+  font-size: 17px;
+  opacity: 0.8;
+}

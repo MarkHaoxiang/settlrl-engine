@@ -9,10 +9,10 @@ import {
   type Player,
   type ResourceKind,
 } from "../lib/boardData";
-import { ACCENT, buttonStyle } from "../lib/ui";
 import Anchored from "./Anchored";
 import CountBadge from "./CountBadge";
 import ResourceGlyph from "./ResourceGlyph";
+import s from "./TradePopover.module.css";
 
 const boundText = (lo: number, hi: number): string => (lo === hi ? `${lo}` : `${lo}–${hi}`);
 
@@ -36,21 +36,17 @@ function TradeChip({
     <button
       title={`${RESOURCE_LABELS[r]}${disabled ? " — none to give" : ""}`}
       disabled={disabled}
+      className={s.chip}
       style={{
-        position: "relative",
-        width: 38,
-        height: 32,
-        borderRadius: 7,
         background: fill,
         border: `2px solid ${TERRAIN_STROKE[r]}`,
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.3 : 1,
-        padding: 0,
-        ...(selected ? { outline: `2px solid ${ACCENT}`, outlineOffset: 1 } : {}),
+        ...(selected ? { outline: "2px solid var(--accent)", outlineOffset: 1 } : {}),
       }}
       onClick={onClick}
     >
-      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <span className={s.chipIcon}>
         <ResourceGlyph kind={r} px={24} opacity={0.85} />
       </span>
       <CountBadge value={annotation} />
@@ -60,9 +56,9 @@ function TradeChip({
 
 function Side({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: 1 }}>{title}</span>
-      <div style={{ display: "flex", gap: 4 }}>{children}</div>
+    <div className={s.side}>
+      <span className={s.sideTitle}>{title}</span>
+      <div className={s.sideChips}>{children}</div>
     </div>
   );
 }
@@ -103,8 +99,8 @@ export default function TradePopover({
 
   return (
     <Anchored x={x} y={y} onClose={onClose}>
-      <span style={{ fontSize: 13, fontWeight: 700 }}>Trade with {playerName(partner)} — one card each way</span>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+      <span className={s.header}>Trade with {playerName(partner)} — one card each way</span>
+      <div className={s.sides}>
         <Side title="You give">
           {RESOURCE_ORDER.map((r) => (
             <TradeChip
@@ -117,7 +113,7 @@ export default function TradePopover({
             />
           ))}
         </Side>
-        <span style={{ fontSize: 20, opacity: 0.7, paddingBottom: 4 }}>⇄</span>
+        <span className={s.arrow}>⇄</span>
         <Side title={`${playerName(partner)} gives`}>
           {RESOURCE_ORDER.map((r) => (
             <TradeChip
@@ -130,20 +126,15 @@ export default function TradePopover({
           ))}
         </Side>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 12, opacity: 0.75, flex: 1 }}>
+      <div className={s.footer}>
+        <span className={s.summary}>
           {give && receive
             ? `1 ${RESOURCE_LABELS[give].toLowerCase()} for 1 ${RESOURCE_LABELS[receive].toLowerCase()}`
             : "pick a card from each side"}
         </span>
         <button
           disabled={disabled || !match}
-          style={{
-            ...buttonStyle,
-            fontSize: 13,
-            padding: "6px 14px",
-            ...(match ? { borderColor: ACCENT } : { opacity: 0.5, cursor: "default" }),
-          }}
+          className={match ? s.proposeReady : s.proposeDisabled}
           onClick={() => match && onPick(match.flat)}
         >
           🤝 Propose

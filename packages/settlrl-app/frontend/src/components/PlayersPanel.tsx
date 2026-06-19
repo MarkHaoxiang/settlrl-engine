@@ -9,6 +9,7 @@ import {
   type Player,
 } from "../lib/boardData";
 import type { Belief } from "../lib/game";
+import s from "./PlayersPanel.module.css";
 
 // One proven bound, "n" when exact or "lo–hi" when a steal blurred it.
 const boundText = (lo: number, hi: number): string => (lo === hi ? `${lo}` : `${lo}–${hi}`);
@@ -25,7 +26,7 @@ function Glyph({ children }: { children: React.ReactNode }) {
       strokeWidth={2.2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      style={{ opacity: 0.55, flexShrink: 0 }}
+      className={s.glyph}
     >
       {children}
     </svg>
@@ -68,9 +69,9 @@ const MagnifierGlyph = () => (
 
 function Stat({ glyph, value, label }: { glyph: React.ReactNode; value: number; label: string }) {
   return (
-    <span title={label} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+    <span title={label} className={s.stat}>
       {glyph}
-      <span style={{ minWidth: 10 }}>{value}</span>
+      <span className={s.statValue}>{value}</span>
     </span>
   );
 }
@@ -93,49 +94,26 @@ export default function PlayersPanel({
 }) {
   const [inspected, setInspected] = useState<number | null>(null);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "12px 10px 8px" }}>
-      <span
-        style={{
-          fontSize: 11,
-          opacity: 0.6,
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          padding: "0 4px 4px",
-        }}
-      >
-        Players
-      </span>
+    <div className={s.panel}>
+      <span className={s.label}>Players</span>
       {players.map((p) => {
         const b = belief?.players.find((x) => x.player === p.player);
         const open = inspected === p.player && b != null;
         return (
-          <div
-            key={p.player}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 5,
-              borderRadius: 8,
-              padding: "5px 8px",
-              ...(p.player === acting ? { background: "var(--selected-bg)" } : {}),
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          <div key={p.player} className={p.player === acting ? s.rowActive : s.row}>
+            <div className={s.line}>
               <span
+                className={s.dot}
                 style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  flexShrink: 0,
                   background: PLAYER_COLORS[p.player] ?? "#888",
                   border: `1.5px solid ${PLAYER_STROKES[p.player] ?? "#444"}`,
                 }}
               />
-              <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+              <span className={s.name}>
                 {playerName(p.player)}
                 {p.player === you ? " (you)" : ""}
               </span>
-              <span style={{ marginLeft: "auto", display: "flex", gap: 9, whiteSpace: "nowrap" }}>
+              <span className={s.stats}>
                 <Stat glyph={<VpGlyph />} value={p.victoryPoints} label="victory points" />
                 <Stat glyph={<CardsGlyph />} value={p.resourceCards} label="resource cards" />
                 <Stat glyph={<DevGlyph />} value={p.devCards} label="development cards" />
@@ -143,41 +121,26 @@ export default function PlayersPanel({
               {b ? (
                 <button
                   title="Inspect: proven hand bounds (card counting)"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: "0 2px",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    color: open ? "var(--accent)" : "inherit",
-                    opacity: open ? 1 : 0.7,
-                  }}
+                  className={open ? s.inspectOpen : s.inspect}
                   onClick={() => setInspected(open ? null : p.player)}
                 >
                   <MagnifierGlyph />
                 </button>
               ) : (
                 // Keep the stat columns aligned on rows without an inspect.
-                <span style={{ width: 16 }} />
+                <span className={s.spacer} />
               )}
             </div>
             {open && b && (
-              <div style={{ display: "flex", gap: 3, paddingLeft: 18 }} className="fade-in">
+              <div className={`fade-in ${s.bounds}`}>
                 {RESOURCE_ORDER.map((r) => (
                   <span
                     key={r}
                     title={`${r}: ${boundText(b.res_lo[r], b.res_hi[r])}`}
+                    className={s.boundChip}
                     style={{
-                      minWidth: 26,
-                      textAlign: "center",
-                      borderRadius: 4,
-                      padding: "1px 3px",
-                      fontSize: 10,
-                      fontWeight: 700,
                       background: TERRAIN_FILL[r],
                       border: `1px solid ${TERRAIN_STROKE[r]}`,
-                      color: "#1a1a1a",
-                      opacity: 0.9,
                     }}
                   >
                     {boundText(b.res_lo[r], b.res_hi[r])}

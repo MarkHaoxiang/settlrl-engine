@@ -1,0 +1,73 @@
+.panel {
+  composes: panel from "../styles/ui.module.css";
+  width: 260px;
+  margin: 12px;
+  margin-left: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.divider {
+  height: 1px;
+  background: var(--divider);
+  margin: 0 14px 2px;
+}
+
+.title {
+  font-size: 11px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 12px 14px 8px;
+}
+
+.log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 14px;
+}
+
+.entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.entryMove {
+  composes: entry;
+  opacity: 0.75;
+}
+
+/* background is the player colour, set inline. */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.author {
+  font-weight: 700;
+}
+
+.text {
+  overflow-wrap: anywhere;
+}
+
+.inputRow {
+  padding: 10px;
+}
+
+.input {
+  composes: button from "../styles/ui.module.css";
+  cursor: text;
+  width: 100%;
+  font-size: 12px;
+  padding: 7px 10px;
+}
