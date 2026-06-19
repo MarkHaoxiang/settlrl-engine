@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { type AuthUser } from "../lib/auth";
 import { useMyGames } from "../lib/queries";
-import { LINK, panelStyle } from "../lib/ui";
+import Panel from "./Panel";
+import s from "./MyGames.module.css";
 
 // The signed-in user's in-progress games, so they can resume on any device
 // (seats follow the account). Hidden when logged out or when there are none.
@@ -10,26 +11,16 @@ export default function MyGames({ user }: { user: AuthUser | null }) {
 
   if (games.length === 0) return null;
   return (
-    <div style={{ ...panelStyle, padding: "16px 20px", borderRadius: 12, minWidth: 248 }}>
-      <div
-        style={{
-          fontSize: 12,
-          opacity: 0.6,
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          marginBottom: 10,
-        }}
-      >
-        Your games
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <Panel className={s.box}>
+      <div className={s.label}>Your games</div>
+      <div className={s.list}>
         {games.map((g) => (
-          <Link key={g.id} to={`/play/${g.id}`} style={{ color: LINK, fontSize: 14 }}>
+          <Link key={g.id} to={`/play/${g.id}`} className={s.gameLink}>
             Game {g.id.slice(0, 6)} — seat{g.seats.length > 1 ? "s" : ""}{" "}
             {g.seats.map((s) => s + 1).join(", ")}
           </Link>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }

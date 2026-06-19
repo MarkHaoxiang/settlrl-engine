@@ -1,0 +1,46 @@
+.page {
+  composes: page from "../styles/ui.module.css";
+  gap: 36px;
+}
+
+.toolbar {
+  composes: toolbarTopRight from "../styles/ui.module.css";
+  align-items: flex-start;
+}
+
+.title {
+  font-size: 48px;
+  margin: 0;
+  letter-spacing: 1px;
+}
+
+.cards {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.card {
+  composes: panel from "../styles/ui.module.css";
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  padding: 26px 24px;
+  border-radius: var(--radius-lg);
+  border: 2px solid var(--panel-border);
+  text-decoration: none;
+  box-shadow: var(--shadow-panel);
+}
+
+.cardTitle {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.cardSubtitle {
+  font-size: 13px;
+  opacity: 0.75;
+  line-height: 1.4;
+}

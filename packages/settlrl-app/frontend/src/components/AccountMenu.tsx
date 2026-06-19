@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { logout, type AuthUser } from "../lib/auth";
-import { LINK, smallButtonStyle } from "../lib/ui";
+import ui from "../styles/ui.module.css";
+import Button from "./Button";
+import s from "./AccountMenu.module.css";
 
 // A compact account control for the menu. Accounts are optional — signed out,
 // everything still works — so signed out this is just a link to the sign-in
@@ -14,20 +16,20 @@ export default function AccountMenu({
 }) {
   if (user) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-        <Link to="/profile" style={{ color: LINK, opacity: 0.8 }}>
+      <div className={s.row}>
+        <Link to="/profile" className={s.accountLink}>
           {user.email}
           {user.is_superuser ? " · admin" : ""}
         </Link>
-        <button style={smallButtonStyle} onClick={() => void logout().then(() => onUser(null))}>
+        <Button variant="small" onClick={() => void logout().then(() => onUser(null))}>
           Log out
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <Link to="/login" style={{ ...smallButtonStyle, color: LINK, textDecoration: "none" }}>
+    <Link to="/login" className={ui.buttonLinkSmall}>
       Sign in
     </Link>
   );

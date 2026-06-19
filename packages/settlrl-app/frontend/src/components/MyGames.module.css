@@ -1,0 +1,20 @@
+.box {
+  padding: 16px 20px;
+  min-width: 248px;
+}
+
+.label {
+  composes: sectionLabel from "../styles/ui.module.css";
+  margin-bottom: 10px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gameLink {
+  color: var(--link);
+  font-size: 14px;
+}

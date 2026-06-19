@@ -1,0 +1,97 @@
+/* Shared look-and-feel classes (the old lib/ui.ts style objects, now scoped
+   CSS over the design tokens in index.css). Use the <Panel>/<Button> primitives
+   where an element fits; reach for these classes directly when styling another
+   element (e.g. a Link as a button). */
+
+.panel {
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-family: var(--font-serif);
+  backdrop-filter: blur(2px);
+  user-select: none;
+}
+
+.button {
+  background: var(--button-bg);
+  border: 1px solid var(--button-border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  font-size: 14px;
+  font-family: var(--font-serif);
+  cursor: pointer;
+}
+
+.buttonSmall {
+  composes: button;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* A compact icon toggle (theme / sound). */
+.iconButton {
+  composes: button;
+  padding: 3px 8px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+/* A Link that looks like a button (no underline, link colour). */
+.buttonLink {
+  composes: button;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.buttonLinkSmall {
+  composes: buttonSmall;
+  color: var(--link);
+  text-decoration: none;
+}
+
+/* A selected button/chip: the accent wash + border. */
+.selected {
+  background: var(--selected-bg);
+  border-color: var(--accent);
+}
+
+.overlayMsg {
+  color: var(--text);
+  padding: var(--space-4);
+  font-family: var(--font-serif);
+}
+
+.link {
+  color: var(--link);
+}
+
+/* A small uppercase section heading inside a panel ("Your games", "Past
+   games", "Bot services"). */
+.sectionLabel {
+  font-size: 12px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* A centred, column page (menu, leaderboard, profile). Per-page `gap` is set by
+   the composing class. */
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  color: var(--text);
+  font-family: var(--font-serif);
+}
+
+/* The fixed account / theme toolbar in a page's top-right corner. */
+.toolbarTopRight {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 10px;
+}

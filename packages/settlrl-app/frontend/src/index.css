@@ -2,8 +2,9 @@
   box-sizing: border-box;
 }
 
-/* Theme palettes (lib/ui.ts exposes these to inline styles). Light: warm
-   paper on a sunlit table. Dark: the original night-table glass. */
+/* The design tokens — colors (theme-dependent), plus the non-color tokens
+   (typography, spacing, radii, shadows) shared by the CSS modules and the
+   remaining computed inline styles. Light: warm paper on a sunlit table. */
 body {
   --bg: radial-gradient(ellipse at 50% 35%, #f3e8cd 0%, #d9c7a0 75%);
   --panel-bg: rgba(253, 248, 235, 0.92);
@@ -17,6 +18,19 @@ body {
   --divider: rgba(90, 70, 40, 0.25);
   --link: #2c5f9e;
   --error: #b03a2e;
+
+  /* Non-color tokens (theme-independent). */
+  --font-serif: Georgia, serif;
+  --highlight: #fce38a; /* literal: bright on the board tiles in either theme */
+  --accent-glow-shadow: 0 0 8px 2px var(--accent-glow);
+  --shadow-panel: 0 6px 24px rgba(0, 0, 0, 0.4);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 16px;
+  --space-4: 24px;
 }
 
 body[data-theme="dark"] {
@@ -97,5 +111,5 @@ body {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  font-family: Georgia, serif;
+  font-family: var(--font-serif);
 }
