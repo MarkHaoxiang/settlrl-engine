@@ -25,6 +25,10 @@ const FIXTURES = {
     { n_players: 4, kind: "account", name: "bob", rating: 1502, games: 12, wins: 3 },
   ],
   "/api/bots": { greedy: { title: "Greedy", description: "a bot", counts: [2, 3, 4] } },
+  "/api/lobby": [
+    { id: "lob12345", n_players: 4, number_placement: "random", seats: ["human", "human", "random", "human"], claimed: [0], open_seats: 2, created_at: Date.now() / 1000 - 40 },
+    { id: "lob67890", n_players: 2, number_placement: "spiral", seats: ["human", "human"], claimed: [0], open_seats: 1, created_at: Date.now() / 1000 - 600 },
+  ],
   "/api/admin/bot-providers": [{ name: "greedy", base_url: "http://localhost:8100" }],
 };
 
@@ -33,6 +37,7 @@ const browser = await chromium.launch({ executablePath: CHROME });
 // [name, path, signedIn] — signed-out screens (login) must not be redirected.
 const SCREENS = [
   ["menu", "/", true],
+  ["lobby", "/lobby", true],
   ["leaderboard", "/leaderboard", true],
   ["profile", "/profile", true],
   ["login", "/login", false],

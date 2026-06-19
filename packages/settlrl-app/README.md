@@ -30,9 +30,12 @@ hand arrives in full, everyone else's only as public counts, and the legal-move 
 ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
 link, and opening it claims a free human seat (or spectates when none is left); the 🔑 button
 copies a resume link that carries your seat tokens, so you can restore the exact seats you
-hold on another device or after clearing storage. A game with unclaimed human seats waits in
-a **lobby** — it serves no moves and advances neither bots nor turn timeouts — until every
-human seat is filled, then begins on its own. The server
+hold on another device or after clearing storage. A game with unclaimed human seats waits in a
+**waiting room** — it serves no moves and advances neither bots nor turn timeouts — until every
+human seat is filled, then begins on its own; any player in it can convert a still-open seat to
+a bot (or reopen it) there to start under-filled. A game can also be **listed** at creation so
+it appears in the public lobby (below) for anyone to join, instead of being invite-link only.
+The server
 pushes state: each client holds an event stream (`GET /api/games/{id}/events`, SSE) and
 receives its per-seat snapshot on every change, and bot seats are played by a server-side
 driver pacing one move at a time so each lands as its own pushed snapshot — games advance
@@ -176,6 +179,16 @@ are kept in the store (a capped, replayable archive) rather than discarded, so
 their record is served even after the live game is evicted — the same record the
 end-of-game screen's **Download replay** button saves.
 
+## Lobby
+
+The menu's **Lobby** page (`/lobby`, public) lists open games anyone can join —
+the games created with **List in lobby** that still have an unclaimed human seat,
+newest first (`GET /api/lobby`). Each row shows its player count, seats filled,
+and map; **Join** opens the game and claims a free seat. The owner controls each
+seat from the New Game dialog (human or a specific bot) and can still retarget an
+unclaimed seat in the waiting room (`POST /api/games/{id}/seats`), so an
+under-filled game is never stuck.
+
 ## Leaderboard
 
 The menu's **Leaderboard** page (`/leaderboard`, public) ranks players by skill,
@@ -258,8 +271,9 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "listed"?, "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees |
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
+| `POST /api/games/{id}/seats` | Retarget an unclaimed seat before play `{ "seat", "kind": "human" \| <bot kind> }` (any player in the game) — `403` for outsiders, `409` if the seat is taken or the game has started |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
 | `GET /api/games/{id}/events` | Server-sent events: the requester's snapshot immediately, then again on every change (`bot_move` carries the server-paced bot play just made) |
@@ -274,6 +288,7 @@ BASE=http://localhost:8000 npm run e2e
 | `GET /api/me/games` | The signed-in user's live games — seats follow the account across devices |
 | `GET /api/me/history` | The signed-in user's finished games (newest first) — replayable / downloadable by id |
 | `GET /api/leaderboard` | Elo ratings for accounts and bots, per player-count bucket, best first (public; see [Leaderboard](#leaderboard)) |
+| `GET /api/lobby` | Open games anyone can join (listed, non-terminal, with a free human seat), newest first (public; see [Lobby](#lobby)) |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
 
@@ -305,7 +320,7 @@ packages/settlrl-app/
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
 │   ├── api/             # the HTTP layer (game model + serialization is settlrl-game)
 │   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over
-│   │   ├── routers/       # Routes by area: games, replay, bots, me, leaderboard (each build(deps) -> APIRouter)
+│   │   ├── routers/       # Routes by area: games, replay, bots, me, leaderboard, lobby (each build(deps) -> APIRouter)
 │   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
 │   │   └── openapi.py     # Schema dump backing the generated frontend types
 │   ├── game/            # the live game runtime
@@ -324,11 +339,11 @@ packages/settlrl-app/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /help, /profile, /leaderboard, /replay
+        ├── App.tsx          # Routes: menu, /play, /lobby, /help, /profile, /leaderboard, /replay
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError) + the SSE reader
         ├── lib/client.ts     # Typed REST client (openapi-fetch) from the schema, auth-injecting
-        ├── lib/queries.ts    # React Query hooks for the read endpoints (me/games, history, leaderboard)
+        ├── lib/queries.ts    # React Query hooks for the read endpoints (me/games, history, leaderboard, lobby)
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard
         ├── lib/api-schema.d.ts # Wire types generated from openapi.json (do not edit)
         ├── lib/game.ts       # Live-game API client (/api/game*)
@@ -344,8 +359,9 @@ packages/settlrl-app/
         ├── styles/ui.module.css # Shared CSS-module classes (panel, button, page/toolbar, …)
         ├── components/Button.tsx · Panel.tsx # Primitives over styles/ui.module.css
         ├── pages/
-        │   ├── Menu.tsx       # Landing page: choose Play or Replay
+        │   ├── Menu.tsx       # Landing page: choose Play, Lobby, or Replay
         │   ├── PlayView.tsx   # Play mode: game state + handlers wiring the components below
+        │   ├── LobbyView.tsx  # Lobby: browse open games and join one
         │   ├── HelpView.tsx   # Help page: controls, action icons, seats
         │   └── ReplayView.tsx # Replay mode: load a record, scrub / step / play it
         └── components/

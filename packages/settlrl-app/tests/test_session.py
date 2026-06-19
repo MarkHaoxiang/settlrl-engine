@@ -8,7 +8,7 @@ record export.
 
 import pytest
 from settlrl_game.record import GameRecord, replay
-from settlrl_game.session import HUMAN, GameSession
+from settlrl_game.session import HUMAN, GameSession, IllegalActionError
 
 _BOTS = frozenset({"random"})  # an accepted "remote" kind for these tests
 
@@ -153,3 +153,17 @@ def test_record_of_running_game_has_no_winner() -> None:
     assert [m.flat for m in rec.moves] == [rec.moves[0].flat]
     sess.reset(seed=1)
     assert sess.record().moves == ()  # reset starts a fresh trace
+
+
+def test_set_seat_kind_relabels_before_play() -> None:
+    sess = GameSession(seed=0, n_players=2, seats=["human", "human"])
+    sess.set_seat_kind(1, "random")
+    assert sess.seats == ["human", "random"]
+    assert sess.status().seats == ["human", "random"]  # surfaced to the wire
+
+
+def test_set_seat_kind_rejected_after_a_move() -> None:
+    sess = GameSession(seed=0, n_players=2)
+    sess.auto_step()
+    with pytest.raises(IllegalActionError):
+        sess.set_seat_kind(1, "random")

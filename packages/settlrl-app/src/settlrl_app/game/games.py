@@ -94,6 +94,10 @@ class GameHandle:
         # the seat follows the user across devices, without the seat token).
         self.claim_users: dict[int, str] = {}
         self.touched = time.monotonic()
+        self.created_at = time.time()
+        # Listed in the public lobby (anyone may join an open human seat). Set on
+        # create for "public" games; invite-only games stay False.
+        self.listed = False
         # Monotonic change counter: every state change bumps it, and waiters
         # re-serialise their view when it moves.
         self.version = 0
@@ -102,6 +106,9 @@ class GameHandle:
         self.bot_move: BotMoveModel | None = None
         # Set on eviction: waiters and the bot driver exit.
         self.closed = False
+        # Whether the bot/timeout driver task has been started for this game, so
+        # spawning it (create, restart, a seat turned into a bot) is idempotent.
+        self.driver_started = False
         # Crash-recovery journal (None when persistence is off).
         self.journal: GameJournal | None = None
         # Set once the game's end has been journalled, so the finish hook in
@@ -167,6 +174,10 @@ class GameHandle:
 
     def human_seats(self) -> list[int]:
         return [i for i, kind in enumerate(self.session.seats) if kind == HUMAN]
+
+    def open_human_seats(self) -> list[int]:
+        """Human seats no one has claimed yet — the seats a joiner can take."""
+        return [s for s in self.human_seats() if s not in self.claims]
 
     def ready(self) -> bool:
         """Whether every human seat is claimed. Until then the game waits in its
@@ -301,6 +312,16 @@ class GameRegistry:
         """A snapshot of the live handles (e.g. to start drivers after a
         restart)."""
         return list(self._games.values())
+
+    def open_games(self) -> list[GameHandle]:
+        """Listed, joinable games for the public lobby: not over, with at least
+        one unclaimed human seat. Newest first."""
+        open_ = [
+            h
+            for h in self._games.values()
+            if h.listed and not h.session.terminal() and h.open_human_seats()
+        ]
+        return sorted(open_, key=lambda h: h.created_at, reverse=True)
 
     def _insert(self, handle: GameHandle) -> None:
         """Place an already-built handle (used by restore; no eviction)."""

@@ -80,6 +80,8 @@ export default function NewGameDialog({
   // With several human seats: all on this screen, or just yours (the others
   // join through the invite link).
   const [seating, setSeating] = useState<"hotseat" | "online">("hotseat");
+  // List the game in the public lobby so anyone can take its open human seats.
+  const [listed, setListed] = useState(false);
   // One controller per possible seat; only the first nPlayers are used.
   const [seats, setSeats] = useState<SeatConfig[]>([
     { kind: HUMAN },
@@ -153,6 +155,9 @@ export default function NewGameDialog({
   };
 
   const humanSeats = seats.slice(0, nPlayers).filter((s) => s.kind === HUMAN).length;
+  // Online seating (others join remotely) is only meaningful with >=2 humans;
+  // only then are seats left open, so only then can the game be listed.
+  const online = humanSeats >= 2 && seating === "online";
 
   const setSeat = (i: number, seat: SeatConfig) =>
     setSeats((prev) => prev.map((p, j) => (j === i ? seat : p)));
@@ -168,7 +173,9 @@ export default function NewGameDialog({
       nPlayers,
       numberPlacement,
       seats: seats.slice(0, nPlayers),
-      claim: humanSeats >= 2 && seating === "online" ? "first" : "all",
+      claim: online ? "first" : "all",
+      // Only an online game leaves human seats open for others to take.
+      listed: online && listed,
     });
   };
 
@@ -294,6 +301,19 @@ export default function NewGameDialog({
               </span>
             }
           />
+        )}
+        {online && (
+          <div className={s.row}>
+            <span className={s.label}>Lobby</span>
+            <button
+              className={cx(s.seatButton, listed && ui.selected)}
+              onClick={() => setListed((v) => !v)}
+              title="Show this game in the public lobby so anyone can join its open seats"
+            >
+              {listed ? "Listed" : "List in lobby"}
+            </button>
+            <span className={s.hint}>{listed ? "anyone can join" : "invite link only"}</span>
+          </div>
         )}
         <div className={s.row}>
           <span className={s.label}>Map</span>

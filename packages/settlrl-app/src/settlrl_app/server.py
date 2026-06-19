@@ -92,6 +92,11 @@ def create_app(
     drivers: set[asyncio.Task[None]] = set()
 
     def spawn_driver(handle: GameHandle) -> None:
+        # Idempotent: create, restart, and a seat turned into a bot may all ask,
+        # but a game must have exactly one driver.
+        if handle.driver_started:
+            return
+        handle.driver_started = True
         task = start_game_driver(handle, bot_delay, turn_timeout, bots)
         drivers.add(task)
         task.add_done_callback(drivers.discard)
@@ -146,6 +151,7 @@ def create_app(
         routers.bots,
         routers.me,
         routers.leaderboard,
+        routers.lobby,
     ):
         app.include_router(module.build(deps))
     app.include_router(auth.router)

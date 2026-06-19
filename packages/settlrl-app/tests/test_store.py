@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry, _rebuild_handle
 from settlrl_app.server import create_app
 from settlrl_app.storage.db import Database, GameLog
-from settlrl_app.storage.store import GameStore, RatingEntry
+from settlrl_app.storage.store import FinishedGame, GameStore, RatingEntry
 from settlrl_game.convert import board_to_model
 from settlrl_game.session import GameSession, GameSetup
 from sqlalchemy import select
@@ -106,7 +106,7 @@ def test_eviction_drops_the_game_from_the_store(tmp_path: Path) -> None:
 
 
 def test_finished_game_is_kept_as_history_not_restored(tmp_path: Path) -> None:
-    async def scenario() -> tuple[str, int | None, set[str], list[object]]:
+    async def scenario() -> tuple[str, int | None, set[str], list[FinishedGame]]:
         db = Database(str(tmp_path / "settlrl.db"))
         await db.init()
         store = GameStore(db)

@@ -133,6 +133,8 @@ export interface NewGameConfig {
   // One entry per seat; no seat has to be human (an all-bot game spectates).
   seats: SeatConfig[];
   claim: ClaimMode;
+  // List the game in the public lobby so anyone can join its open seats.
+  listed: boolean;
 }
 
 // A freshly created game: its id plus the creator's seat tokens (every human
@@ -164,6 +166,7 @@ export async function createGame(
       number_placement: config.numberPlacement,
       seats: config.seats.map((s) => s.kind),
       claim: config.claim,
+      listed: config.listed,
       ticket,
     }),
     // Sign-in (if any) ties the creator's claimed seats to their account.
@@ -182,6 +185,24 @@ export async function joinGame(
     // Sign-in (if any) ties the claimed seat to the account.
     headers: authHeader(),
   });
+}
+
+// Retarget a still-open seat (open <-> a bot kind). Owner-only, pre-start; the
+// returned snapshot reflects the new seat kinds. Used by the waiting room to
+// bot-fill seats so an under-filled game can start.
+export async function setSeat(
+  gameId: string,
+  tokens: SeatTokens,
+  seat: number,
+  kind: SeatKind
+): Promise<GameSnapshot> {
+  return adaptGame(
+    await api<GameWire>(`/api/games/${gameId}/seats`, {
+      method: "POST",
+      body: JSON.stringify({ seat, kind }),
+      headers: seatHeaders(tokens),
+    })
+  );
 }
 
 // A bot's catalog entry (one per registered bot service): a display title, a

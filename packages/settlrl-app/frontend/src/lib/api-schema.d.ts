@@ -63,6 +63,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/games/{game_id}/seats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Seat
+         * @description Retarget an unclaimed seat before play begins — open it for a human or
+         *     turn it into a bot (the lobby owner's "fill to start" control). Any
+         *     player in the game may do this; ``403`` for outsiders, ``409`` if the
+         *     seat is taken or the game has started.
+         */
+        post: operations["post_seat_api_games__game_id__seats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/games/{game_id}": {
         parameters: {
             query?: never;
@@ -372,6 +395,26 @@ export interface paths {
          *     (best first). Public; clients split the buckets into ladders.
          */
         get: operations["leaderboard_api_leaderboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobby": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lobby
+         * @description Listed, joinable games (newest first) — each has an open human seat.
+         */
+        get: operations["lobby_api_lobby_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1012,6 +1055,11 @@ export interface components {
              * @enum {string}
              */
             claim: "all" | "first" | "none";
+            /**
+             * Listed
+             * @default false
+             */
+            listed: boolean;
             /** Ticket */
             ticket?: string | null;
         };
@@ -1060,6 +1108,26 @@ export interface components {
             games: number;
             /** Wins */
             wins: number;
+        };
+        /**
+         * _LobbyGameModel
+         * @description One joinable game in the lobby.
+         */
+        _LobbyGameModel: {
+            /** Id */
+            id: string;
+            /** N Players */
+            n_players: number;
+            /** Number Placement */
+            number_placement: string;
+            /** Seats */
+            seats: string[];
+            /** Claimed */
+            claimed: number[];
+            /** Open Seats */
+            open_seats: number;
+            /** Created At */
+            created_at: number;
         };
         /**
          * _MyGameModel
@@ -1113,6 +1181,13 @@ export interface components {
             position: number;
             /** Total */
             total: number;
+        };
+        /** _SeatRequest */
+        _SeatRequest: {
+            /** Seat */
+            seat: number;
+            /** Kind */
+            kind: string;
         };
     };
     responses: never;
@@ -1211,6 +1286,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_JoinedModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_seat_api_games__game_id__seats_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_SeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameModel"];
                 };
             };
             /** @description Validation Error */
@@ -1678,6 +1790,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_LeaderboardEntry"][];
+                };
+            };
+        };
+    };
+    lobby_api_lobby_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LobbyGameModel"][];
                 };
             };
         };

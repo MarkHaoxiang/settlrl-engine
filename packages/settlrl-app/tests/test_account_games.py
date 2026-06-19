@@ -208,7 +208,7 @@ def test_leaderboard_rates_accounts_and_bots() -> None:
         assert {e["name"] for e in board} == {"champ", "random"}  # handle + bot
         assert {e["kind"] for e in board} == {"account", "bot"}
         assert all(e["n_players"] == 2 and e["games"] == 1 for e in board)
-        assert sum(e["wins"] for e in board) == 1  # exactly one winner
+        assert sum(int(e["wins"]) for e in board) == 1  # type: ignore[call-overload]  # exactly one winner
 
 
 def test_account_seat_ownership_survives_a_restart() -> None:

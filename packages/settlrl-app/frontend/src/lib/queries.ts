@@ -12,6 +12,7 @@ type Schemas = components["schemas"];
 export type MyGame = Schemas["_MyGameModel"];
 export type PastGame = Schemas["_PastGameModel"];
 export type LeaderboardEntry = Schemas["_LeaderboardEntry"];
+export type LobbyGame = Schemas["_LobbyGameModel"];
 
 // The signed-in user's in-progress games (seats follow the account); idle until
 // signed in.
@@ -37,5 +38,14 @@ export function useLeaderboard() {
   return useQuery({
     queryKey: ["leaderboard"],
     queryFn: () => unwrap(client.GET("/api/leaderboard")),
+  });
+}
+
+// Open games anyone can join, newest first; polled so the list stays live.
+export function useLobby() {
+  return useQuery({
+    queryKey: ["lobby"],
+    queryFn: () => unwrap(client.GET("/api/lobby")),
+    refetchInterval: 4000,
   });
 }

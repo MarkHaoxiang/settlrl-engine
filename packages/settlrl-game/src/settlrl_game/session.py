@@ -160,6 +160,19 @@ class GameSession:
         self._win_logged = False
         self._moves: list[Move] = []
 
+    def set_seat_kind(self, seat: int, kind: SeatLike) -> None:
+        """Relabel one seat's controller (lobby seat control / matchmaking
+        bot-fill). A seat's kind is metadata — the engine only knows
+        ``n_players`` — so this just swaps the label; valid only before any move
+        is played. A non-human kind is added to the accepted external kinds."""
+        if self._moves:
+            raise IllegalActionError("cannot change seats after the game has started")
+        if not 0 <= seat < self.n_players:
+            raise ValueError(f"no seat {seat}")
+        if kind != HUMAN:
+            self._external_kinds = self._external_kinds | {kind}
+        self.seats[seat] = kind
+
     # -- views ------------------------------------------------------------
 
     def acting_seat(self) -> int:

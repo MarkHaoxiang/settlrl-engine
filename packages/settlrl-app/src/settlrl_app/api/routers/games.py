@@ -42,6 +42,9 @@ class _CreateRequest(BaseModel):
     # hotseat default), just the first ("first", online play — others join
     # via POST /join), or none.
     claim: Literal["all", "first", "none"] = "all"
+    # List the game in the public lobby (anyone may join an open human seat).
+    # Default off: a game is invite-only unless explicitly made public.
+    listed: bool = False
     # The caller's place in line from a prior queued response, re-sent each poll
     # while waiting for a free slot; None on the first attempt.
     ticket: str | None = None
@@ -74,6 +77,13 @@ class _JoinedModel(BaseModel):
     id: str
     seat: int
     token: str
+
+
+class _SeatRequest(BaseModel):
+    # The seat to retarget (must be unclaimed) and its new controller: "human"
+    # (open for a joiner) or a bot kind from GET /api/bots.
+    seat: int
+    kind: str
 
 
 class _ActionRequest(BaseModel):
@@ -158,6 +168,7 @@ def build(deps: Deps) -> APIRouter:
             return _QueuedModel(
                 ticket=seated.ticket, position=seated.position, total=seated.total
             )
+        seated.listed = req.listed  # show in the public lobby if requested
         humans = seated.human_seats()
         claiming = (
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
@@ -179,6 +190,37 @@ def build(deps: Deps) -> APIRouter:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             handle.bump()
         return _JoinedModel(id=game_id, seat=seat, token=token)
+
+    @router.post("/api/games/{game_id}/seats")
+    async def post_seat(
+        game_id: str,
+        req: _SeatRequest,
+        user: CurrentUser = None,
+        x_seat_tokens: SeatTokens = None,
+    ) -> GameModel:
+        """Retarget an unclaimed seat before play begins — open it for a human or
+        turn it into a bot (the lobby owner's "fill to start" control). Any
+        player in the game may do this; ``403`` for outsiders, ``409`` if the
+        seat is taken or the game has started."""
+        handle = deps.handle_of(game_id)
+        async with handle.lock:
+            owned = handle.owned_seats(tokens(x_seat_tokens), uid(user))
+            if not owned:
+                raise HTTPException(
+                    status_code=403, detail="only a player in this game can set seats"
+                )
+            if req.seat in handle.claims:
+                raise HTTPException(status_code=409, detail="seat is already taken")
+            if req.kind != HUMAN:
+                _validate_seat_kinds([req.kind], handle.session.n_players, bots.catalog())
+            try:
+                handle.session.set_seat_kind(req.seat, req.kind)
+            except (ValueError, IllegalActionError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if needs_driver(handle, deps.turn_timeout):
+                deps.spawn_driver(handle)
+            handle.bump()
+            return game_model(handle, owned)
 
     @router.get("/api/games/{game_id}")
     async def get_game(

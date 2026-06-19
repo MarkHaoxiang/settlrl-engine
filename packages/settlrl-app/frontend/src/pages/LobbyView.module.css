@@ -1,0 +1,53 @@
+.page {
+  composes: page from "../styles/ui.module.css";
+  gap: 28px;
+}
+
+.title {
+  font-size: 36px;
+  margin: 0;
+}
+
+.box {
+  composes: panel from "../styles/ui.module.css";
+  padding: 12px 16px;
+  min-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.empty {
+  font-size: 13px;
+  opacity: 0.6;
+  padding: 8px 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 6px;
+  border-top: 1px solid var(--divider);
+}
+
+.row:first-child {
+  border-top: none;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.players {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.muted {
+  font-size: 12px;
+  opacity: 0.7;
+}

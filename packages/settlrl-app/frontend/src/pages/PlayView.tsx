@@ -17,7 +17,16 @@ import TopBar from "../components/TopBar";
 import { BotIcon, HumanIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
-import { createGame, joinGame, type GameAction, type GameSnapshot, type NewGameConfig } from "../lib/game";
+import {
+  createGame,
+  fetchBots,
+  joinGame,
+  setSeat,
+  type BotSpec,
+  type GameAction,
+  type GameSnapshot,
+  type NewGameConfig,
+} from "../lib/game";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import { authToken } from "../lib/auth";
 import {
@@ -147,6 +156,12 @@ export default function PlayView() {
   const [endDismissed, setEndDismissed] = useState(false);
   // Brief "Copied!" feedback on the lobby's invite-link button.
   const [linkCopied, setLinkCopied] = useState(false);
+  // The bot catalog, for the waiting-room owner control that fills an open seat
+  // with a bot. Empty until loaded / when the server runs no bots.
+  const [bots, setBots] = useState<Record<string, BotSpec>>({});
+  useEffect(() => {
+    fetchBots().then(setBots).catch(() => setBots({}));
+  }, []);
   // Set while waiting in line when the server is at its concurrency cap.
   const [queue, setQueue] = useState<{ position: number; total: number } | null>(null);
   const queueTimer = useRef<number | null>(null);
@@ -303,6 +318,17 @@ export default function PlayView() {
   const humanSeats = status.seats.flatMap((k, i) => (k === "human" ? [i] : []));
   const claimedSeats = new Set(snapshot.seats_claimed);
   const waiting = !status.terminal && humanSeats.some((s) => !claimedSeats.has(s));
+  // Any player in the game may retarget the still-open seats (the lobby owner's
+  // "fill to start" control): convert an open human seat to a bot, or reopen a
+  // bot seat. Pick the bot kind the new-game dialog would default to.
+  const inGame = mySeats.length > 0;
+  const botKinds = Object.keys(bots)
+    .filter((b) => bots[b].counts.includes(status.seats.length))
+    .sort();
+  const defaultBot = botKinds.includes("random") ? "random" : botKinds[0];
+  const retargetSeat = (seat: number, kind: string) => {
+    if (gameId) void setSeat(gameId, tokens, seat, kind).catch(() => {});
+  };
   // The hand panel follows whichever owned seat is acting (falling back to
   // this client's first seat). Owning no seats means spectating: no hand.
   const handSeat = mySeats.includes(status.acting_player)
@@ -489,6 +515,10 @@ export default function PlayView() {
                   const human = kind === "human";
                   const filled = !human || claimedSeats.has(i);
                   const mine = mySeats.includes(i);
+                  // The owner can retarget a seat no one has claimed yet: fill an
+                  // open human seat with a bot, or reopen a bot seat for a human.
+                  const open = human && !claimedSeats.has(i);
+                  const canControl = inGame && !claimedSeats.has(i);
                   return (
                     <div key={i} className={s.seatRow} style={{ opacity: filled ? 1 : 0.55 }}>
                       <span className={s.seatDot} style={{ background: PLAYER_COLORS[i] ?? "#888" }} />
@@ -500,6 +530,26 @@ export default function PlayView() {
                       <span className={s.seatStatus}>
                         {!human ? kind : filled ? "joined" : "open"}
                       </span>
+                      {canControl &&
+                        (open
+                          ? defaultBot && (
+                              <Button
+                                variant="small"
+                                title="Fill this seat with a bot so the game can start"
+                                onClick={() => retargetSeat(i, defaultBot)}
+                              >
+                                + Bot
+                              </Button>
+                            )
+                          : (
+                              <Button
+                                variant="small"
+                                title="Reopen this seat for a human player"
+                                onClick={() => retargetSeat(i, "human")}
+                              >
+                                Open
+                              </Button>
+                            ))}
                     </div>
                   );
                 })}
