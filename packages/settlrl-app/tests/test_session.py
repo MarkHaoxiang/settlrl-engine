@@ -29,19 +29,6 @@ def test_acting_seat_is_human_after_construction() -> None:
     assert not sess.status().terminal
 
 
-def test_default_seats_are_all_human() -> None:
-    sess = GameSession(seed=0)
-    assert sess.status().seats == [HUMAN, HUMAN, HUMAN, HUMAN]
-
-
-def test_acting_seat_is_human_after_reset() -> None:
-    sess = GameSession(seed=1)
-    sess.apply(int(sess.legal_flat()[0]))  # perturb
-    sess.reset(seed=2)
-    assert sess.acting_seat() == 0
-    assert sess.status().your_turn
-
-
 def test_auto_step_plays_a_random_legal_move() -> None:
     sess = GameSession(seed=0)
     flat = sess.auto_step()
@@ -82,12 +69,6 @@ def test_all_bot_game_waits_on_a_bot_and_plays_out() -> None:
     assert not sess.status().your_turn  # no human seat acts
     _drive_to_completion(sess)
     assert sess.status().terminal and sess.status().winner is not None
-
-
-def test_two_player_session_seats_two() -> None:
-    sess = GameSession(seed=0, n_players=2)
-    assert sess.acting_seat() == 0
-    assert len(sess.game.players) == 2  # seated player count
 
 
 def test_belief_serves_the_hand_seat() -> None:

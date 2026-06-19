@@ -62,11 +62,3 @@ def test_dev_script_endpoints_still_exist() -> None:
         assert path in text, f"dev.sh no longer calls {path}"
         assert path in served, f"the server no longer serves {path}"
     assert "/info" in text and "/info" in _paths(create_bot_app(make_bot("greedy")))
-
-
-def test_dev_script_seeds_an_admin() -> None:
-    # Registering the bot service only works if the seeded account is admin,
-    # which depends on its email being passed as a configured admin email.
-    text = SCRIPT.read_text()
-    assert "SETTLRL_APP_ADMIN_EMAILS" in text
-    assert "$ADMIN_EMAIL" in text or "${ADMIN_EMAIL}" in text

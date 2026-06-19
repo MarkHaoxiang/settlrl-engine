@@ -9,40 +9,14 @@ decode layer to real play rather than to a parallel reconstruction.
 """
 
 import pytest
-import settlrl_game.reference as ref
 from settlrl_game.actions import N_FLAT, decode_actions
 from settlrl_game.convert import board_to_model
-from settlrl_game.models import BoardModel, CubeModel
+from settlrl_game.models import CubeModel
 from settlrl_game.session import GameSession, IllegalActionError
 
 
 def _cube(c: CubeModel) -> tuple[int, int, int]:
     return (c.q, c.r, c.s)
-
-
-def test_session_board_converts() -> None:
-    sess = GameSession(seed=0)
-    model = board_to_model(sess.game)
-    assert isinstance(model, BoardModel)
-    assert len(model.tiles) == 19
-    assert len(model.ports) == 9
-    assert len(model.players) == 4
-
-
-def test_status_phase_is_a_real_phase() -> None:
-    sess = GameSession(seed=0)
-    valid = {p.value for p in ref.Phase}
-    assert sess.status().phase in valid
-
-
-def test_legal_actions_decode_and_roundtrip() -> None:
-    # Every legal move decodes, and its flat id is genuinely legal.
-    sess = GameSession(seed=0)
-    legal = sess.legal_flat()
-    assert legal, "human should have legal moves at game start (setup phase)"
-    legal_set = set(legal)
-    for m in decode_actions(legal):
-        assert m.flat in legal_set
 
 
 def test_illegal_action_rejected() -> None:

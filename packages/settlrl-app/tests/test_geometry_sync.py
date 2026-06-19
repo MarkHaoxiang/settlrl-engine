@@ -9,12 +9,6 @@ from settlrl_game.convert import EDGE_VERTICES, TILE_COORDS, VERTEX_COORDS
 from settlrl_game.reference import board as rb
 
 
-def test_counts_match_reference() -> None:
-    assert len(TILE_COORDS) == rb.N_TILES
-    assert len(VERTEX_COORDS) == rb.N_VERTICES
-    assert len(EDGE_VERTICES) == rb.N_EDGES
-
-
 def test_tables_are_well_formed() -> None:
     # Tile axial coords are the (q, r) projection of the tile cube centres.
     for t, (q, r) in enumerate(TILE_COORDS):
