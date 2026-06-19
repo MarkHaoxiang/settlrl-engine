@@ -539,7 +539,10 @@ def learn(
                 jnp.asarray(ev.value), jnp.asarray(ev.mask),
             )  # fmt: skip
             metrics.update({k2: float(v) for k2, v in vm.items()})
-        if arena_games and (i + 1) % arena_every == 0:
+        # Arena only once the net is past the warm-up: a half-trained net drags
+        # games out, and the GNN search arena pays full cost per step, so an early
+        # arena is both slow and meaningless (val_* metrics cover warm-up health).
+        if arena_games and (i + 1) % arena_every == 0 and (i + 1) >= teacher_iters:
             t2 = time.perf_counter()
             # Arena decoupled from training: many lanes (parallel, GPU-saturating)
             # at a modest sim budget -- ~an order of magnitude faster, same signal.

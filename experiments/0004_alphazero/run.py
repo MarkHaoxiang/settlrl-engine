@@ -132,10 +132,12 @@ VARIANTS: dict[str, dict[str, object]] = {
         "max_num_considered_actions": 16,
         "reuse": 2.0,
         "batch_size": 512,
-        "arena_games": 64,
-        "arena_every": 3,
-        "arena_batch": 256,
-        "arena_sims": 32,
+        # Cheap arena (GNN search is costly), gated to fire first at the end of the
+        # 8-iter warm-up (i=7) -- the capacity probe -- then every 4 iters.
+        "arena_games": 40,
+        "arena_every": 4,
+        "arena_batch": 64,
+        "arena_sims": 24,
         "checkpoint_every": 2,
     },
     "gnn_smoke": {
