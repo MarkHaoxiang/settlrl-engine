@@ -6,7 +6,8 @@ import {
   type BotProvider,
 } from "../lib/admin";
 import type { AuthUser } from "../lib/auth";
-import { buttonStyle, panelStyle, smallButtonStyle } from "../lib/ui";
+import Button from "./Button";
+import s from "./BotProviders.module.css";
 
 // Admin-only panel for managing the remote bot services that become the
 // seatable bots (one bot per service). Hidden unless the signed-in user is a
@@ -50,53 +51,37 @@ export default function BotProviders({ user }: { user: AuthUser | null }) {
     }
   };
 
-  const inputStyle: React.CSSProperties = { ...panelStyle, padding: "8px 10px", fontSize: 13 };
   const canAdd = baseUrl.trim() !== "" && !busy;
   return (
-    <div style={{ ...panelStyle, padding: "16px 20px", borderRadius: 12, minWidth: 300 }}>
-      <div
-        style={{
-          fontSize: 12,
-          opacity: 0.6,
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          marginBottom: 10,
-        }}
-      >
-        Bot services
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+    <div className={s.box}>
+      <div className={s.label}>Bot services</div>
+      <div className={s.list}>
         {providers.length === 0 && (
-          <span style={{ fontSize: 13, opacity: 0.6 }}>
-            None registered — no bots are seatable yet.
-          </span>
+          <span className={s.empty}>None registered — no bots are seatable yet.</span>
         )}
         {providers.map((p) => (
-          <div
-            key={p.name}
-            style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}
-          >
-            <span style={{ flex: 1 }}>
-              <b>{p.name}</b> <span style={{ opacity: 0.6 }}>{p.base_url}</span>
+          <div key={p.name} className={s.row}>
+            <span className={s.info}>
+              <b>{p.name}</b> <span className={s.url}>{p.base_url}</span>
             </span>
-            <button style={smallButtonStyle} onClick={() => void remove(p.name)}>
+            <Button variant="small" onClick={() => void remove(p.name)}>
               Remove
-            </button>
+            </Button>
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className={s.form}>
         <input
-          style={inputStyle}
+          className={s.input}
           placeholder="base URL (e.g. http://localhost:8100)"
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && canAdd && void add()}
         />
-        {error && <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>}
-        <button style={buttonStyle} disabled={!canAdd} onClick={() => void add()}>
+        {error && <span className={s.error}>{error}</span>}
+        <Button disabled={!canAdd} onClick={() => void add()}>
           Register service
-        </button>
+        </Button>
       </div>
     </div>
   );

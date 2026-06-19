@@ -4,7 +4,8 @@
 import type { Board, Player } from "../lib/boardData";
 import { PLAYER_COLORS, playerName } from "../lib/boardData";
 import { downloadRecord } from "../lib/game";
-import { ACCENT, DIVIDER, buttonStyle, panelStyle, selectedStyle } from "../lib/ui";
+import Button from "./Button";
+import s from "./GameOverScreen.module.css";
 
 // Final victory points: building points + the two awards + victory-point dev
 // cards. Every hand is revealed once the game is over, so this is the true
@@ -45,59 +46,38 @@ export default function GameOverScreen({
   const roads = (player: number) => board.roads.filter((r) => r.player === player).length;
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: "rgba(0,0,0,0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 30,
-      }}
-    >
-      <div style={{ ...panelStyle, padding: "22px 26px", minWidth: 460, display: "flex", flexDirection: "column", gap: 16 }}>
-        <span style={{ fontSize: 22, fontWeight: 800, color: ACCENT, textAlign: "center" }}>{headline}</span>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div className={s.backdrop}>
+      <div className={s.dialog}>
+        <span className={s.headline}>{headline}</span>
+        <div className={s.standings}>
           {standings.map((p) => (
-            <div
-              key={p.player}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: `1px solid ${DIVIDER}`,
-                ...(p.player === winner ? selectedStyle : {}),
-              }}
-            >
-              <span style={{ width: 18, textAlign: "center" }}>{p.player === winner ? "👑" : ""}</span>
-              <span style={{ width: 12, height: 12, borderRadius: "50%", background: PLAYER_COLORS[p.player] }} />
-              <span style={{ flex: 1, fontWeight: 600 }}>{playerName(p.player)}</span>
-              <span style={{ fontSize: 20, fontWeight: 800, width: 32, textAlign: "right" }}>{totalVp(p)}</span>
-              <span style={{ width: 64, fontSize: 14, textAlign: "right" }} title="awards">
+            <div key={p.player} className={p.player === winner ? s.rowWin : s.row}>
+              <span className={s.crown}>{p.player === winner ? "👑" : ""}</span>
+              <span className={s.dot} style={{ background: PLAYER_COLORS[p.player] }} />
+              <span className={s.name}>{playerName(p.player)}</span>
+              <span className={s.vp}>{totalVp(p)}</span>
+              <span className={s.awards} title="awards">
                 {p.longestRoad ? "🛣️" : ""}
                 {p.largestArmy ? `⚔️${p.knightsPlayed}` : ""}
               </span>
-              <span style={{ width: 130, fontSize: 12, opacity: 0.75, textAlign: "right" }} title="settlements · cities · roads · cards · dev">
-                🏠{pieces(p.player, "settlement")} 🏙{pieces(p.player, "city")} 🛤{roads(p.player)} · 🃏{p.resourceCards} 🎴{p.devCards}
+              <span
+                className={s.counts}
+                title="settlements · cities · roads · cards · dev"
+              >
+                🏠{pieces(p.player, "settlement")} 🏙{pieces(p.player, "city")} 🛤
+                {roads(p.player)} · 🃏{p.resourceCards} 🎴{p.devCards}
               </span>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-          <button style={buttonStyle} onClick={onDismiss}>
-            View board
-          </button>
+        <div className={s.actions}>
+          <Button onClick={onDismiss}>View board</Button>
           {gameId && (
-            <button style={buttonStyle} onClick={() => void downloadRecord(gameId)}>
-              Download replay
-            </button>
+            <Button onClick={() => void downloadRecord(gameId)}>Download replay</Button>
           )}
-          <button style={{ ...buttonStyle, ...selectedStyle }} onClick={onNewGame}>
+          <Button selected onClick={onNewGame}>
             New game
-          </button>
+          </Button>
         </div>
       </div>
     </div>
