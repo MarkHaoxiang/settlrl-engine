@@ -37,11 +37,13 @@ class AlphaZeroConfig(Config):
     teacher: bool = False
     teacher_iters: int = 0
     teacher_sims: int = 32
-    # the setup phase is played by a probabilistic-expectimax (GNN path); the net
-    # trains/acts only on the main loop. `setup_temperature` = opponent suboptimality.
-    setup_depth: int = 3
+    # the setup phase is played by a fixed policy (GNN path); the net trains/acts
+    # only on the main loop. setup_depth<=1 = lookahead opener (default, as strong
+    # as deeper at 2p); >=2 = the probabilistic-expectimax search (>=3p / better
+    # value), `setup_temperature` its opponent suboptimality.
+    setup_depth: int = 1
     setup_temperature: float = 2.0
-    setup_beam: int = 8
+    setup_beam: int = 4
     # loop
     n_iterations: int = 20
     selfplay_samples: int = 2048
