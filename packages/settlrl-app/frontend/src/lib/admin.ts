@@ -20,10 +20,6 @@ export async function getAdminStatus(): Promise<AdminStatus> {
   return api<AdminStatus>("/api/admin/status", { headers: authHeader() });
 }
 
-export async function listBotProviders(): Promise<BotProvider[]> {
-  return api<BotProvider[]>("/api/admin/bot-providers", { headers: authHeader() });
-}
-
 export async function registerBotProvider(baseUrl: string): Promise<BotProvider> {
   return api<BotProvider>("/api/admin/bot-providers", {
     method: "POST",

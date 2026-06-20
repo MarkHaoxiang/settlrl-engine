@@ -228,7 +228,9 @@ game count against the registry cap, the registered bot services and seatable
 kinds, and a table of the current games (id, players, phase, moves, open seats,
 listed / Quick-Match flags, age). It polls `GET /api/admin/status` (superuser
 only — `401`/`403` otherwise); the bottom-right link and the page itself are
-gated on the account's superuser flag.
+gated on the account's superuser flag. The **bot services** are also *managed*
+here — register one by base URL or remove one (the [Bot services](#bot-services)
+controls live on this page, not the menu).
 
 ## Bot services
 
@@ -249,8 +251,9 @@ speaks a standardized, structured two-call API:
 BOT_PORT=8100 uv run --package settlrl-agents settlrl-bot-service --bot greedy
 ```
 
-An **admin** registers a service by base URL at runtime; its bot self-identifies
-via `GET /info` and joins the catalog under its own name:
+An **admin** registers a service by base URL at runtime (from the
+[Admin](#admin) page); its bot self-identifies via `GET /info` and joins the
+catalog under its own name:
 
 | Endpoint | Description |
 |---|---|

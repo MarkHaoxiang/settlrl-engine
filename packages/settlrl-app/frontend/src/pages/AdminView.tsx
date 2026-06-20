@@ -1,9 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
+import Button from "../components/Button";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
-import { getAdminStatus, type AdminStatus } from "../lib/admin";
+import {
+  getAdminStatus,
+  registerBotProvider,
+  removeBotProvider,
+  type AdminStatus,
+} from "../lib/admin";
 import { currentUser, type AuthUser } from "../lib/auth";
 import ui from "../styles/ui.module.css";
 import s from "./AdminView.module.css";
@@ -41,6 +47,11 @@ export default function AdminView() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [status, setStatus] = useState<AdminStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The base URL being typed into the register-a-bot-service form, plus its
+  // own error (separate from the status-poll error).
+  const [baseUrl, setBaseUrl] = useState("");
+  const [botError, setBotError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
 
   // Gate the page on the superuser flag (the API enforces it too); bounce others.
@@ -51,20 +62,51 @@ export default function AdminView() {
     });
   }, [navigate]);
 
+  const refresh = useCallback(
+    () =>
+      getAdminStatus().then(
+        (st) => (setStatus(st), setError(null)),
+        (e: unknown) => setError(String(e))
+      ),
+    []
+  );
+
   useEffect(() => {
     let live = true;
-    const tick = () =>
-      getAdminStatus().then(
-        (st) => live && (setStatus(st), setError(null)),
-        (e: unknown) => live && setError(String(e))
-      );
+    const tick = () => (live ? refresh() : Promise.resolve());
     void tick();
     const t = window.setInterval(() => void tick(), POLL_MS);
     return () => {
       live = false;
       window.clearInterval(t);
     };
-  }, []);
+  }, [refresh]);
+
+  // Registering/removing a bot service mutates the catalog, then re-pulls the
+  // status so the panel reflects it immediately (rather than waiting a poll).
+  const addProvider = async () => {
+    setBusy(true);
+    setBotError(null);
+    try {
+      await registerBotProvider(baseUrl.trim());
+      setBaseUrl("");
+      await refresh();
+    } catch (e) {
+      setBotError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dropProvider = async (name: string) => {
+    setBotError(null);
+    try {
+      await removeBotProvider(name);
+      await refresh();
+    } catch (e) {
+      setBotError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const canAdd = baseUrl.trim() !== "" && !busy;
 
   return (
     <div className={s.page}>
@@ -96,12 +138,17 @@ export default function AdminView() {
           <Panel className={s.box}>
             <span className={ui.sectionLabel}>Bot services</span>
             {status.bot_providers.length === 0 ? (
-              <span className={s.muted}>None registered.</span>
+              <span className={s.muted}>None registered — no bots are seatable yet.</span>
             ) : (
               status.bot_providers.map((p) => (
                 <div key={String(p.name)} className={s.providerRow}>
-                  <span className={s.providerName}>{String(p.name)}</span>
-                  <span className={s.muted}>{String(p.base_url)}</span>
+                  <span className={s.providerInfo}>
+                    <span className={s.providerName}>{String(p.name)}</span>
+                    <span className={s.muted}>{String(p.base_url)}</span>
+                  </span>
+                  <Button variant="small" onClick={() => void dropProvider(String(p.name))}>
+                    Remove
+                  </Button>
                 </div>
               ))
             )}
@@ -114,6 +161,19 @@ export default function AdminView() {
                 ))}
               </div>
             )}
+            <div className={s.form}>
+              <input
+                className={s.input}
+                placeholder="base URL (e.g. http://localhost:8100)"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && canAdd && void addProvider()}
+              />
+              <Button disabled={!canAdd} onClick={() => void addProvider()}>
+                Register service
+              </Button>
+            </div>
+            {botError && <span className={s.error}>{botError}</span>}
           </Panel>
 
           <Panel className={s.box}>

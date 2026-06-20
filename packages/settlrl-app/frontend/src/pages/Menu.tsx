@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
-import BotProviders from "../components/BotProviders";
 import MyGames from "../components/MyGames";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, type AuthUser } from "../lib/auth";
@@ -34,7 +33,6 @@ export default function Menu() {
         <MenuCard to="/leaderboard" title="Leaderboard" subtitle="Elo rankings for players and bots, split by game size." />
       </div>
       <MyGames user={user} />
-      <BotProviders user={user} />
     </div>
   );
 }

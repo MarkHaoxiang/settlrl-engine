@@ -30,6 +30,21 @@ const FIXTURES = {
     { id: "lob67890", n_players: 2, number_placement: "spiral", seats: ["human", "human"], claimed: [0], open_seats: 1, searchable: false, created_at: Date.now() / 1000 - 600 },
   ],
   "/api/admin/bot-providers": [{ name: "greedy", base_url: "http://localhost:8100" }],
+  "/api/admin/status": {
+    uptime_seconds: 9234,
+    games_active: 2,
+    games_total: 3,
+    games_capacity: 64,
+    bot_kinds: ["greedy", "lookahead", "random"],
+    bot_providers: [
+      { name: "greedy", base_url: "http://localhost:8100" },
+      { name: "lookahead", base_url: "http://localhost:8101" },
+    ],
+    games: [
+      { id: "abcdef1234", n_players: 4, phase: "main", terminal: false, moves: 73, open_seats: 0, listed: true, searchable: true, created_at: Date.now() / 1000 - 420 },
+      { id: "fedcba9876", n_players: 2, phase: "setup", terminal: false, moves: 4, open_seats: 1, listed: true, searchable: false, created_at: Date.now() / 1000 - 50 },
+    ],
+  },
 };
 
 const browser = await chromium.launch({ executablePath: CHROME });
@@ -42,6 +57,7 @@ const SCREENS = [
   ["profile", "/profile", true],
   ["login", "/login", false],
   ["help", "/help", true],
+  ["admin", "/admin", true],
 ];
 
 for (const [name, path, signedIn] of SCREENS) {

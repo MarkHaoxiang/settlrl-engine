@@ -55,6 +55,13 @@
 
 .providerRow {
   display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.providerInfo {
+  flex: 1;
+  display: flex;
   align-items: baseline;
   gap: 10px;
 }
@@ -62,6 +69,19 @@
 .providerName {
   font-weight: 700;
   font-size: 14px;
+}
+
+.form {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.input {
+  composes: panel from "../styles/ui.module.css";
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
 }
 
 .kinds {
