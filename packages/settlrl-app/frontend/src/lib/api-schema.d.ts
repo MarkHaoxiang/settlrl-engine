@@ -446,6 +446,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Status
+         * @description Server health for the admin page (superuser only).
+         */
+        get: operations["status_api_admin_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1054,6 +1074,25 @@ export interface components {
             /** Flat */
             flat: number;
         };
+        /** _AdminStatus */
+        _AdminStatus: {
+            /** Uptime Seconds */
+            uptime_seconds: number;
+            /** Games Active */
+            games_active: number;
+            /** Games Total */
+            games_total: number;
+            /** Games Capacity */
+            games_capacity: number;
+            /** Bot Providers */
+            bot_providers: {
+                [key: string]: unknown;
+            }[];
+            /** Bot Kinds */
+            bot_kinds: string[];
+            /** Games */
+            games: components["schemas"]["_GameSummary"][];
+        };
         /** _ChatRequest */
         _ChatRequest: {
             /** Text */
@@ -1114,6 +1153,32 @@ export interface components {
             tokens: {
                 [key: string]: string;
             };
+        };
+        /**
+         * _GameSummary
+         * @description One live game's at-a-glance state for the admin list.
+         */
+        _GameSummary: {
+            /** Id */
+            id: string;
+            /** N Players */
+            n_players: number;
+            /** Phase */
+            phase: string;
+            /** Terminal */
+            terminal: boolean;
+            /** Moves */
+            moves: number;
+            /** Seats */
+            seats: string[];
+            /** Open Seats */
+            open_seats: number;
+            /** Listed */
+            listed: boolean;
+            /** Searchable */
+            searchable: boolean;
+            /** Created At */
+            created_at: number;
         };
         /** _JoinRequest */
         _JoinRequest: {
@@ -1922,6 +1987,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_api_admin_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_AdminStatus"];
                 };
             };
         };

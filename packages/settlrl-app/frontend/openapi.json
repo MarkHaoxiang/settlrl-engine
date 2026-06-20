@@ -974,6 +974,30 @@
     ]
    }
   },
+  "/api/admin/status": {
+   "get": {
+    "summary": "Status",
+    "description": "Server health for the admin page (superuser only).",
+    "operationId": "status_api_admin_status_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_AdminStatus"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ]
+   }
+  },
   "/api/auth/login": {
    "post": {
     "tags": [
@@ -2657,6 +2681,59 @@
     ],
     "title": "_ActionRequest"
    },
+   "_AdminStatus": {
+    "properties": {
+     "uptime_seconds": {
+      "type": "number",
+      "title": "Uptime Seconds"
+     },
+     "games_active": {
+      "type": "integer",
+      "title": "Games Active"
+     },
+     "games_total": {
+      "type": "integer",
+      "title": "Games Total"
+     },
+     "games_capacity": {
+      "type": "integer",
+      "title": "Games Capacity"
+     },
+     "bot_providers": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array",
+      "title": "Bot Providers"
+     },
+     "bot_kinds": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Bot Kinds"
+     },
+     "games": {
+      "items": {
+       "$ref": "#/components/schemas/_GameSummary"
+      },
+      "type": "array",
+      "title": "Games"
+     }
+    },
+    "type": "object",
+    "required": [
+     "uptime_seconds",
+     "games_active",
+     "games_total",
+     "games_capacity",
+     "bot_providers",
+     "bot_kinds",
+     "games"
+    ],
+    "title": "_AdminStatus"
+   },
    "_ChatRequest": {
     "properties": {
      "text": {
@@ -2784,6 +2861,68 @@
     ],
     "title": "_CreatedModel",
     "description": "A fresh game: its id and the creator's seat tokens."
+   },
+   "_GameSummary": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "n_players": {
+      "type": "integer",
+      "title": "N Players"
+     },
+     "phase": {
+      "type": "string",
+      "title": "Phase"
+     },
+     "terminal": {
+      "type": "boolean",
+      "title": "Terminal"
+     },
+     "moves": {
+      "type": "integer",
+      "title": "Moves"
+     },
+     "seats": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Seats"
+     },
+     "open_seats": {
+      "type": "integer",
+      "title": "Open Seats"
+     },
+     "listed": {
+      "type": "boolean",
+      "title": "Listed"
+     },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable"
+     },
+     "created_at": {
+      "type": "number",
+      "title": "Created At"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "n_players",
+     "phase",
+     "terminal",
+     "moves",
+     "seats",
+     "open_seats",
+     "listed",
+     "searchable",
+     "created_at"
+    ],
+    "title": "_GameSummary",
+    "description": "One live game's at-a-glance state for the admin list."
    },
    "_JoinRequest": {
     "properties": {

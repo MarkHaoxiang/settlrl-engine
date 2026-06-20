@@ -325,6 +325,15 @@ class GameRegistry:
         restart)."""
         return list(self._games.values())
 
+    @property
+    def max_games(self) -> int:
+        """The cap on retained games (active + finished kept for history)."""
+        return self._max
+
+    def active_count(self) -> int:
+        """Live (non-terminal) games currently held."""
+        return self._active_count()
+
     def open_games(self) -> list[GameHandle]:
         """Listed, joinable games for the public lobby: not over, with at least
         one unclaimed human seat. Newest first."""

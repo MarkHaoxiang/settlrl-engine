@@ -220,6 +220,16 @@ an account nor a bot (an anonymous, token-only human) is not rated, and a bot
 occupying more than one seat in a game is skipped for that game. Endpoint:
 `GET /api/leaderboard`.
 
+## Admin
+
+A superuser-only status page (`/admin`, reached from the **⚙ Admin** link pinned
+bottom-right for admins) shows the running server at a glance: uptime, the live
+game count against the registry cap, the registered bot services and seatable
+kinds, and a table of the current games (id, players, phase, moves, open seats,
+listed / Quick-Match flags, age). It polls `GET /api/admin/status` (superuser
+only — `401`/`403` otherwise); the bottom-right link and the page itself are
+gated on the account's superuser flag.
+
 ## Bot services
 
 The game server runs **no** agent code in-process. A seat's bot moves are
@@ -244,6 +254,7 @@ via `GET /info` and joins the catalog under its own name:
 
 | Endpoint | Description |
 |---|---|
+| `GET /api/admin/status` | Server status: uptime, live games, bot services (admin; see [Admin](#admin)) |
 | `GET /api/admin/bot-providers` | List registered bot services (admin) |
 | `POST /api/admin/bot-providers` | Register one `{ "base_url" }` (admin); `400` if unreachable |
 | `DELETE /api/admin/bot-providers/{name}` | Unregister one by bot name (admin) |
@@ -337,7 +348,7 @@ packages/settlrl-app/
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
 │   ├── api/             # the HTTP layer (game model + serialization is settlrl-game)
 │   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over
-│   │   ├── routers/       # Routes by area: games, replay, bots, me, leaderboard, lobby (each build(deps) -> APIRouter)
+│   │   ├── routers/       # Routes by area: games, replay, bots, me, leaderboard, lobby, admin (each build(deps) -> APIRouter)
 │   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
 │   │   └── openapi.py     # Schema dump backing the generated frontend types
 │   ├── game/            # the live game runtime
@@ -357,7 +368,7 @@ packages/settlrl-app/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /lobby, /help, /profile, /leaderboard, /replay
+        ├── App.tsx          # Routes: menu, /play, /lobby, /help, /profile, /leaderboard, /replay, /admin
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError) + the SSE reader
         ├── lib/client.ts     # Typed REST client (openapi-fetch) from the schema, auth-injecting

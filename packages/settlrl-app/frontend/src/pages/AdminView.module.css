@@ -1,0 +1,111 @@
+.page {
+  composes: page from "../styles/ui.module.css";
+  gap: 24px;
+}
+
+.title {
+  font-size: 36px;
+  margin: 0;
+}
+
+.box {
+  composes: panel from "../styles/ui.module.css";
+  padding: 14px 18px;
+  width: 640px;
+  max-width: 94vw;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.muted {
+  font-size: 13px;
+  opacity: 0.65;
+}
+
+.error {
+  color: var(--danger, #d66);
+  font-size: 13px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  padding: 4px 2px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statValue {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.statLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.providerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.providerName {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.kindTag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--selected-bg);
+  border: 1px solid var(--accent);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.headRow {
+  opacity: 0.6;
+  text-align: left;
+}
+
+.cell {
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.cellRight {
+  padding: 5px 8px;
+  text-align: right;
+}
+
+.mono {
+  padding: 5px 8px;
+  font-family: var(--font-mono, monospace);
+}
+
+.row {
+  border-top: 1px solid var(--divider);
+}

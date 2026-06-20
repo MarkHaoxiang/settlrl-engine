@@ -9,8 +9,9 @@ driver spawner), so they hold no module-level state and tests stay isolated.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Header, HTTPException
@@ -68,6 +69,8 @@ class Deps:
     turn_timeout: float
     store: GameStore | None = None
     matchmaker: Matchmaker | None = None
+    # Wall-clock process start, for the admin status page's uptime.
+    started_at: float = field(default_factory=time.time)
 
     def handle_of(self, game_id: str) -> GameHandle:
         handle = self.registry.get(game_id)

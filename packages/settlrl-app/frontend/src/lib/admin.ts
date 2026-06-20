@@ -2,12 +2,22 @@
 // the seatable-bot catalog (one bot per service). Every call carries the bearer
 // token; the server gates these on the superuser flag (403 otherwise).
 
+import type { components } from "./api-schema";
 import { API_BASE, ApiError, api } from "./api";
 import { authHeader } from "./auth";
+
+type Schemas = components["schemas"];
+export type AdminStatus = Schemas["_AdminStatus"];
+export type GameSummary = Schemas["_GameSummary"];
 
 export interface BotProvider {
   name: string;
   base_url: string;
+}
+
+// Server health for the admin page (superuser only; 403 otherwise).
+export async function getAdminStatus(): Promise<AdminStatus> {
+  return api<AdminStatus>("/api/admin/status", { headers: authHeader() });
 }
 
 export async function listBotProviders(): Promise<BotProvider[]> {

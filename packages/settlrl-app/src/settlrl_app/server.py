@@ -161,6 +161,7 @@ def create_app(
         routers.me,
         routers.leaderboard,
         routers.lobby,
+        routers.admin,
     ):
         app.include_router(module.build(deps))
     app.include_router(auth.router)
