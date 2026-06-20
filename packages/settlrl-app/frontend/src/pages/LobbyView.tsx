@@ -101,7 +101,7 @@ export default function LobbyView() {
         ‹ Menu
       </Link>
 
-      <h1 className={s.title}>Lobby</h1>
+      <h1 className={s.title}>Play</h1>
 
       <Panel className={s.box}>
         <span className={ui.sectionLabel}>Host a game</span>
