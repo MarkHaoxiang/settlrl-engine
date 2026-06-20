@@ -46,6 +46,15 @@
   white-space: nowrap;
 }
 
+.identity {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
 .stats {
   margin-left: auto;
   display: flex;

@@ -261,3 +261,6 @@ class GameModel(BaseModel):
     # The seats this requester owns — by seat token or by signed-in account — so
     # an account holder is recognised on any device without the seat token.
     your_seats: list[int] = []
+    # Per-seat display name of the human holding it (account local-part); None
+    # for a bot seat, an open seat, or an anonymous claim. Indexed by seat.
+    seat_names: list[str | None] = []

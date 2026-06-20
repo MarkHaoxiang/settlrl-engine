@@ -99,6 +99,9 @@ class GameHandle:
         # seat -> owning user id, for seats claimed by a signed-in account (so
         # the seat follows the user across devices, without the seat token).
         self.claim_users: dict[int, str] = {}
+        # seat -> display name of its human owner (account local-part), for the
+        # in-game seat list. Anonymous claimers have no entry (shown "Guest").
+        self.claim_names: dict[int, str] = {}
         self.touched = time.monotonic()
         self.created_at = time.time()
         # Listed in the public lobby (anyone may join an open human seat). Set on
@@ -368,6 +371,10 @@ async def restore_games(registry: GameRegistry, store: GameStore) -> None:
     for header, events in await store.load():
         handle = await anyio.to_thread.run_sync(_rebuild_handle, store, header, events)
         if handle is not None:
+            # Names aren't journaled (derivable from the account); re-resolve them
+            # so a restored signed-in seat still shows its owner.
+            for seat, user_id in handle.claim_users.items():
+                handle.claim_names[seat] = await store.display_name(user_id)
             registry._insert(handle)
 
 

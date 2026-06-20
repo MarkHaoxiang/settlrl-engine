@@ -180,6 +180,10 @@ def build(deps: Deps) -> APIRouter:
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
         game_tokens = dict(seated.claim(seat, uid(user)) for seat in claiming)
+        if user is not None:
+            label = user.email.split("@", 1)[0]
+            for seat in claiming:
+                seated.claim_names[seat] = label
         if needs_driver(seated, deps.turn_timeout):
             deps.spawn_driver(seated)
         return _CreatedModel(id=seated.id, seats=session.seats, tokens=game_tokens)
@@ -194,6 +198,8 @@ def build(deps: Deps) -> APIRouter:
                 seat, token = handle.claim(req.seat, uid(user))
             except (LookupError, ValueError) as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if user is not None:
+                handle.claim_names[seat] = user.email.split("@", 1)[0]
             handle.bump()
         return _JoinedModel(id=game_id, seat=seat, token=token)
 

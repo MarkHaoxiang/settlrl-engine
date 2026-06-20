@@ -272,6 +272,11 @@ export default function PlayView() {
   if (!snapshot) return <div className={ui.overlayMsg}>Loading game…</div>;
 
   const { status, board } = snapshot;
+  // Who holds each seat: an account name (or "Guest") for a human, the bot kind
+  // for a bot — for the seat list and the waiting room.
+  const seatIdentity = (i: number): string =>
+    status.seats[i] !== "human" ? status.seats[i] : (snapshot.seat_names[i] ?? "Guest");
+  const seatLabels = status.seats.map((_, i) => seatIdentity(i));
   // Lobby gate: an online game waits until every human seat is claimed (the
   // server serves no actions and advances nothing until then). Derived from the
   // public seat kinds + claims, so spectators see the wait too.
@@ -490,7 +495,11 @@ export default function PlayView() {
                         {mine ? " (you)" : ""}
                       </span>
                       <span className={s.seatStatus}>
-                        {!human ? kind : filled ? "joined" : "open"}
+                        {!human
+                          ? kind
+                          : claimedSeats.has(i)
+                            ? (snapshot.seat_names[i] ?? "joined")
+                            : "open"}
                       </span>
                       {canControl &&
                         (open
@@ -673,6 +682,7 @@ export default function PlayView() {
         acting={status.terminal ? undefined : status.acting_player}
         you={handSeat >= 0 ? handSeat : undefined}
         belief={snapshot.belief}
+        identities={seatLabels}
       />
 
       {configuring && (

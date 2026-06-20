@@ -53,4 +53,5 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
         belief=session.belief(observer) if observer is not None else None,
         seats_claimed=sorted(handle.claims),
         your_seats=sorted(owned),
+        seat_names=[handle.claim_names.get(i) for i in range(len(status.seats))],
     )

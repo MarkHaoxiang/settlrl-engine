@@ -322,6 +322,17 @@ class GameStore:
             row.wins += int(i == op.winner_index)
             row.updated_at = op.finished_at
 
+    async def display_name(self, user_id: str) -> str:
+        """An account's label: its email local-part, or a short id if the
+        account is gone (or the id is unparseable)."""
+        try:
+            uid = uuid.UUID(user_id)
+        except ValueError:
+            return user_id[:8]
+        async with self._db.sessionmaker() as session:
+            user = await session.get(User, uid)
+        return user.email.split("@", 1)[0] if user else user_id[:8]
+
     async def _display_names(
         self, session: AsyncSession, subjects: tuple[Subject, ...]
     ) -> dict[Subject, str]:

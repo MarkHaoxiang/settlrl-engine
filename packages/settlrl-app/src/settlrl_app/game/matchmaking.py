@@ -222,6 +222,10 @@ class Matchmaker:
             return  # no slot right now; the waiters poll again
         for seat, entry in enumerate(humans):
             _, token = handle.claim(seat, entry.user_id)
+            if entry.user_id is not None and self._store is not None:
+                handle.claim_names[seat] = await self._store.display_name(
+                    entry.user_id
+                )
             entry.result = (handle.id, seat, token)
         if needs_driver(handle, self._turn_timeout):
             self._spawn_driver(handle)

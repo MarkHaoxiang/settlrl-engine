@@ -16,12 +16,14 @@ interface Props {
   acting?: number;
   you?: number;
   belief?: Belief | null;
+  // Per-seat owner labels (account name / "Guest" / bot kind) for the seat list.
+  identities?: (string | null)[];
 }
 
 // Right-hand column: the seat list on top (when given), then the chat & game
 // log rendering the server-side log — every move lands here as an event line,
 // and humans can type messages.
-export default function ChatPanel({ entries, onSend, title = "Chat", players, acting, you, belief }: Props) {
+export default function ChatPanel({ entries, onSend, title = "Chat", players, acting, you, belief, identities }: Props) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -40,7 +42,7 @@ export default function ChatPanel({ entries, onSend, title = "Chat", players, ac
     <div className={s.panel}>
       {players && (
         <>
-          <PlayersPanel players={players} acting={acting} you={you} belief={belief} />
+          <PlayersPanel players={players} acting={acting} you={you} belief={belief} identities={identities} />
           <div className={s.divider} />
         </>
       )}

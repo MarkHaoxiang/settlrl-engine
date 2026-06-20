@@ -755,6 +755,11 @@ export interface components {
              * @default []
              */
             your_seats: number[];
+            /**
+             * Seat Names
+             * @default []
+             */
+            seat_names: (string | null)[];
         };
         /**
          * GameStatusModel

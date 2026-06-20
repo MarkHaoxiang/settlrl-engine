@@ -85,12 +85,16 @@ export default function PlayersPanel({
   acting,
   you,
   belief,
+  identities,
 }: {
   players: Player[];
   acting?: number;
   // The hand-panel seat, marked "(you)".
   you?: number;
   belief?: Belief | null;
+  // Who holds each seat: an account name or "Guest" for a human, the bot kind
+  // for a bot. Indexed by seat; absent renders just the colour name.
+  identities?: (string | null)[];
 }) {
   const [inspected, setInspected] = useState<number | null>(null);
   return (
@@ -113,6 +117,11 @@ export default function PlayersPanel({
                 {playerName(p.player)}
                 {p.player === you ? " (you)" : ""}
               </span>
+              {identities?.[p.player] ? (
+                <span className={s.identity} title={identities[p.player] ?? undefined}>
+                  {identities[p.player]}
+                </span>
+              ) : null}
               <span className={s.stats}>
                 <Stat glyph={<VpGlyph />} value={p.victoryPoints} label="victory points" />
                 <Stat glyph={<CardsGlyph />} value={p.resourceCards} label="resource cards" />

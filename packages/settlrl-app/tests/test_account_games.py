@@ -78,6 +78,31 @@ def test_other_users_and_anonymous_own_nothing(client: TestClient) -> None:
     assert client.get(f"/api/games/{game}").json()["your_seats"] == []
 
 
+def test_seat_names_show_account_holders_and_bots(client: TestClient) -> None:
+    token = _token(client, "alice@example.com")
+    game = client.post(
+        "/api/games",
+        # Online seating: the creator claims only seat 0, seat 2 stays open.
+        json={
+            "seed": 0,
+            "seats": ["human", "random", "human", "random"],
+            "claim": "first",
+        },
+        headers=_bearer(token),
+    ).json()["id"]
+
+    # The creator's seat carries their account label; bot seats (kind in
+    # status.seats) and the still-open human seat have no name.
+    snap = client.get(f"/api/games/{game}", headers=_bearer(token)).json()
+    assert snap["seat_names"] == ["alice", None, None, None]
+    assert snap["status"]["seats"] == ["human", "random", "human", "random"]
+
+    # An anonymous join fills the open seat but stays nameless ("Guest" on the UI).
+    client.post(f"/api/games/{game}/join", json={"seat": 2})
+    snap = client.get(f"/api/games/{game}", headers=_bearer(token)).json()
+    assert snap["seat_names"][2] is None
+
+
 def test_my_games_lists_only_the_users_games(client: TestClient) -> None:
     a = _token(client, "a@example.com")
     b = _token(client, "b@example.com")

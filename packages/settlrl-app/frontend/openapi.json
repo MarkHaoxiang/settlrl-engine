@@ -1957,6 +1957,21 @@
       "type": "array",
       "title": "Your Seats",
       "default": []
+     },
+     "seat_names": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Seat Names",
+      "default": []
      }
     },
     "type": "object",
