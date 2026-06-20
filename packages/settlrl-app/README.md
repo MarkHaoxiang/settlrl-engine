@@ -7,9 +7,10 @@ React + TypeScript frontend renders the board as SVG. The game model itself is
 (`settlrl-agents[service]`). The app depends on neither the engine nor the
 agents directly.
 
-A menu lets you choose between two modes, each at its own URL.
+A menu lets you choose between modes, each at its own URL. **Play** opens the
+[lobby](#lobby) — the hub to host a game, join an open one, or Quick Match.
 
-**Play** (`/play`) — a live, playable game. Each seat is configured per game as a human sharing the screen (hotseat) or a bot (a `settlrl-agents` policy); with no human seats the game plays itself as a spectated bot match. Search bots expose their build parameters, like `mcts`'s simulation budget, behind the seat's gear button. The interface is the table itself:
+A game (`/play/{id}`) is a live, playable game. Each seat is configured per game as a human sharing the screen (hotseat) or a bot (a `settlrl-agents` policy); with no human seats the game plays itself as a spectated bot match. Search bots expose their build parameters, like `mcts`'s simulation budget, behind the seat's gear button. The interface is the table itself:
 
 - **Board** — every placement you can currently make is marked in your colour (hover to preview the piece); click it and confirm in a popup that shows the build cost or who to rob.
 - **Hand** — click a glowing development card to play it (resource picks come from a popover), or resource cards to discard after a 7; a knight can also be played straight off the robber pawn, which lights up to take the click.
@@ -182,15 +183,16 @@ end-of-game screen's **Download replay** button saves.
 
 ## Lobby
 
-The menu's **Lobby** page (`/lobby`, public) lists open games anyone can join —
-the games created with **List in lobby** that still have an unclaimed human seat,
-newest first (`GET /api/lobby`). Each row shows its player count, seats filled,
-and map; **Join** opens the game and claims a free seat. The owner controls each
-seat from the New Game dialog (human or a specific bot) and can still retarget an
-unclaimed seat in the waiting room (`POST /api/games/{id}/seats`), so an
-under-filled game is never stuck. Listing a game publicly requires a signed-in
-account (`POST /api/games` with `listed` returns `401` otherwise); anonymous play
-stays invite-link only.
+The menu's **Play** card opens the **Lobby** page (`/lobby`, public), the entry
+point for online play: **Host a game** (the New Game dialog), **Quick Match**, or
+join an open game. The open-games list shows the games created with **List in
+lobby** that still have an unclaimed human seat, newest first (`GET /api/lobby`);
+each row shows its player count, seats filled, and map, and **Join** opens the
+game and claims a free seat. The owner controls each seat from the New Game dialog
+(human or a specific bot) and can still retarget an unclaimed seat in the waiting
+room (`POST /api/games/{id}/seats`), so an under-filled game is never stuck.
+Listing a game publicly requires a signed-in account (`POST /api/games` with
+`listed` returns `401` otherwise); anonymous play stays invite-link only.
 
 **Quick Match** pairs you into a game with one click (`POST /api/matchmake`,
 2- or 4-player). Waiters are pooled per player count and matched on their
@@ -373,9 +375,9 @@ packages/settlrl-app/
         ├── styles/ui.module.css # Shared CSS-module classes (panel, button, page/toolbar, …)
         ├── components/Button.tsx · Panel.tsx # Primitives over styles/ui.module.css
         ├── pages/
-        │   ├── Menu.tsx       # Landing page: choose Play, Lobby, or Replay
+        │   ├── Menu.tsx       # Landing page: choose Play (the lobby), Replay, or Leaderboard
         │   ├── PlayView.tsx   # Play mode: game state + handlers wiring the components below
-        │   ├── LobbyView.tsx  # Lobby: browse open games and join one
+        │   ├── LobbyView.tsx  # Lobby: host a game, Quick Match, or join an open one
         │   ├── HelpView.tsx   # Help page: controls, action icons, seats
         │   └── ReplayView.tsx # Replay mode: load a record, scrub / step / play it
         └── components/

@@ -19,7 +19,6 @@ import { BotIcon, HumanIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import {
-  createGame,
   fetchBots,
   joinGame,
   setSeat,
@@ -28,6 +27,7 @@ import {
   type GameSnapshot,
   type NewGameConfig,
 } from "../lib/game";
+import { useCreateGame } from "../lib/useCreateGame";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import { authToken } from "../lib/auth";
 import {
@@ -71,7 +71,6 @@ export default function PlayView() {
   // The seats this browser owns in this game (multiplayer identity).
   const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
   const [joinFailed, setJoinFailed] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
   // One join request at a time: the token effect above re-fires this one
   // before the first claim resolves, and a double-join would grab two seats.
   const joining = useRef(false);
@@ -158,54 +157,19 @@ export default function PlayView() {
   useEffect(() => {
     fetchBots().then(setBots).catch(() => setBots({}));
   }, []);
-  // Set while waiting in line when the server is at its concurrency cap.
-  const [queue, setQueue] = useState<{ position: number; total: number } | null>(null);
-  const queueTimer = useRef<number | null>(null);
-
   // Creating a game claims human seats per the dialog's seating choice
   // (hotseat: all of them; online: just the first) — the rest are claimed
-  // through the invite link (auto-join above). When the server is full the
-  // request comes back as a queue position; we re-poll with the ticket until a
-  // slot frees and the game is created.
-  const QUEUE_POLL_MS = 3000;
-  const pollCreate = async (config: NewGameConfig, ticket?: string) => {
-    try {
-      const res = await createGame(config, ticket);
-      if ("queued" in res) {
-        setQueue({ position: res.position, total: res.total });
-        queueTimer.current = window.setTimeout(
-          () => void pollCreate(config, res.ticket),
-          QUEUE_POLL_MS
-        );
-      } else {
-        setQueue(null);
-        saveTokens(res.id, res.tokens);
-        rememberGame(res.id);
-        navigate(`/play/${res.id}`);
-      }
-    } catch (e) {
-      setQueue(null);
-      setCreateError(`Could not create the game: ${String(e)}`);
-    }
-  };
+  // through the invite link (auto-join above). The shared hook handles the
+  // full-server queue (re-poll with the ticket) and the navigate-on-create.
+  const { start: beginCreate, queue, error: createError, cancel: abortCreate } = useCreateGame();
   const start = (config: NewGameConfig) => {
     setConfiguring(false);
-    setCreateError(null);
-    void pollCreate(config);
+    beginCreate(config);
   };
   const cancelQueue = () => {
-    if (queueTimer.current !== null) window.clearTimeout(queueTimer.current);
-    queueTimer.current = null;
-    setQueue(null);
+    abortCreate();
     setConfiguring(true);
   };
-  // Stop polling if the view unmounts mid-queue.
-  useEffect(
-    () => () => {
-      if (queueTimer.current !== null) window.clearTimeout(queueTimer.current);
-    },
-    []
-  );
 
   const actions = snapshot?.actions ?? [];
 

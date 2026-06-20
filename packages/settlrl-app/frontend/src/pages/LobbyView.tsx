@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import Button from "../components/Button";
+import NewGameDialog from "../components/NewGameDialog";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
 import { currentUser, type AuthUser } from "../lib/auth";
 import { matchmake, type PlayerCount } from "../lib/game";
+import { useCreateGame } from "../lib/useCreateGame";
 import { useLobby, type LobbyGame } from "../lib/queries";
 import { rememberGame, saveTokens } from "../lib/seats";
 import ui from "../styles/ui.module.css";
@@ -46,6 +48,10 @@ export default function LobbyView() {
   const [searching, setSearching] = useState<{ n: PlayerCount; waiting: number } | null>(null);
   const ticket = useRef<string | undefined>(undefined);
   const timer = useRef<number | null>(null);
+  // Hosting a new game: the configuration dialog, plus the shared create flow
+  // (handles the full-server queue and navigates into the game once it exists).
+  const [hosting, setHosting] = useState(false);
+  const { start: hostGame, queue, error: createError, cancel: abortCreate } = useCreateGame();
 
   useEffect(() => {
     void currentUser().then(setUser);
@@ -98,6 +104,16 @@ export default function LobbyView() {
       <h1 className={s.title}>Lobby</h1>
 
       <Panel className={s.box}>
+        <span className={ui.sectionLabel}>Host a game</span>
+        <div className={s.quickRow}>
+          <span className={s.muted}>Set up a board; list it here so others can join, or share the invite link.</span>
+          <Button selected onClick={() => setHosting(true)}>
+            Create game
+          </Button>
+        </div>
+      </Panel>
+
+      <Panel className={s.box}>
         <span className={ui.sectionLabel}>Quick Match</span>
         {searching ? (
           <div className={s.quickRow}>
@@ -125,12 +141,32 @@ export default function LobbyView() {
         <span className={ui.sectionLabel}>Open games</span>
         {games.length === 0 ? (
           <span className={s.empty}>
-            No open games right now. Create one and list it in the lobby for others to join.
+            No open games right now. Host one above and list it in the lobby for others to join.
           </span>
         ) : (
           games.map((g) => <GameRow key={g.id} game={g} onJoin={join} />)
         )}
       </Panel>
+
+      {createError && <div className={ui.overlayMsg}>{createError}</div>}
+      {queue && (
+        <div className={ui.overlayMsg}>
+          You're #{queue.position} of {queue.total} in line…
+          <div className={s.queueSub}>The server is busy; your game starts automatically.</div>
+          <Button variant="small" className={s.queueCancel} onClick={abortCreate}>
+            Cancel
+          </Button>
+        </div>
+      )}
+      {hosting && (
+        <NewGameDialog
+          onStart={(c) => {
+            setHosting(false);
+            hostGame(c);
+          }}
+          onClose={() => setHosting(false)}
+        />
+      )}
     </div>
   );
 }

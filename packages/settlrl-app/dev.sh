@@ -16,6 +16,11 @@ API_PORT="${API_PORT:-8000}"
 BOT_PORT="${BOT_PORT:-8100}"
 API="http://localhost:${API_PORT}"
 
+# Pin JAX to CPU for the API server and bot services: dev play is single-game
+# and latency-bound, so the GPU buys nothing and just contends with training
+# runs. Override with JAX_PLATFORMS= in the environment to use the GPU.
+export JAX_PLATFORMS="${JAX_PLATFORMS:-cpu}"
+
 # The bots to serve, each on its own port starting at BOT_PORT.
 BOTS=(greedy mcts)
 
