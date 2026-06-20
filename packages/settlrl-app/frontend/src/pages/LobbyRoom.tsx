@@ -206,13 +206,16 @@ export default function LobbyRoom() {
                       >
                         Human
                       </button>
-                      <button
-                        className={cx(s.miniBtn, !human && ui.selected)}
-                        title="Fill this seat with a bot"
-                        onClick={() => retarget(i, defaultBot)}
-                      >
-                        Bot
-                      </button>
+                      {/* Only offer a bot when the server actually serves one. */}
+                      {botNames.length > 0 && (
+                        <button
+                          className={cx(s.miniBtn, !human && ui.selected)}
+                          title="Fill this seat with a bot"
+                          onClick={() => retarget(i, defaultBot)}
+                        >
+                          Bot
+                        </button>
+                      )}
                       {!human && botNames.length > 1 && (
                         <select
                           className={s.botSelect}
@@ -327,7 +330,7 @@ export default function LobbyRoom() {
                 🔑
               </Button>
             )}
-            {isHost && (
+            {isHost && botNames.length > 0 && (
               <Button selected onClick={startGame} title="Fill open seats with bots and start">
                 Start game
               </Button>

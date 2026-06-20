@@ -67,15 +67,16 @@ export default function LobbyView() {
   // Joining is just a deep link: the lobby room claims the first free seat.
   const join = (id: string) => navigate(`/lobby/${id}`);
 
-  // Host opens a game with a sensible default table — you (seat 0) plus an open
-  // human seat and bots — and lands in its lobby room to configure it. Leaving a
-  // seat open keeps the room up; the host bot-fills and starts from there.
+  // Host opens a table of open human seats and lands in its lobby room to set it
+  // up — invite people into the seats, or fill any with a bot there (from the
+  // server's live catalog; no bot kind is baked in here). Open seats keep the
+  // room up until the host fills them and starts.
   const host = () => {
     const config: NewGameConfig = {
       seed: Math.floor(Math.random() * 65536),
       nPlayers: 4,
       numberPlacement: "random",
-      seats: [{ kind: HUMAN }, { kind: HUMAN }, { kind: "random" }, { kind: "random" }],
+      seats: [{ kind: HUMAN }, { kind: HUMAN }, { kind: HUMAN }, { kind: HUMAN }],
       claim: "first",
       listed: !!authToken(),
       searchable: false,
