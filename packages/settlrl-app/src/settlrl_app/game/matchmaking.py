@@ -152,9 +152,20 @@ class Matchmaker:
         window = elo_window(
             now - oldest.joined_at, self._base_window, self._widen_per_10s
         )
-        group = [e for e in waiting if abs(e.rating - oldest.rating) <= window][
-            :n_players
-        ]
+        # Gather near-Elo waiters, but never the same account twice (a signed-in
+        # player queued from two tabs): one human must not fill two seats.
+        group: list[_Entry] = []
+        seen_users: set[str] = set()
+        for e in waiting:
+            if abs(e.rating - oldest.rating) > window:
+                continue
+            if e.user_id is not None and e.user_id in seen_users:
+                continue
+            group.append(e)
+            if e.user_id is not None:
+                seen_users.add(e.user_id)
+            if len(group) >= n_players:
+                break
         full = len(group) >= n_players
         timed_out = now - oldest.joined_at >= self._never_stuck_s
         if not full and not timed_out:

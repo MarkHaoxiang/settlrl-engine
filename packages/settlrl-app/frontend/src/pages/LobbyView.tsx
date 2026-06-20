@@ -48,6 +48,10 @@ export default function LobbyView() {
   const [searching, setSearching] = useState<{ n: PlayerCount; waiting: number } | null>(null);
   const ticket = useRef<string | undefined>(undefined);
   const timer = useRef<number | null>(null);
+  // Guards against a double-click starting a second poll loop: the two loops
+  // would each enqueue their own ticket and the matchmaker would pair this
+  // browser with itself, dropping it into a game where it holds every seat.
+  const searchActive = useRef(false);
   // Hosting a new game: the configuration dialog, plus the shared create flow
   // (handles the full-server queue and navigates into the game once it exists).
   const [hosting, setHosting] = useState(false);
@@ -71,15 +75,19 @@ export default function LobbyView() {
         setSearching({ n, waiting: res.waiting });
         timer.current = window.setTimeout(() => void poll(n), POLL_MS);
       } else {
+        searchActive.current = false;
         saveTokens(res.id, { [res.seat]: res.token });
         rememberGame(res.id);
         navigate(`/play/${res.id}`);
       }
     } catch {
+      searchActive.current = false;
       setSearching(null);
     }
   };
   const startMatch = (n: PlayerCount) => {
+    if (searchActive.current) return; // a search is already running
+    searchActive.current = true;
     ticket.current = undefined;
     setSearching({ n, waiting: 0 });
     void poll(n);
@@ -88,6 +96,7 @@ export default function LobbyView() {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = null;
     ticket.current = undefined;
+    searchActive.current = false;
     setSearching(null);
   };
 

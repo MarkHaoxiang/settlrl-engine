@@ -16,8 +16,8 @@ import s from "./ReplayView.module.css";
 
 const PLAY_INTERVAL_MS = 600;
 
-// The pair of ways to load a record: a saved .json file, or the live game as
-// played so far. Rendered both on the empty state and (small) in the bar.
+// The pair of ways to load a record: a saved .json file, or the most recent
+// game from this browser. Rendered both on the empty state and (small) in the bar.
 function LoadButtons({
   small,
   onLoad,
@@ -56,14 +56,14 @@ function LoadButtons({
       </button>
       <button
         className={cn}
-        title="Replay the live game as played so far"
+        title="Replay your most recent game on this browser, as played so far"
         onClick={() => {
           const last = lastGameId();
           if (!last) onError("no recent game on this browser");
           else loadReplayFromGame(last).then(onLoad, (e: unknown) => onError(String(e)));
         }}
       >
-        {small ? "🎮" : "🎮 Use current game"}
+        {small ? "🎮" : "🎮 Replay your last game"}
       </button>
     </>
   );
@@ -141,7 +141,7 @@ export default function ReplayView() {
         <div className={s.loadDialog}>
           <span className={s.loadTitle}>Replay a game</span>
           <span className={s.loadSub}>
-            Open a saved game record, or replay the game currently in Play from its first move.
+            Open a saved game record, or replay your most recent game from its first move.
           </span>
           <div className={s.loadRow}>
             <LoadButtons onLoad={loaded} onError={setError} />

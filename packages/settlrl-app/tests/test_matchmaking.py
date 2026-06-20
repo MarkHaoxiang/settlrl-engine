@@ -49,6 +49,22 @@ def test_two_near_rated_waiters_pair_into_one_game() -> None:
     asyncio.run(scenario())
 
 
+def test_one_account_does_not_fill_both_seats() -> None:
+    async def scenario() -> None:
+        # The same signed-in account queues from two tabs: it must never be paired
+        # with itself into a game where it holds every seat.
+        mm, _ = _matchmaker()
+        a = await mm.matchmake(2, None, "user-1")
+        b = await mm.matchmake(2, None, "user-1")
+        assert a.result is None and b.result is None  # one account, no match
+
+        # A different account completes the table.
+        c = await mm.matchmake(2, None, "user-2")
+        assert c.result is not None
+
+    asyncio.run(scenario())
+
+
 def test_lone_waiter_is_bot_filled_once_it_times_out() -> None:
     async def scenario() -> None:
         # never_stuck_s=0: a single waiter forms a game immediately, bots filling
