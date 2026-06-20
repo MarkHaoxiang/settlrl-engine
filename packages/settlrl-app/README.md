@@ -17,8 +17,8 @@ A game (`/play/{id}`) is a live, playable game. Each seat is configured per game
 - **Trading** — click a bank resource pile to maritime-trade at your best port rate, or an opponent's hand pile to compose a 1:1 offer they answer on their turn; buy a development card from the bank's deck.
 - **Table scene** — top-down, with zoom, pan, and spin (mouse, touch, or keyboard: arrows pan, `+`/`−` zoom, `[` `]` spin, `0` re-fits). When you hold a single seat the table opens rotated to face it (your play area at the bottom); spectating or a shared-screen hotseat keeps the canonical bottom-facing view. The bank's card piles sit left of the board; each seat's play area lines its table edge with its face-down hand and dev piles and unbuilt roads, settlements, and cities. The dice rest in the corner beside the acting seat: they glow gold to roll, then glow red as the end-turn control once you've rolled.
 - **Trade answers** — a trade offered to you shows as a card over the board with Accept / Reject.
-- **Bars and panels** — the bottom panel shows the acting human's hand and a status line; the top bar holds New game and a light/dark theme toggle. The right column lists the seats in playing order (points, cards, devs, and 🔍 to inspect an opponent's proven hand bounds) above a chat panel that doubles as the game log.
-- **New game** — a dialog (on entry and from the New game button) sets player count (2 or 4), what controls each seat, seating across several humans (hotseat here, or online via an invite link), number-token placement (random or spiral), and an optional seed. The win target follows the player count — **15 victory points for a 2-player duel, 10 otherwise** (shown by the board when it isn't the usual 10) — and is recorded with the game so a replay ends where the original did.
+- **Bars and panels** — the bottom panel shows the acting human's hand and a status line; the top bar holds New game and a light/dark theme toggle. The right column lists the seats in playing order — each with its holder (a signed-in player's account name, "Guest" for an anonymous human, or the bot kind), points, cards, devs, and 🔍 to inspect an opponent's proven hand bounds — above a chat panel that doubles as the game log.
+- **New game** — a dialog (on entry and from the New game button) sets player count (2 or 4), what controls each seat, seating across several humans (hotseat here, or online via an invite link — the lobby's host flow opens on online), whether to list the game publicly and mark it open to Quick Match, number-token placement (random or spiral), and an optional seed. The win target follows the player count — **15 victory points for a 2-player duel, 10 otherwise** (shown by the board when it isn't the usual 10) — and is recorded with the game so a replay ends where the original did.
 
 A help page (`/help`, the **?** button) documents the controls and icons.
 
@@ -192,7 +192,9 @@ game and claims a free seat. The owner controls each seat from the New Game dial
 (human or a specific bot) and can still retarget an unclaimed seat in the waiting
 room (`POST /api/games/{id}/seats`), so an under-filled game is never stuck.
 Listing a game publicly requires a signed-in account (`POST /api/games` with
-`listed` returns `401` otherwise); anonymous play stays invite-link only.
+`listed` returns `401` otherwise); anonymous play stays invite-link only. A
+listed game the host also marks `searchable` shows a **Quick Match** tag in its
+lobby row (a visibility flag; the matchmaker still forms its own games).
 
 **Quick Match** pairs you into a game with one click (`POST /api/matchmake`,
 2- or 4-player). Waiters are pooled per player count and matched on their

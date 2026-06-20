@@ -107,6 +107,9 @@ class GameHandle:
         # Listed in the public lobby (anyone may join an open human seat). Set on
         # create for "public" games; invite-only games stay False.
         self.listed = False
+        # The host marked this game open to Quick Match (a visibility flag shown
+        # in the lobby; the matchmaker still forms its own games).
+        self.searchable = False
         # Monotonic change counter: every state change bumps it, and waiters
         # re-serialise their view when it moves.
         self.version = 0

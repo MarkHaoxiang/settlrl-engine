@@ -1093,6 +1093,11 @@ export interface components {
              * @default false
              */
             listed: boolean;
+            /**
+             * Searchable
+             * @default false
+             */
+            searchable: boolean;
             /** Ticket */
             ticket?: string | null;
         };
@@ -1159,6 +1164,8 @@ export interface components {
             claimed: number[];
             /** Open Seats */
             open_seats: number;
+            /** Searchable */
+            searchable: boolean;
             /** Created At */
             created_at: number;
         };

@@ -70,9 +70,13 @@ const PLACEMENT_HELP: Record<NumberPlacement, string> = {
 export default function NewGameDialog({
   onStart,
   onClose,
+  defaultOnline = false,
 }: {
   onStart: (config: NewGameConfig) => void;
   onClose: () => void;
+  // Open as an online multiplayer game (two human seats, online seating) — the
+  // lobby host flow, where the common case is others joining from their devices.
+  defaultOnline?: boolean;
 }) {
   const [nPlayers, setNPlayers] = useState<PlayerCount>(4);
   const [numberPlacement, setNumberPlacement] = useState<NumberPlacement>("random");
@@ -81,15 +85,20 @@ export default function NewGameDialog({
   const [preview, setPreview] = useState<Board | null>(null);
   // With several human seats: all on this screen, or just yours (the others
   // join through the invite link).
-  const [seating, setSeating] = useState<"hotseat" | "online">("hotseat");
+  const [seating, setSeating] = useState<"hotseat" | "online">(
+    defaultOnline ? "online" : "hotseat"
+  );
   // List the game in the public lobby so anyone can take its open human seats.
   // Listing requires a signed-in account (the server enforces it too).
-  const [listed, setListed] = useState(false);
   const signedIn = !!authToken();
-  // One controller per possible seat; only the first nPlayers are used.
+  const [listed, setListed] = useState(defaultOnline && signedIn);
+  // Mark the game open to Quick Match (a visibility flag shown in the lobby).
+  const [searchable, setSearchable] = useState(false);
+  // One controller per possible seat; only the first nPlayers are used. The
+  // online host flow opens with two human seats so others have a seat to take.
   const [seats, setSeats] = useState<SeatConfig[]>([
     { kind: HUMAN },
-    { kind: "random" },
+    { kind: defaultOnline ? HUMAN : "random" },
     { kind: "random" },
     { kind: "random" },
   ]);
@@ -179,8 +188,9 @@ export default function NewGameDialog({
       seats: seats.slice(0, nPlayers),
       claim: online ? "first" : "all",
       // Only an online game leaves human seats open for others to take, and
-      // only a signed-in creator may list it publicly.
+      // only a signed-in creator may list it publicly or open it to Quick Match.
       listed: online && signedIn && listed,
+      searchable: online && signedIn && searchable,
     });
   };
 
@@ -324,6 +334,26 @@ export default function NewGameDialog({
             </button>
             <span className={s.hint}>
               {!signedIn ? "sign in to list" : listed ? "anyone can join" : "invite link only"}
+            </span>
+          </div>
+        )}
+        {online && (
+          <div className={s.row}>
+            <span className={s.label}>Quick Match</span>
+            <button
+              className={cx(s.seatButton, searchable && signedIn && ui.selected)}
+              onClick={() => signedIn && setSearchable((v) => !v)}
+              disabled={!signedIn}
+              title={
+                signedIn
+                  ? "Mark this game as open to Quick Match players"
+                  : "Sign in to open a game to Quick Match"
+              }
+            >
+              {searchable && signedIn ? "Searchable" : "Open to Quick Match"}
+            </button>
+            <span className={s.hint}>
+              {!signedIn ? "sign in to enable" : searchable ? "matched players can find it" : "off"}
             </span>
           </div>
         )}

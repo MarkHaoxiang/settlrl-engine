@@ -28,7 +28,10 @@ function GameRow({ game, onJoin }: { game: LobbyGame; onJoin: (id: string) => vo
   return (
     <div className={s.row}>
       <div className={s.rowMain}>
-        <span className={s.players}>{game.n_players} players</span>
+        <span className={s.players}>
+          {game.n_players} players
+          {game.searchable && <span className={s.qmTag}>⚡ Quick Match</span>}
+        </span>
         <span className={s.muted}>
           {seated}/{game.n_players} seated · {game.number_placement} map · {ago(game.created_at)}
         </span>
@@ -169,6 +172,7 @@ export default function LobbyView() {
       )}
       {hosting && (
         <NewGameDialog
+          defaultOnline
           onStart={(c) => {
             setHosting(false);
             hostGame(c);

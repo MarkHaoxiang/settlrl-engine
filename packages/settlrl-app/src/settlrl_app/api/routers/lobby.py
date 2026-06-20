@@ -18,6 +18,7 @@ class _LobbyGameModel(BaseModel):
     seats: list[str]  # seat kinds; "human" seats are the open ones
     claimed: list[int]  # seats already taken
     open_seats: int  # unclaimed human seats a joiner can take
+    searchable: bool  # the host marked it open to Quick Match
     created_at: float
 
 
@@ -58,6 +59,7 @@ def build(deps: Deps) -> APIRouter:
                 seats=list(h.session.seats),
                 claimed=sorted(h.claims),
                 open_seats=len(h.open_human_seats()),
+                searchable=h.searchable,
                 created_at=h.created_at,
             )
             for h in deps.registry.open_games()

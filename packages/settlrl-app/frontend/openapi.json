@@ -2735,6 +2735,11 @@
       "title": "Listed",
       "default": false
      },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable",
+      "default": false
+     },
      "ticket": {
       "anyOf": [
        {
@@ -2891,6 +2896,10 @@
       "type": "integer",
       "title": "Open Seats"
      },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable"
+     },
      "created_at": {
       "type": "number",
       "title": "Created At"
@@ -2904,6 +2913,7 @@
      "seats",
      "claimed",
      "open_seats",
+     "searchable",
      "created_at"
     ],
     "title": "_LobbyGameModel",

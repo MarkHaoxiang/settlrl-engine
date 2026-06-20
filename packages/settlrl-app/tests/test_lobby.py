@@ -73,6 +73,29 @@ def test_only_listed_games_with_open_seats_appear(client: TestClient) -> None:
     assert lobby[0]["claimed"] == [0]
 
 
+def test_searchable_flag_requires_sign_in_and_surfaces_in_the_lobby(
+    client: TestClient,
+) -> None:
+    # Like listing, marking a game searchable needs an account.
+    assert (
+        client.post(
+            "/api/games", json={"seed": 0, "n_players": 2, "searchable": True}
+        ).status_code
+        == 401
+    )
+
+    auth = _bearer(_token(client))
+    doc = _create(client, headers=auth, claim="first", listed=True, searchable=True)
+    lobby = client.get("/api/lobby").json()
+    assert [g["id"] for g in lobby] == [doc["id"]]
+    assert lobby[0]["searchable"] is True
+
+    # A listed-but-not-searchable game reports the flag off.
+    doc2 = _create(client, headers=auth, seed=2, claim="first", listed=True)
+    off = next(g for g in client.get("/api/lobby").json() if g["id"] == doc2["id"])
+    assert off["searchable"] is False
+
+
 def test_seat_control_turns_an_open_seat_into_a_bot(client: TestClient) -> None:
     doc = _create(client, headers=_bearer(_token(client)), claim="first", listed=True)
     game = doc["id"]

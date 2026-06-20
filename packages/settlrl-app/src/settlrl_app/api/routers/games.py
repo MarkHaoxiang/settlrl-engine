@@ -45,6 +45,8 @@ class _CreateRequest(BaseModel):
     # List the game in the public lobby (anyone may join an open human seat).
     # Default off: a game is invite-only unless explicitly made public.
     listed: bool = False
+    # Mark the game open to Quick Match (a visibility flag shown in the lobby).
+    searchable: bool = False
     # The caller's place in line from a prior queued response, re-sent each poll
     # while waiting for a free slot; None on the first attempt.
     ticket: str | None = None
@@ -146,7 +148,7 @@ def build(deps: Deps) -> APIRouter:
         """Create a game, or return the caller's place in line when the server
         is at its concurrency cap (a ``202`` they re-POST with ``ticket``).
         Listing a game publicly (``listed``) requires a signed-in account."""
-        if req.listed and user is None:
+        if (req.listed or req.searchable) and user is None:
             raise HTTPException(
                 status_code=401, detail="sign in to list a game in the lobby"
             )
@@ -175,6 +177,7 @@ def build(deps: Deps) -> APIRouter:
                 ticket=seated.ticket, position=seated.position, total=seated.total
             )
         seated.listed = req.listed  # show in the public lobby if requested
+        seated.searchable = req.searchable  # mark open to Quick Match (visibility)
         humans = seated.human_seats()
         claiming = (
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []

@@ -135,6 +135,8 @@ export interface NewGameConfig {
   claim: ClaimMode;
   // List the game in the public lobby so anyone can join its open seats.
   listed: boolean;
+  // Mark the game open to Quick Match (a visibility flag shown in the lobby).
+  searchable: boolean;
 }
 
 // A freshly created game: its id plus the creator's seat tokens (every human
@@ -167,6 +169,7 @@ export async function createGame(
       seats: config.seats.map((s) => s.kind),
       claim: config.claim,
       listed: config.listed,
+      searchable: config.searchable,
       ticket,
     }),
     // Sign-in (if any) ties the creator's claimed seats to their account.
