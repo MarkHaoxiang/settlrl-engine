@@ -264,3 +264,10 @@ class GameModel(BaseModel):
     # Per-seat display name of the human holding it (account local-part); None
     # for a bot seat, an open seat, or an anonymous claim. Indexed by seat.
     seat_names: list[str | None] = []
+    # The map's setup, for the lobby room's map controls (the host rerolls /
+    # reconfigures from these). The board encodes the layout; these name it.
+    seed: int = 0
+    number_placement: str = "random"
+    # Lobby visibility flags, for the host's toggles in the lobby room.
+    listed: bool = False
+    searchable: bool = False

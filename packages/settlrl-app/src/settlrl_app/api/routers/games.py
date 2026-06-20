@@ -47,6 +47,9 @@ class _CreateRequest(BaseModel):
     listed: bool = False
     # Mark the game open to Quick Match (a visibility flag shown in the lobby).
     searchable: bool = False
+    # VP total that ends the game; None uses the server default for the count
+    # (win_threshold: 15 for the 2-player duel, 10 otherwise).
+    victory_points_to_win: int | None = None
     # The caller's place in line from a prior queued response, re-sent each poll
     # while waiting for a free slot; None on the first attempt.
     ticket: str | None = None
@@ -86,6 +89,22 @@ class _SeatRequest(BaseModel):
     # (open for a joiner) or a bot kind from GET /api/bots.
     seat: int
     kind: str
+
+
+class _ConfigureRequest(BaseModel):
+    """A pre-start reconfiguration of the lobby room's game. Every field is
+    optional and merged onto the current setup; the board is rebuilt in place
+    (the game id, the still-valid seat claims, and the chat are preserved)."""
+
+    seed: int | None = None
+    n_players: Literal[2, 4] | None = None
+    number_placement: Literal["random", "spiral"] | None = None
+    # The full seat-kind list (length == the new n_players); a still-claimed
+    # surviving seat is forced back to "human" regardless.
+    seats: list[str] | None = None
+    victory_points_to_win: int | None = None
+    listed: bool | None = None
+    searchable: bool | None = None
 
 
 class _ActionRequest(BaseModel):
@@ -162,7 +181,9 @@ def build(deps: Deps) -> APIRouter:
                     number_placement=req.number_placement,
                     seats=req.seats,
                     external_kinds=bots.remote_kinds(),
-                    victory_points_to_win=win_threshold(req.n_players),
+                    victory_points_to_win=(
+                        req.victory_points_to_win or win_threshold(req.n_players)
+                    ),
                 )
             )
         except ValueError as exc:
@@ -237,6 +258,98 @@ def build(deps: Deps) -> APIRouter:
             if needs_driver(handle, deps.turn_timeout):
                 deps.spawn_driver(handle)
             handle.bump()
+            return game_model(handle, owned)
+
+    @router.post("/api/games/{game_id}/configure")
+    async def post_configure(
+        game_id: str,
+        req: _ConfigureRequest,
+        user: CurrentUser = None,
+        x_seat_tokens: SeatTokens = None,
+    ) -> GameModel:
+        """Reconfigure a game that hasn't started — change the map, player count,
+        VP target, seats, or lobby flags. The board is rebuilt in place, keeping
+        the game id, the still-valid seat claims, and the chat. Host only (the
+        seat-0 owner): ``403`` otherwise; ``409`` once a move has been played."""
+        handle = deps.handle_of(game_id)
+        async with handle.lock:
+            owned = handle.owned_seats(tokens(x_seat_tokens), uid(user))
+            if 0 not in owned:
+                raise HTTPException(status_code=403, detail="only the host can configure")
+            session = handle.session
+            if session.moves_played > 0:
+                raise HTTPException(status_code=409, detail="game already started")
+
+            n = req.n_players if req.n_players is not None else session.n_players
+            if req.seats is not None:
+                seats = list(req.seats)
+            else:
+                cur = session.seats
+                seats = [cur[i] if i < len(cur) else "random" for i in range(n)]
+            if len(seats) != n:
+                raise HTTPException(status_code=422, detail=f"expected {n} seats")
+            # A claimed seat that survives the new count stays human — you can't
+            # turn a seat someone holds into a bot.
+            for seat in handle.claims:
+                if seat < n:
+                    seats[seat] = HUMAN
+            _validate_seat_kinds(seats, n, bots.catalog())
+
+            # Snapshot what survives the reset (which clears the session's log).
+            chat = [(e.player, e.text) for e in session.log() if e.kind == "chat"]
+            old_claims = dict(handle.claims)
+            old_users = dict(handle.claim_users)
+            old_names = dict(handle.claim_names)
+            vp = req.victory_points_to_win or session.victory_points_to_win
+            placement = req.number_placement or session.number_placement
+            seed = req.seed if req.seed is not None else session.seed
+            try:
+                await anyio.to_thread.run_sync(
+                    lambda: session.reset(
+                        seed,
+                        n_players=n,
+                        number_placement=placement,
+                        seats=seats,
+                        external_kinds=bots.remote_kinds(),
+                        victory_points_to_win=vp,
+                    )
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+            # Keep claims only for seats that still exist and are still human.
+            handle.claims, handle.claim_users, handle.claim_names = {}, {}, {}
+            for seat, token in old_claims.items():
+                if seat < n and seats[seat] == HUMAN:
+                    handle.claims[seat] = token
+                    if seat in old_users:
+                        handle.claim_users[seat] = old_users[seat]
+                    if seat in old_names:
+                        handle.claim_names[seat] = old_names[seat]
+            kept_chat = [(p, t) for p, t in chat if p is None or p < n]
+            for player, text in kept_chat:
+                session.add_chat(player, text)
+
+            if req.listed is not None:
+                handle.listed = req.listed
+            if req.searchable is not None:
+                handle.searchable = req.searchable
+
+            # Rebuild the journal so a crash-restart restores the new board,
+            # surviving claims, and chat (the header write is an upsert).
+            if deps.store is not None:
+                handle.journal = deps.store.create(game_id, session.setup.to_dict())
+                for seat, token in handle.claims.items():
+                    handle.journal.claim(seat, token, handle.claim_users.get(seat))
+                for player, text in kept_chat:
+                    handle.journal.chat(player, text)
+
+            if needs_driver(handle, deps.turn_timeout):
+                deps.spawn_driver(handle)
+            handle.bump()
+            # Recompute ownership: a dropped claim (a now-gone seat) must not
+            # linger in the snapshot's your_seats.
+            owned = handle.owned_seats(tokens(x_seat_tokens), uid(user))
             return game_model(handle, owned)
 
     @router.get("/api/games/{game_id}")

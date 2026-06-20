@@ -54,4 +54,8 @@ def game_model(handle: GameHandle, owned: set[int]) -> GameModel:
         seats_claimed=sorted(handle.claims),
         your_seats=sorted(owned),
         seat_names=[handle.claim_names.get(i) for i in range(len(status.seats))],
+        seed=session.seed,
+        number_placement=session.number_placement,
+        listed=handle.listed,
+        searchable=handle.searchable,
     )

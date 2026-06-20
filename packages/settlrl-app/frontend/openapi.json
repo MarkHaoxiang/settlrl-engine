@@ -247,6 +247,77 @@
     }
    }
   },
+  "/api/games/{game_id}/configure": {
+   "post": {
+    "summary": "Post Configure",
+    "description": "Reconfigure a game that hasn't started \u2014 change the map, player count,\nVP target, seats, or lobby flags. The board is rebuilt in place, keeping\nthe game id, the still-valid seat claims, and the chat. Host only (the\nseat-0 owner): ``403`` otherwise; ``409`` once a move has been played.",
+    "operationId": "post_configure_api_games__game_id__configure_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "game_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Game Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ConfigureRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GameModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/games/{game_id}": {
    "get": {
     "summary": "Get Game",
@@ -1996,6 +2067,26 @@
       "type": "array",
       "title": "Seat Names",
       "default": []
+     },
+     "seed": {
+      "type": "integer",
+      "title": "Seed",
+      "default": 0
+     },
+     "number_placement": {
+      "type": "string",
+      "title": "Number Placement",
+      "default": "random"
+     },
+     "listed": {
+      "type": "boolean",
+      "title": "Listed",
+      "default": false
+     },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable",
+      "default": false
      }
     },
     "type": "object",
@@ -2758,6 +2849,101 @@
     ],
     "title": "_ChatRequest"
    },
+   "_ConfigureRequest": {
+    "properties": {
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Seed"
+     },
+     "n_players": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "enum": [
+         2,
+         4
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N Players"
+     },
+     "number_placement": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "random",
+         "spiral"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Number Placement"
+     },
+     "seats": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Seats"
+     },
+     "victory_points_to_win": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Victory Points To Win"
+     },
+     "listed": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Listed"
+     },
+     "searchable": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Searchable"
+     }
+    },
+    "type": "object",
+    "title": "_ConfigureRequest",
+    "description": "A pre-start reconfiguration of the lobby room's game. Every field is\noptional and merged onto the current setup; the board is rebuilt in place\n(the game id, the still-valid seat claims, and the chat are preserved)."
+   },
    "_CreateRequest": {
     "properties": {
      "seed": {
@@ -2816,6 +3002,17 @@
       "type": "boolean",
       "title": "Searchable",
       "default": false
+     },
+     "victory_points_to_win": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Victory Points To Win"
      },
      "ticket": {
       "anyOf": [

@@ -10,11 +10,10 @@ export interface CreateQueue {
   total: number;
 }
 
-// Drives the create-a-game flow shared by the lobby and an in-progress game:
-// start(config) creates the game and navigates into it, re-polling with the
-// returned ticket while the server is at its concurrency cap. queue/error
-// expose the in-flight state for the caller to render; cancel abandons a queued
-// request.
+// Drives the create-a-game flow: start(config) creates the game and navigates
+// into its lobby room, re-polling with the returned ticket while the server is
+// at its concurrency cap. queue/error expose the in-flight state for the caller
+// to render; cancel abandons a queued request.
 export function useCreateGame() {
   const navigate = useNavigate();
   const [queue, setQueue] = useState<CreateQueue | null>(null);
@@ -31,7 +30,7 @@ export function useCreateGame() {
         setQueue(null);
         saveTokens(res.id, res.tokens);
         rememberGame(res.id);
-        navigate(`/play/${res.id}`);
+        navigate(`/lobby/${res.id}`);
       }
     } catch (e) {
       setQueue(null);

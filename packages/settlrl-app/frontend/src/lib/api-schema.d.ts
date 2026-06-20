@@ -87,6 +87,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/games/{game_id}/configure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Configure
+         * @description Reconfigure a game that hasn't started — change the map, player count,
+         *     VP target, seats, or lobby flags. The board is rebuilt in place, keeping
+         *     the game id, the still-valid seat claims, and the chat. Host only (the
+         *     seat-0 owner): ``403`` otherwise; ``409`` once a move has been played.
+         */
+        post: operations["post_configure_api_games__game_id__configure_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/games/{game_id}": {
         parameters: {
             query?: never;
@@ -780,6 +803,26 @@ export interface components {
              * @default []
              */
             seat_names: (string | null)[];
+            /**
+             * Seed
+             * @default 0
+             */
+            seed: number;
+            /**
+             * Number Placement
+             * @default random
+             */
+            number_placement: string;
+            /**
+             * Listed
+             * @default false
+             */
+            listed: boolean;
+            /**
+             * Searchable
+             * @default false
+             */
+            searchable: boolean;
         };
         /**
          * GameStatusModel
@@ -1100,6 +1143,28 @@ export interface components {
             /** Player */
             player?: number | null;
         };
+        /**
+         * _ConfigureRequest
+         * @description A pre-start reconfiguration of the lobby room's game. Every field is
+         *     optional and merged onto the current setup; the board is rebuilt in place
+         *     (the game id, the still-valid seat claims, and the chat are preserved).
+         */
+        _ConfigureRequest: {
+            /** Seed */
+            seed?: number | null;
+            /** N Players */
+            n_players?: (2 | 4) | null;
+            /** Number Placement */
+            number_placement?: ("random" | "spiral") | null;
+            /** Seats */
+            seats?: string[] | null;
+            /** Victory Points To Win */
+            victory_points_to_win?: number | null;
+            /** Listed */
+            listed?: boolean | null;
+            /** Searchable */
+            searchable?: boolean | null;
+        };
         /** _CreateRequest */
         _CreateRequest: {
             /**
@@ -1137,6 +1202,8 @@ export interface components {
              * @default false
              */
             searchable: boolean;
+            /** Victory Points To Win */
+            victory_points_to_win?: number | null;
             /** Ticket */
             ticket?: string | null;
         };
@@ -1457,6 +1524,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["_SeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_configure_api_games__game_id__configure_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ConfigureRequest"];
             };
         };
         responses: {

@@ -2,11 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import Button from "../components/Button";
-import NewGameDialog from "../components/NewGameDialog";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
-import { currentUser, type AuthUser } from "../lib/auth";
-import { matchmake, type PlayerCount } from "../lib/game";
+import { authToken, currentUser, type AuthUser } from "../lib/auth";
+import { HUMAN, matchmake, type NewGameConfig, type PlayerCount } from "../lib/game";
 import { useCreateGame } from "../lib/useCreateGame";
 import { useLobby, type LobbyGame } from "../lib/queries";
 import { rememberGame, saveTokens } from "../lib/seats";
@@ -55,9 +54,8 @@ export default function LobbyView() {
   // would each enqueue their own ticket and the matchmaker would pair this
   // browser with itself, dropping it into a game where it holds every seat.
   const searchActive = useRef(false);
-  // Hosting a new game: the configuration dialog, plus the shared create flow
-  // (handles the full-server queue and navigates into the game once it exists).
-  const [hosting, setHosting] = useState(false);
+  // Hosting opens a game straight away and drops the host into its lobby room
+  // (where the board, seats, VP and flags are all editable before it starts).
   const { start: hostGame, queue, error: createError, cancel: abortCreate } = useCreateGame();
 
   useEffect(() => {
@@ -66,8 +64,24 @@ export default function LobbyView() {
   // Stop polling if the view unmounts mid-search.
   useEffect(() => () => void (timer.current !== null && window.clearTimeout(timer.current)), []);
 
-  // Joining is just a deep link: PlayView claims the first free seat on entry.
-  const join = (id: string) => navigate(`/play/${id}`);
+  // Joining is just a deep link: the lobby room claims the first free seat.
+  const join = (id: string) => navigate(`/lobby/${id}`);
+
+  // Host opens a game with a sensible default table — you (seat 0) plus an open
+  // human seat and bots — and lands in its lobby room to configure it. Leaving a
+  // seat open keeps the room up; the host bot-fills and starts from there.
+  const host = () => {
+    const config: NewGameConfig = {
+      seed: Math.floor(Math.random() * 65536),
+      nPlayers: 4,
+      numberPlacement: "random",
+      seats: [{ kind: HUMAN }, { kind: HUMAN }, { kind: "random" }, { kind: "random" }],
+      claim: "first",
+      listed: !!authToken(),
+      searchable: false,
+    };
+    hostGame(config);
+  };
 
   // Re-POST the ticket on an interval until a seat comes back, then drop into it.
   const poll = async (n: PlayerCount) => {
@@ -118,8 +132,8 @@ export default function LobbyView() {
       <Panel className={s.box}>
         <span className={ui.sectionLabel}>Host a game</span>
         <div className={s.quickRow}>
-          <span className={s.muted}>Set up a board; list it here so others can join, or share the invite link.</span>
-          <Button selected onClick={() => setHosting(true)}>
+          <span className={s.muted}>Open a lobby room: pick the board, players and bots, invite friends, then start.</span>
+          <Button selected onClick={host}>
             Create game
           </Button>
         </div>
@@ -169,16 +183,6 @@ export default function LobbyView() {
             Cancel
           </Button>
         </div>
-      )}
-      {hosting && (
-        <NewGameDialog
-          defaultOnline
-          onStart={(c) => {
-            setHosting(false);
-            hostGame(c);
-          }}
-          onClose={() => setHosting(false)}
-        />
       )}
     </div>
   );

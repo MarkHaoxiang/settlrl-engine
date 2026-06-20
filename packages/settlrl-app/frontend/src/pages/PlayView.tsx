@@ -11,23 +11,17 @@ import ChoicePopover from "../components/ChoicePopover";
 import GameOverScreen from "../components/GameOverScreen";
 import Hand, { DEV_PLAY_TYPE } from "../components/Hand";
 import MaritimePopover from "../components/MaritimePopover";
-import NewGameDialog from "../components/NewGameDialog";
 import TradePopover from "../components/TradePopover";
 import TradeResponsePopover from "../components/TradeResponsePopover";
 import TopBar from "../components/TopBar";
-import { BotIcon, HumanIcon } from "../components/icons";
+import { BotIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
 import {
-  fetchBots,
   joinGame,
-  setSeat,
-  type BotSpec,
   type GameAction,
   type GameSnapshot,
-  type NewGameConfig,
 } from "../lib/game";
-import { useCreateGame } from "../lib/useCreateGame";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import { authToken } from "../lib/auth";
 import {
@@ -144,32 +138,20 @@ export default function PlayView() {
   // The maritime-trade picker, anchored at the clicked bank pile (the resource
   // to receive); choose which resource to give for one of it.
   const [maritimeFor, setMaritimeFor] = useState<{ receive: ResourceKind; x: number; y: number } | null>(null);
-  // Whether the new-game configuration dialog is open (shown on entry
-  // without a game, and reopened by the New game button).
-  const [configuring, setConfiguring] = useState(!gameId);
   // The end-game overlay shows once a game finishes; "View board" dismisses it.
   const [endDismissed, setEndDismissed] = useState(false);
-  // Brief "Copied!" feedback on the lobby's invite-link button.
-  const [linkCopied, setLinkCopied] = useState(false);
-  // The bot catalog, for the waiting-room owner control that fills an open seat
-  // with a bot. Empty until loaded / when the server runs no bots.
-  const [bots, setBots] = useState<Record<string, BotSpec>>({});
+
+  // A game still waiting for players belongs in its lobby room, not on the board:
+  // bounce there (this keeps old /play invite & resume links working). Play only
+  // begins once every human seat is claimed.
   useEffect(() => {
-    fetchBots().then(setBots).catch(() => setBots({}));
-  }, []);
-  // Creating a game claims human seats per the dialog's seating choice
-  // (hotseat: all of them; online: just the first) — the rest are claimed
-  // through the invite link (auto-join above). The shared hook handles the
-  // full-server queue (re-poll with the ticket) and the navigate-on-create.
-  const { start: beginCreate, queue, error: createError, cancel: abortCreate } = useCreateGame();
-  const start = (config: NewGameConfig) => {
-    setConfiguring(false);
-    beginCreate(config);
-  };
-  const cancelQueue = () => {
-    abortCreate();
-    setConfiguring(true);
-  };
+    if (!gameId || !snapshot) return;
+    const st = snapshot.status;
+    const claimed = new Set(snapshot.seats_claimed);
+    const stillWaiting =
+      !st.terminal && st.seats.some((k, i) => k === "human" && !claimed.has(i));
+    if (stillWaiting) navigate(`/lobby/${gameId}`, { replace: true });
+  }, [gameId, snapshot, navigate]);
 
   const actions = snapshot?.actions ?? [];
 
@@ -248,52 +230,15 @@ export default function PlayView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, actions, knightArming]);
 
-  if (!gameId)
-    return (
-      <div className={s.fullscreen}>
-        {createError && <div className={ui.overlayMsg}>{createError}</div>}
-        {queue && (
-          <div className={ui.overlayMsg}>
-            You're #{queue.position} of {queue.total} in line…
-            <div className={s.queueSub}>
-              The server is busy; your game starts automatically.
-            </div>
-            <Button variant="small" className={s.queueCancel} onClick={cancelQueue}>
-              Cancel
-            </Button>
-          </div>
-        )}
-        {configuring && (
-          <NewGameDialog onStart={(c) => void start(c)} onClose={() => navigate("/")} />
-        )}
-      </div>
-    );
   if (error) return <div className={ui.overlayMsg}>{error}</div>;
   if (!snapshot) return <div className={ui.overlayMsg}>Loading game…</div>;
 
   const { status, board } = snapshot;
   // Who holds each seat: an account name (or "Guest") for a human, the bot kind
-  // for a bot — for the seat list and the waiting room.
+  // for a bot — for the seat list in the chat column.
   const seatIdentity = (i: number): string =>
     status.seats[i] !== "human" ? status.seats[i] : (snapshot.seat_names[i] ?? "Guest");
   const seatLabels = status.seats.map((_, i) => seatIdentity(i));
-  // Lobby gate: an online game waits until every human seat is claimed (the
-  // server serves no actions and advances nothing until then). Derived from the
-  // public seat kinds + claims, so spectators see the wait too.
-  const humanSeats = status.seats.flatMap((k, i) => (k === "human" ? [i] : []));
-  const claimedSeats = new Set(snapshot.seats_claimed);
-  const waiting = !status.terminal && humanSeats.some((s) => !claimedSeats.has(s));
-  // Any player in the game may retarget the still-open seats (the lobby owner's
-  // "fill to start" control): convert an open human seat to a bot, or reopen a
-  // bot seat. Pick the bot kind the new-game dialog would default to.
-  const inGame = mySeats.length > 0;
-  const botKinds = Object.keys(bots)
-    .filter((b) => bots[b].counts.includes(status.seats.length))
-    .sort();
-  const defaultBot = botKinds.includes("random") ? "random" : botKinds[0];
-  const retargetSeat = (seat: number, kind: string) => {
-    if (gameId) void setSeat(gameId, tokens, seat, kind).catch(() => {});
-  };
   // The hand panel follows whichever owned seat is acting (falling back to
   // this client's first seat). Owning no seats means spectating: no hand.
   const handSeat = mySeats.includes(status.acting_player)
@@ -464,80 +409,10 @@ export default function PlayView() {
               🔑
             </Button>
           )}
-          <Button variant="small" onClick={() => setConfiguring(true)}>
+          <Button variant="small" onClick={() => navigate("/lobby")}>
             New game
           </Button>
         </TopBar>
-
-        {waiting && (
-          <div className={s.waitBackdrop}>
-            <div className={s.waitDialog}>
-              <span className={s.waitTitle}>Waiting for players…</span>
-              <span className={s.waitSub}>
-                {humanSeats.filter((s) => claimedSeats.has(s)).length} / {humanSeats.length} joined — the
-                game starts once every seat is filled.
-              </span>
-              <div className={s.seatList}>
-                {status.seats.map((kind, i) => {
-                  const human = kind === "human";
-                  const filled = !human || claimedSeats.has(i);
-                  const mine = mySeats.includes(i);
-                  // The owner can retarget a seat no one has claimed yet: fill an
-                  // open human seat with a bot, or reopen a bot seat for a human.
-                  const open = human && !claimedSeats.has(i);
-                  const canControl = inGame && !claimedSeats.has(i);
-                  return (
-                    <div key={i} className={s.seatRow} style={{ opacity: filled ? 1 : 0.55 }}>
-                      <span className={s.seatDot} style={{ background: PLAYER_COLORS[i] ?? "#888" }} />
-                      {human ? <HumanIcon size={16} /> : <BotIcon size={16} />}
-                      <span className={s.seatName}>
-                        {playerName(i)}
-                        {mine ? " (you)" : ""}
-                      </span>
-                      <span className={s.seatStatus}>
-                        {!human
-                          ? kind
-                          : claimedSeats.has(i)
-                            ? (snapshot.seat_names[i] ?? "joined")
-                            : "open"}
-                      </span>
-                      {canControl &&
-                        (open
-                          ? defaultBot && (
-                              <Button
-                                variant="small"
-                                title="Fill this seat with a bot so the game can start"
-                                onClick={() => retargetSeat(i, defaultBot)}
-                              >
-                                + Bot
-                              </Button>
-                            )
-                          : (
-                              <Button
-                                variant="small"
-                                title="Reopen this seat for a human player"
-                                onClick={() => retargetSeat(i, "human")}
-                              >
-                                Open
-                              </Button>
-                            ))}
-                    </div>
-                  );
-                })}
-              </div>
-              <Button
-                title="Others join the open seats by opening this link"
-                onClick={() => {
-                  void navigator.clipboard.writeText(window.location.href);
-                  setLinkCopied(true);
-                  window.setTimeout(() => setLinkCopied(false), 1500);
-                }}
-              >
-                {linkCopied ? "Copied!" : "🔗 Copy invite link"}
-              </Button>
-            </div>
-          </div>
-        )}
 
         {incomingTrade && (acceptAction || rejectAction) && (
           <TradeResponsePopover
@@ -613,7 +488,7 @@ export default function PlayView() {
             winner={status.winner ?? null}
             mySeats={mySeats}
             gameId={gameId}
-            onNewGame={() => setConfiguring(true)}
+            onNewGame={() => navigate("/lobby")}
             onDismiss={() => setEndDismissed(true)}
           />
         )}
@@ -684,10 +559,6 @@ export default function PlayView() {
         belief={snapshot.belief}
         identities={seatLabels}
       />
-
-      {configuring && (
-        <NewGameDialog onStart={(c) => void start(c)} onClose={() => setConfiguring(false)} />
-      )}
     </div>
   );
 }

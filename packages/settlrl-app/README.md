@@ -18,7 +18,7 @@ A game (`/play/{id}`) is a live, playable game. Each seat is configured per game
 - **Table scene** — top-down, with zoom, pan, and spin (mouse, touch, or keyboard: arrows pan, `+`/`−` zoom, `[` `]` spin, `0` re-fits). When you hold a single seat the table opens rotated to face it (your play area at the bottom); spectating or a shared-screen hotseat keeps the canonical bottom-facing view. The bank's card piles sit left of the board; each seat's play area lines its table edge with its face-down hand and dev piles and unbuilt roads, settlements, and cities. The dice rest in the corner beside the acting seat: they glow gold to roll, then glow red as the end-turn control once you've rolled.
 - **Trade answers** — a trade offered to you shows as a card over the board with Accept / Reject.
 - **Bars and panels** — the bottom panel shows the acting human's hand and a status line; the top bar holds New game and a light/dark theme toggle. The right column lists the seats in playing order — each with its holder (a signed-in player's account name, "Guest" for an anonymous human, or the bot kind), points, cards, devs, and 🔍 to inspect an opponent's proven hand bounds — above a chat panel that doubles as the game log.
-- **New game** — a dialog (on entry and from the New game button) sets player count (2 or 4), what controls each seat, seating across several humans (hotseat here, or online via an invite link — the lobby's host flow opens on online), whether to list the game publicly and mark it open to Quick Match, number-token placement (random or spiral), and an optional seed. The win target follows the player count — **15 victory points for a 2-player duel, 10 otherwise** (shown by the board when it isn't the usual 10) — and is recorded with the game so a replay ends where the original did.
+- **New game** — the top bar's New game button (and the end-of-game screen) returns to the [lobby](#lobby), where hosting opens a [lobby room](#lobby) to set up and start a fresh game. The win target defaults to the player count — **15 victory points for a 2-player duel, 10 otherwise** (shown by the board when it isn't the usual 10) — but the host can set any target; it's recorded with the game so a replay ends where the original did.
 
 A help page (`/help`, the **?** button) documents the controls and icons.
 
@@ -32,11 +32,13 @@ hand arrives in full, everyone else's only as public counts, and the legal-move 
 ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
 link, and opening it claims a free human seat (or spectates when none is left); the 🔑 button
 copies a resume link that carries your seat tokens, so you can restore the exact seats you
-hold on another device or after clearing storage. A game with unclaimed human seats waits in a
-**waiting room** — it serves no moves and advances neither bots nor turn timeouts — until every
-human seat is filled, then begins on its own; any player in it can convert a still-open seat to
-a bot (or reopen it) there to start under-filled. A game can also be **listed** at creation so
-it appears in the public lobby (below) for anyone to join, instead of being invite-link only.
+hold on another device or after clearing storage. A game with unclaimed human seats stays in its
+**[lobby room](#lobby)** (`/lobby/{id}`) — the host sets up the board, seats, and win target there
+while players join and chat — and begins on its own once every human seat is filled (the host can
+bot-fill the open seats to start now); the server serves no moves and advances neither bots nor
+turn timeouts until then, and opening `/play/{id}` for a game that hasn't started bounces to its
+lobby room. A game can also be **listed** so it appears in the public lobby (below) for anyone to
+join, instead of being invite-link only.
 The server
 pushes state: each client holds an event stream (`GET /api/games/{id}/events`, SSE) and
 receives its per-seat snapshot on every change, and bot seats are played by a server-side
@@ -184,13 +186,22 @@ end-of-game screen's **Download replay** button saves.
 ## Lobby
 
 The menu's **Play** card opens the **Lobby** page (`/lobby`, public), the entry
-point for online play: **Host a game** (the New Game dialog), **Quick Match**, or
-join an open game. The open-games list shows the games created with **List in
-lobby** that still have an unclaimed human seat, newest first (`GET /api/lobby`);
-each row shows its player count, seats filled, and map, and **Join** opens the
-game and claims a free seat. The owner controls each seat from the New Game dialog
-(human or a specific bot) and can still retarget an unclaimed seat in the waiting
-room (`POST /api/games/{id}/seats`), so an under-filled game is never stuck.
+point for online play: **Host a game**, **Quick Match**, or join an open game.
+The open-games list shows the games created with **List in lobby** that still
+have an unclaimed human seat, newest first (`GET /api/lobby`); each row shows its
+player count, seats filled, and map, and **Join** opens the game and claims a
+free seat.
+
+**Host a game** creates a game right away and drops you into its **lobby room**
+(`/lobby/{id}`) — a three-column page (players, the map and settings, and chat)
+that is the game's pre-start staging area. Because the game already exists, the
+room renders its live board and the host's edits reconfigure it in place
+(`POST /api/games/{id}/configure`, host-only and only before the first move): the
+host changes the map (seed / number placement), player count, win target, and per
+-seat human-or-bot, and toggles **List in lobby** / **Open to Quick Match** — all
+streamed to every participant, with the game id, the seat claims, and the chat
+preserved across each change. **Start game** bot-fills the still-open seats; once
+every human seat is claimed the game starts and everyone is sent into `/play/{id}`.
 Listing a game publicly requires a signed-in account (`POST /api/games` with
 `listed` returns `401` otherwise); anonymous play stays invite-link only. A
 listed game the host also marks `searchable` shows a **Quick Match** tag in its
@@ -301,9 +312,10 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "listed"?, "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees. `listed` requires a signed-in account (`401` otherwise) |
+| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "listed"?, "searchable"?, "victory_points_to_win"?, "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees. `listed`/`searchable` require a signed-in account (`401` otherwise) |
 | `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
 | `POST /api/games/{id}/seats` | Retarget an unclaimed seat before play `{ "seat", "kind": "human" \| <bot kind> }` (any player in the game) — `403` for outsiders, `409` if the seat is taken or the game has started |
+| `POST /api/games/{id}/configure` | Reconfigure a not-yet-started game (the lobby room) — any of `{ "seed"?, "n_players"?, "number_placement"?, "seats"?, "victory_points_to_win"?, "listed"?, "searchable"? }`, merged onto the current setup. Host only (seat-0 owner, `403` otherwise); `409` once a move is played. Rebuilds the board in place, keeping the game id, the surviving seat claims, and the chat |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
 | `GET /api/games/{id}/events` | Server-sent events: the requester's snapshot immediately, then again on every change (`bot_move` carries the server-paced bot play just made) |
@@ -371,7 +383,7 @@ packages/settlrl-app/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
-        ├── App.tsx          # Routes: menu, /play, /lobby, /help, /profile, /leaderboard, /replay, /admin
+        ├── App.tsx          # Routes: menu, /play/:id, /lobby, /lobby/:id, /help, /profile, /leaderboard, /replay, /admin
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError) + the SSE reader
         ├── lib/client.ts     # Typed REST client (openapi-fetch) from the schema, auth-injecting
@@ -393,7 +405,8 @@ packages/settlrl-app/
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play (the lobby), Replay, or Leaderboard
         │   ├── PlayView.tsx   # Play mode: game state + handlers wiring the components below
-        │   ├── LobbyView.tsx  # Lobby: host a game, Quick Match, or join an open one
+        │   ├── LobbyView.tsx  # Lobby hub: host a game, Quick Match, or join an open one
+        │   ├── LobbyRoom.tsx  # A game's pre-start room (/lobby/:id): players / map+settings / chat
         │   ├── HelpView.tsx   # Help page: controls, action icons, seats
         │   └── ReplayView.tsx # Replay mode: load a record, scrub / step / play it
         └── components/
@@ -411,7 +424,6 @@ packages/settlrl-app/
             ├── TableDice.tsx    # The dice on the table (click to roll when glowing)
             ├── TransferAnimations.tsx # Chips that fly between bank piles / seats on a transfer
             ├── PlayersPanel.tsx # Seat list atop the chat column (stats + belief inspect)
-            ├── NewGameDialog.tsx # Modal: configure players / seats / numbers / seed for a new game
             ├── ChatPanel.tsx    # Right-hand column: players section + chat / log
             ├── ThemeToggle.tsx  # Light / dark switch
             ├── HexTile.tsx      # Hex polygon, terrain colour, icon-and-number token

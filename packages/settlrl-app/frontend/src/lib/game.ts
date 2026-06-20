@@ -137,6 +137,21 @@ export interface NewGameConfig {
   listed: boolean;
   // Mark the game open to Quick Match (a visibility flag shown in the lobby).
   searchable: boolean;
+  // VP total that ends the game; omit for the server default (15 at 2 players,
+  // 10 otherwise).
+  victoryPointsToWin?: number;
+}
+
+// A pre-start reconfiguration of a lobby's game: any subset of its setup. The
+// board is rebuilt server-side, keeping the game id, the live claims, and chat.
+export interface GameConfig {
+  seed?: number;
+  nPlayers?: PlayerCount;
+  numberPlacement?: NumberPlacement;
+  seats?: SeatKind[];
+  victoryPointsToWin?: number;
+  listed?: boolean;
+  searchable?: boolean;
 }
 
 // A freshly created game: its id plus the creator's seat tokens (every human
@@ -170,6 +185,7 @@ export async function createGame(
       claim: config.claim,
       listed: config.listed,
       searchable: config.searchable,
+      victory_points_to_win: config.victoryPointsToWin,
       ticket,
     }),
     // Sign-in (if any) ties the creator's claimed seats to their account.
@@ -203,6 +219,31 @@ export async function setSeat(
     await api<GameWire>(`/api/games/${gameId}/seats`, {
       method: "POST",
       body: JSON.stringify({ seat, kind }),
+      headers: seatHeaders(tokens),
+    })
+  );
+}
+
+// Reconfigure a not-yet-started game (the lobby room's host controls): change
+// the map, player count, VP target, seats, or lobby flags. Owner-only, pre-start;
+// the returned snapshot reflects the rebuilt board with claims and chat intact.
+export async function configureGame(
+  gameId: string,
+  tokens: SeatTokens,
+  config: GameConfig
+): Promise<GameSnapshot> {
+  return adaptGame(
+    await api<GameWire>(`/api/games/${gameId}/configure`, {
+      method: "POST",
+      body: JSON.stringify({
+        seed: config.seed,
+        n_players: config.nPlayers,
+        number_placement: config.numberPlacement,
+        seats: config.seats,
+        victory_points_to_win: config.victoryPointsToWin,
+        listed: config.listed,
+        searchable: config.searchable,
+      }),
       headers: seatHeaders(tokens),
     })
   );
