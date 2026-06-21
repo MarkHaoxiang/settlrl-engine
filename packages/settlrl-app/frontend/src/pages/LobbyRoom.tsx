@@ -88,13 +88,16 @@ export default function LobbyRoom() {
     );
   }, [lobbyId, tokens, joinFailed, snapshot]);
 
-  // Someone started the table: follow everyone into the game.
+  // Someone started the table: carry our seat tokens over to the new game id
+  // (the game reuses them) so we keep our seat there, then follow everyone in.
   useEffect(() => {
-    if (snapshot?.started_game_id) {
-      setCurrentPlace(snapshot.started_game_id, "game");
-      navigate(`/play/${snapshot.started_game_id}`, { replace: true });
+    const startedId = snapshot?.started_game_id;
+    if (startedId) {
+      saveTokens(startedId, tokens);
+      setCurrentPlace(startedId, "game");
+      navigate(`/play/${startedId}`, { replace: true });
     }
-  }, [snapshot?.started_game_id, navigate]);
+  }, [snapshot?.started_game_id, tokens, navigate]);
 
   // The lobby vanished (the host closed it, or it was evicted): stop tracking it
   // and bounce back to the lobby list.
@@ -137,6 +140,7 @@ export default function LobbyRoom() {
   const start = () =>
     startLobby(lobbyId, tokens).then((res) => {
       if ("game_id" in res) {
+        saveTokens(res.game_id, tokens); // keep our seat in the new game
         setCurrentPlace(res.game_id, "game");
         navigate(`/play/${res.game_id}`, { replace: true });
       } else {
