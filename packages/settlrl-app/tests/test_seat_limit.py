@@ -82,7 +82,7 @@ def test_create_blocked_while_in_a_live_game(client: TestClient) -> None:
         headers=host,
     )
     assert res.status_code == 409
-    assert res.json()["detail"]["game_id"] == game
+    assert res.json()["detail"]["id"] == game
 
 
 def test_join_blocked_while_in_another_game(client: TestClient) -> None:
@@ -92,7 +92,7 @@ def test_join_blocked_while_in_another_game(client: TestClient) -> None:
     other = _open_lobby(client, b)  # b hosts, seat 1 open
     res = client.post(f"/api/games/{other}/join", json={"seat": 1}, headers=a)
     assert res.status_code == 409
-    assert res.json()["detail"]["game_id"] == mine
+    assert res.json()["detail"]["id"] == mine
 
 
 def test_guest_without_a_client_id_is_unrestricted(client: TestClient) -> None:
@@ -107,7 +107,7 @@ def test_guest_browser_is_held_to_one_game(client: TestClient) -> None:
     game = client.post("/api/games", json={"seed": 0}, headers=hdr).json()["id"]
     # A second create from the same browser is refused, pointing at the first.
     res = client.post("/api/games", json={"seed": 1}, headers=hdr)
-    assert res.status_code == 409 and res.json()["detail"]["game_id"] == game
+    assert res.status_code == 409 and res.json()["detail"]["id"] == game
     # As is joining someone else's open lobby.
     other = _open_lobby(client, _bearer(_token(client, "host@example.com")))
     join = client.post(f"/api/games/{other}/join", json={"seat": 1}, headers=hdr)

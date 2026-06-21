@@ -5,9 +5,10 @@ from settlrl_app.api.routers import (
     bots,
     games,
     leaderboard,
+    lobbies,
     lobby,
     me,
     replay,
 )
 
-__all__ = ["admin", "bots", "games", "leaderboard", "lobby", "me", "replay"]
+__all__ = ["admin", "bots", "games", "leaderboard", "lobbies", "lobby", "me", "replay"]

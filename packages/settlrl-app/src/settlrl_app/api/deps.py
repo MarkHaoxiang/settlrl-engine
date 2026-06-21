@@ -19,6 +19,7 @@ from settlrl_game.session import HUMAN
 
 from settlrl_app.bots.providers import ProviderRegistry
 from settlrl_app.game.games import GameHandle, GameRegistry
+from settlrl_app.game.lobbies import LobbyRegistry
 from settlrl_app.game.replay import ReplaySession
 from settlrl_app.storage.auth import Auth
 from settlrl_app.storage.db import User
@@ -72,6 +73,7 @@ class Deps:
     replays: ReplaySlot
     spawn_driver: Callable[[GameHandle], None]
     turn_timeout: float
+    lobbies: LobbyRegistry = field(default_factory=LobbyRegistry)
     store: GameStore | None = None
     matchmaker: Matchmaker | None = None
     # Wall-clock process start, for the admin status page's uptime.
@@ -96,13 +98,21 @@ class Deps:
         client id sent (an old client) passes — the limit is only as strong as
         its identity."""
         if user is not None:
-            existing = self.registry.live_game_for_user(str(user.id))
+            key = str(user.id)
+            game = self.registry.live_game_for_user(key)
+            lobby = self.lobbies.live_for_user(key)
         elif client_id:
-            existing = self.registry.live_game_for_client(client_id)
+            game = self.registry.live_game_for_client(client_id)
+            lobby = self.lobbies.live_for_client(client_id)
         else:
             return
-        if existing is not None and existing.id != allow:
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "you are already in a game", "game_id": existing.id},
-            )
+        for kind, existing in (("game", game), ("lobby", lobby)):
+            if existing is not None and existing.id != allow:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "you are already in a game",
+                        "id": existing.id,
+                        "kind": kind,
+                    },
+                )

@@ -497,6 +497,191 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lobbies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lobbies
+         * @description Listed, joinable online lobbies (newest first).
+         */
+        get: operations["list_lobbies_api_lobbies_get"];
+        put?: never;
+        /**
+         * Create Lobby
+         * @description Open a lobby. The host takes seat 0 (online) or every human seat
+         *     (hotseat). Listing or Quick-Match visibility needs a signed-in account.
+         */
+        post: operations["create_lobby_api_lobbies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Lobby */
+        get: operations["get_lobby_api_lobbies__lobby_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lobby Events
+         * @description The requester's lobby snapshot now, then again on every change (joins,
+         *     seat edits, config, chat) and once more carrying ``started_game_id``.
+         */
+        get: operations["lobby_events_api_lobbies__lobby_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/configure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Configure Lobby
+         * @description Host-only (seat-0 owner) pre-start config. Changing the player count
+         *     rebuilds the seat list, keeping seat 0 (the host).
+         */
+        post: operations["configure_lobby_api_lobbies__lobby_id__configure_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/seats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Seat
+         * @description Host-only: retarget an unclaimed seat — a bot kind, or open it (online)
+         *     / take it (hotseat) as human.
+         */
+        post: operations["set_seat_api_lobbies__lobby_id__seats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join Lobby
+         * @description Take an open human seat in an online lobby.
+         */
+        post: operations["join_lobby_api_lobbies__lobby_id__join_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave Lobby
+         * @description The host (seat 0) closes the whole lobby; anyone else frees their
+         *     seat. 403 if you hold no seat here.
+         */
+        post: operations["leave_lobby_api_lobbies__lobby_id__leave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lobby Chat */
+        post: operations["lobby_chat_api_lobbies__lobby_id__chat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lobbies/{lobby_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Lobby
+         * @description Host-only: materialise the lobby into a game. 409 while any human seat
+         *     is still open (start a table only once every seat is decided). 202 with a
+         *     place in line when the server is at its game cap.
+         */
+        post: operations["start_lobby_api_lobbies__lobby_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/status": {
         parameters: {
             query?: never;
@@ -1171,6 +1356,21 @@ export interface components {
             /** Player */
             player?: number | null;
         };
+        /** _ConfigureLobbyRequest */
+        _ConfigureLobbyRequest: {
+            /** Seed */
+            seed?: number | null;
+            /** N Players */
+            n_players?: (2 | 4) | null;
+            /** Number Placement */
+            number_placement?: ("random" | "spiral") | null;
+            /** Victory Points To Win */
+            victory_points_to_win?: number | null;
+            /** Listed */
+            listed?: boolean | null;
+            /** Searchable */
+            searchable?: boolean | null;
+        };
         /**
          * _ConfigureRequest
          * @description A pre-start reconfiguration of the lobby room's game. Every field is
@@ -1192,6 +1392,44 @@ export interface components {
             listed?: boolean | null;
             /** Searchable */
             searchable?: boolean | null;
+        };
+        /** _CreateLobbyRequest */
+        _CreateLobbyRequest: {
+            /**
+             * Mode
+             * @default online
+             * @enum {string}
+             */
+            mode: "hotseat" | "online";
+            /**
+             * N Players
+             * @default 4
+             * @enum {integer}
+             */
+            n_players: 2 | 4;
+            /**
+             * Seed
+             * @default 0
+             */
+            seed: number;
+            /**
+             * Number Placement
+             * @default random
+             * @enum {string}
+             */
+            number_placement: "random" | "spiral";
+            /** Victory Points To Win */
+            victory_points_to_win?: number | null;
+            /**
+             * Listed
+             * @default false
+             */
+            listed: boolean;
+            /**
+             * Searchable
+             * @default false
+             */
+            searchable: boolean;
         };
         /** _CreateRequest */
         _CreateRequest: {
@@ -1234,6 +1472,15 @@ export interface components {
             victory_points_to_win?: number | null;
             /** Ticket */
             ticket?: string | null;
+        };
+        /** _CreatedLobbyModel */
+        _CreatedLobbyModel: {
+            /** Id */
+            id: string;
+            /** Tokens */
+            tokens: {
+                [key: string]: string;
+            };
         };
         /**
          * _CreatedModel
@@ -1338,6 +1585,60 @@ export interface components {
             /** Created At */
             created_at: number;
         };
+        /** _LobbyListModel */
+        _LobbyListModel: {
+            /** Id */
+            id: string;
+            /** N Players */
+            n_players: number;
+            /** Number Placement */
+            number_placement: string;
+            /** Open Seats */
+            open_seats: number;
+            /** Searchable */
+            searchable: boolean;
+            /** Created At */
+            created_at: number;
+        };
+        /**
+         * _LobbyModel
+         * @description One lobby as a requester sees it: its config, seats, and preview board.
+         */
+        _LobbyModel: {
+            /** Id */
+            id: string;
+            /** Mode */
+            mode: string;
+            /** Seed */
+            seed: number;
+            /** Number Placement */
+            number_placement: string;
+            /** N Players */
+            n_players: number;
+            /** Victory Points To Win */
+            victory_points_to_win: number;
+            /** Kinds */
+            kinds: string[];
+            /** Seats Claimed */
+            seats_claimed: number[];
+            /** Seat Names */
+            seat_names: (string | null)[];
+            /** Your Seats */
+            your_seats: number[];
+            /** Listed */
+            listed: boolean;
+            /** Searchable */
+            searchable: boolean;
+            /** Ready */
+            ready: boolean;
+            /** Started Game Id */
+            started_game_id: string | null;
+            board: components["schemas"]["BoardModel"];
+            /** Chat */
+            chat: {
+                [key: string]: unknown;
+            }[];
+        };
         /**
          * _MatchFound
          * @description Matched: the seat claimed for the caller in a freshly created game.
@@ -1411,12 +1712,29 @@ export interface components {
             /** Base Url */
             base_url: string;
         };
+        /** _SeatRequest */
+        _SeatRequest: {
+            /** Seat */
+            seat: number;
+            /** Kind */
+            kind: string;
+        };
+        /** _StartRequest */
+        _StartRequest: {
+            /** Ticket */
+            ticket?: string | null;
+        };
+        /** _StartedModel */
+        _StartedModel: {
+            /** Game Id */
+            game_id: string;
+        };
         /**
          * _QueuedModel
          * @description The server is at its concurrency cap: the caller's place in line. They
          *     re-POST with ``ticket`` until they get a :class:`_CreatedModel` back.
          */
-        _QueuedModel: {
+        settlrl_app__api__routers__games___QueuedModel: {
             /**
              * Queued
              * @default true
@@ -1430,12 +1748,20 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** _SeatRequest */
-        _SeatRequest: {
-            /** Seat */
-            seat: number;
-            /** Kind */
-            kind: string;
+        /** _QueuedModel */
+        settlrl_app__api__routers__lobbies___QueuedModel: {
+            /**
+             * Queued
+             * @default true
+             * @constant
+             */
+            queued: true;
+            /** Ticket */
+            ticket: string;
+            /** Position */
+            position: number;
+            /** Total */
+            total: number;
         };
     };
     responses: never;
@@ -1500,7 +1826,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["_CreatedModel"] | components["schemas"]["_QueuedModel"];
+                    "application/json": components["schemas"]["_CreatedModel"] | components["schemas"]["settlrl_app__api__routers__games___QueuedModel"];
                 };
             };
             /** @description Validation Error */
@@ -2178,6 +2504,345 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_MatchQueued"] | components["schemas"]["_MatchFound"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lobbies_api_lobbies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LobbyListModel"][];
+                };
+            };
+        };
+    };
+    create_lobby_api_lobbies_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Client-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_CreateLobbyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_CreatedLobbyModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_lobby_api_lobbies__lobby_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LobbyModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lobby_events_api_lobbies__lobby_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configure_lobby_api_lobbies__lobby_id__configure_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ConfigureLobbyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LobbyModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_seat_api_lobbies__lobby_id__seats_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_SeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LobbyModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    join_lobby_api_lobbies__lobby_id__join_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Client-Id"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_JoinRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_CreatedLobbyModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    leave_lobby_api_lobbies__lobby_id__leave_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lobby_chat_api_lobbies__lobby_id__chat_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LobbyModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_lobby_api_lobbies__lobby_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_StartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_StartedModel"] | components["schemas"]["settlrl_app__api__routers__lobbies___QueuedModel"];
                 };
             };
             /** @description Validation Error */

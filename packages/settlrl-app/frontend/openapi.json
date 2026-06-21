@@ -119,7 +119,7 @@
            "$ref": "#/components/schemas/_CreatedModel"
           },
           {
-           "$ref": "#/components/schemas/_QueuedModel"
+           "$ref": "#/components/schemas/settlrl_app__api__routers__games___QueuedModel"
           }
          ],
          "title": "Response Post Create Api Games Post"
@@ -1166,6 +1166,629 @@
           }
          ],
          "title": "Response Matchmake Api Matchmake Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies": {
+   "get": {
+    "summary": "List Lobbies",
+    "description": "Listed, joinable online lobbies (newest first).",
+    "operationId": "list_lobbies_api_lobbies_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/_LobbyListModel"
+         },
+         "title": "Response List Lobbies Api Lobbies Get"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "summary": "Create Lobby",
+    "description": "Open a lobby. The host takes seat 0 (online) or every human seat\n(hotseat). Listing or Quick-Match visibility needs a signed-in account.",
+    "operationId": "create_lobby_api_lobbies_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "X-Client-Id",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Client-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_CreateLobbyRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_CreatedLobbyModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}": {
+   "get": {
+    "summary": "Get Lobby",
+    "operationId": "get_lobby_api_lobbies__lobby_id__get",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_LobbyModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/events": {
+   "get": {
+    "summary": "Lobby Events",
+    "description": "The requester's lobby snapshot now, then again on every change (joins,\nseat edits, config, chat) and once more carrying ``started_game_id``.",
+    "operationId": "lobby_events_api_lobbies__lobby_id__events_get",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/configure": {
+   "post": {
+    "summary": "Configure Lobby",
+    "description": "Host-only (seat-0 owner) pre-start config. Changing the player count\nrebuilds the seat list, keeping seat 0 (the host).",
+    "operationId": "configure_lobby_api_lobbies__lobby_id__configure_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ConfigureLobbyRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_LobbyModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/seats": {
+   "post": {
+    "summary": "Set Seat",
+    "description": "Host-only: retarget an unclaimed seat \u2014 a bot kind, or open it (online)\n/ take it (hotseat) as human.",
+    "operationId": "set_seat_api_lobbies__lobby_id__seats_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_SeatRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_LobbyModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/join": {
+   "post": {
+    "summary": "Join Lobby",
+    "description": "Take an open human seat in an online lobby.",
+    "operationId": "join_lobby_api_lobbies__lobby_id__join_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Client-Id",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Client-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_JoinRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_CreatedLobbyModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/leave": {
+   "post": {
+    "summary": "Leave Lobby",
+    "description": "The host (seat 0) closes the whole lobby; anyone else frees their\nseat. 403 if you hold no seat here.",
+    "operationId": "leave_lobby_api_lobbies__lobby_id__leave_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/chat": {
+   "post": {
+    "summary": "Lobby Chat",
+    "operationId": "lobby_chat_api_lobbies__lobby_id__chat_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ChatRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_LobbyModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/lobbies/{lobby_id}/start": {
+   "post": {
+    "summary": "Start Lobby",
+    "description": "Host-only: materialise the lobby into a game. 409 while any human seat\nis still open (start a table only once every seat is decided). 202 with a\nplace in line when the server is at its game cap.",
+    "operationId": "start_lobby_api_lobbies__lobby_id__start_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lobby_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Lobby Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_StartRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/_StartedModel"
+          },
+          {
+           "$ref": "#/components/schemas/settlrl_app__api__routers__lobbies___QueuedModel"
+          }
+         ],
+         "title": "Response Start Lobby Api Lobbies  Lobby Id  Start Post"
         }
        }
       }
@@ -2987,6 +3610,86 @@
     ],
     "title": "_ChatRequest"
    },
+   "_ConfigureLobbyRequest": {
+    "properties": {
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Seed"
+     },
+     "n_players": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "enum": [
+         2,
+         4
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N Players"
+     },
+     "number_placement": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "random",
+         "spiral"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Number Placement"
+     },
+     "victory_points_to_win": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Victory Points To Win"
+     },
+     "listed": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Listed"
+     },
+     "searchable": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Searchable"
+     }
+    },
+    "type": "object",
+    "title": "_ConfigureLobbyRequest"
+   },
    "_ConfigureRequest": {
     "properties": {
      "seed": {
@@ -3082,6 +3785,65 @@
     "title": "_ConfigureRequest",
     "description": "A pre-start reconfiguration of the lobby room's game. Every field is\noptional and merged onto the current setup; the board is rebuilt in place\n(the game id, the still-valid seat claims, and the chat are preserved)."
    },
+   "_CreateLobbyRequest": {
+    "properties": {
+     "mode": {
+      "type": "string",
+      "enum": [
+       "hotseat",
+       "online"
+      ],
+      "title": "Mode",
+      "default": "online"
+     },
+     "n_players": {
+      "type": "integer",
+      "enum": [
+       2,
+       4
+      ],
+      "title": "N Players",
+      "default": 4
+     },
+     "seed": {
+      "type": "integer",
+      "title": "Seed",
+      "default": 0
+     },
+     "number_placement": {
+      "type": "string",
+      "enum": [
+       "random",
+       "spiral"
+      ],
+      "title": "Number Placement",
+      "default": "random"
+     },
+     "victory_points_to_win": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Victory Points To Win"
+     },
+     "listed": {
+      "type": "boolean",
+      "title": "Listed",
+      "default": false
+     },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "_CreateLobbyRequest"
+   },
    "_CreateRequest": {
     "properties": {
      "seed": {
@@ -3166,6 +3928,27 @@
     },
     "type": "object",
     "title": "_CreateRequest"
+   },
+   "_CreatedLobbyModel": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "tokens": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "type": "object",
+      "title": "Tokens"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "tokens"
+    ],
+    "title": "_CreatedLobbyModel"
    },
    "_CreatedModel": {
     "properties": {
@@ -3407,6 +4190,162 @@
     "title": "_LobbyGameModel",
     "description": "One joinable game in the lobby."
    },
+   "_LobbyListModel": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "n_players": {
+      "type": "integer",
+      "title": "N Players"
+     },
+     "number_placement": {
+      "type": "string",
+      "title": "Number Placement"
+     },
+     "open_seats": {
+      "type": "integer",
+      "title": "Open Seats"
+     },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable"
+     },
+     "created_at": {
+      "type": "number",
+      "title": "Created At"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "n_players",
+     "number_placement",
+     "open_seats",
+     "searchable",
+     "created_at"
+    ],
+    "title": "_LobbyListModel"
+   },
+   "_LobbyModel": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "mode": {
+      "type": "string",
+      "title": "Mode"
+     },
+     "seed": {
+      "type": "integer",
+      "title": "Seed"
+     },
+     "number_placement": {
+      "type": "string",
+      "title": "Number Placement"
+     },
+     "n_players": {
+      "type": "integer",
+      "title": "N Players"
+     },
+     "victory_points_to_win": {
+      "type": "integer",
+      "title": "Victory Points To Win"
+     },
+     "kinds": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Kinds"
+     },
+     "seats_claimed": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Seats Claimed"
+     },
+     "seat_names": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Seat Names"
+     },
+     "your_seats": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Your Seats"
+     },
+     "listed": {
+      "type": "boolean",
+      "title": "Listed"
+     },
+     "searchable": {
+      "type": "boolean",
+      "title": "Searchable"
+     },
+     "ready": {
+      "type": "boolean",
+      "title": "Ready"
+     },
+     "started_game_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started Game Id"
+     },
+     "board": {
+      "$ref": "#/components/schemas/BoardModel"
+     },
+     "chat": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array",
+      "title": "Chat"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "mode",
+     "seed",
+     "number_placement",
+     "n_players",
+     "victory_points_to_win",
+     "kinds",
+     "seats_claimed",
+     "seat_names",
+     "your_seats",
+     "listed",
+     "searchable",
+     "ready",
+     "started_game_id",
+     "board",
+     "chat"
+    ],
+    "title": "_LobbyModel",
+    "description": "One lobby as a requester sees it: its config, seats, and preview board."
+   },
    "_MatchFound": {
     "properties": {
      "id": {
@@ -3562,7 +4501,55 @@
     "title": "_ProviderRequest",
     "description": "A remote bot service to register: its base URL (the bot self-identifies)."
    },
-   "_QueuedModel": {
+   "_SeatRequest": {
+    "properties": {
+     "seat": {
+      "type": "integer",
+      "title": "Seat"
+     },
+     "kind": {
+      "type": "string",
+      "title": "Kind"
+     }
+    },
+    "type": "object",
+    "required": [
+     "seat",
+     "kind"
+    ],
+    "title": "_SeatRequest"
+   },
+   "_StartRequest": {
+    "properties": {
+     "ticket": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ticket"
+     }
+    },
+    "type": "object",
+    "title": "_StartRequest"
+   },
+   "_StartedModel": {
+    "properties": {
+     "game_id": {
+      "type": "string",
+      "title": "Game Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "game_id"
+    ],
+    "title": "_StartedModel"
+   },
+   "settlrl_app__api__routers__games___QueuedModel": {
     "properties": {
      "queued": {
       "type": "boolean",
@@ -3592,23 +4579,34 @@
     "title": "_QueuedModel",
     "description": "The server is at its concurrency cap: the caller's place in line. They\nre-POST with ``ticket`` until they get a :class:`_CreatedModel` back."
    },
-   "_SeatRequest": {
+   "settlrl_app__api__routers__lobbies___QueuedModel": {
     "properties": {
-     "seat": {
-      "type": "integer",
-      "title": "Seat"
+     "queued": {
+      "type": "boolean",
+      "const": true,
+      "title": "Queued",
+      "default": true
      },
-     "kind": {
+     "ticket": {
       "type": "string",
-      "title": "Kind"
+      "title": "Ticket"
+     },
+     "position": {
+      "type": "integer",
+      "title": "Position"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
      }
     },
     "type": "object",
     "required": [
-     "seat",
-     "kind"
+     "ticket",
+     "position",
+     "total"
     ],
-    "title": "_SeatRequest"
+    "title": "_QueuedModel"
    }
   },
   "securitySchemes": {

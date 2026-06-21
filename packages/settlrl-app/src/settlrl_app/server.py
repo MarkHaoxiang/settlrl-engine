@@ -24,6 +24,7 @@ from settlrl_app.bots.providers import ProviderRegistry
 from settlrl_app.config import Settings
 from settlrl_app.game.driver import start_game_driver
 from settlrl_app.game.games import GameHandle, GameRegistry, restore_games
+from settlrl_app.game.lobbies import LobbyRegistry
 from settlrl_app.game.matchmaking import Matchmaker
 from settlrl_app.storage.auth import Auth
 from settlrl_app.storage.db import Database
@@ -116,6 +117,7 @@ def create_app(
         replays=ReplaySlot(),
         spawn_driver=spawn_driver,
         turn_timeout=turn_timeout,
+        lobbies=LobbyRegistry(),
         store=store,
         matchmaker=matchmaker,
     )
@@ -161,6 +163,7 @@ def create_app(
         routers.me,
         routers.leaderboard,
         routers.lobby,
+        routers.lobbies,
         routers.admin,
     ):
         app.include_router(module.build(deps))
