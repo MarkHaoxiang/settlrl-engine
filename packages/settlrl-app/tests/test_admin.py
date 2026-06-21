@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 
 import pytest
-from _helpers import bot_registry
+from _helpers import bot_registry, start_game
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry
 from settlrl_app.server import create_app
@@ -42,24 +42,11 @@ def test_status_requires_a_superuser(client: TestClient) -> None:
 
 def test_status_reports_server_and_games(client: TestClient) -> None:
     admin = _bearer(_login(client, "admin@example.com"))
-    client.post(
-        "/api/games",
-        json={
-            "seed": 0,
-            "n_players": 2,
-            "seats": ["human", "human"],
-            "claim": "first",
-            "listed": True,
-            "searchable": True,
-        },
-        headers=admin,
-    )
+    start_game(client, ["human", "random"], headers=admin)
 
     st = client.get("/api/admin/status", headers=admin).json()
     assert st["uptime_seconds"] >= 0
     assert st["games_active"] == 1 and st["games_total"] == 1
     assert st["games_capacity"] >= 1
     (game,) = st["games"]
-    assert game["n_players"] == 2
-    assert game["open_seats"] == 1  # the creator claimed seat 0 only
-    assert game["listed"] and game["searchable"] and not game["terminal"]
+    assert game["n_players"] == 2 and not game["terminal"]

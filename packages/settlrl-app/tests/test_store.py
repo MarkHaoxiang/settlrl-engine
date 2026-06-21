@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from _helpers import bot_registry
+from _helpers import bot_registry, start_game
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry, _rebuild_handle
 from settlrl_app.server import create_app
@@ -54,17 +54,7 @@ def test_restart_resumes_an_in_progress_game(tmp_path: Path) -> None:
     with TestClient(
         create_app(state_dir=str(tmp_path), providers=bot_registry())
     ) as c1:
-        doc = c1.post(
-            "/api/games",
-            json={
-                "seed": 0,
-                "n_players": 2,
-                "seats": ["human", "random"],
-                "claim": "first",
-            },
-        ).json()
-        game = doc["id"]
-        hdr = {"X-Seat-Tokens": ",".join(dict(doc["tokens"]).values())}
+        game, hdr = start_game(c1, ["human", "random"])
         flat = c1.get(f"/api/games/{game}", headers=hdr).json()["actions"][0]["flat"]
         before = c1.post(
             f"/api/games/{game}/action", json={"flat": flat}, headers=hdr

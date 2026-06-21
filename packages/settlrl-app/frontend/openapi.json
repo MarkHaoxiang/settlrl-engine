@@ -5,108 +5,20 @@
   "version": "0.1.0"
  },
  "paths": {
-  "/api/preview": {
-   "get": {
-    "summary": "Get Preview",
-    "description": "The board a new game would open on, for the map picker \u2014 no game is\ncreated. Terrain and ports depend only on the seed (not the placement).",
-    "operationId": "get_preview_api_preview_get",
-    "parameters": [
-     {
-      "name": "seed",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "type": "integer",
-       "default": 0,
-       "title": "Seed"
-      }
-     },
-     {
-      "name": "n_players",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "type": "integer",
-       "default": 4,
-       "title": "N Players"
-      }
-     },
-     {
-      "name": "number_placement",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "enum": [
-        "random",
-        "spiral"
-       ],
-       "type": "string",
-       "default": "random",
-       "title": "Number Placement"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/BoardModel"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
   "/api/games": {
    "post": {
-    "summary": "Post Create",
-    "description": "Create a game, or return the caller's place in line when the server\nis at its concurrency cap (a ``202`` they re-POST with ``ticket``).\nListing a game publicly (``listed``) requires a signed-in account.",
-    "operationId": "post_create_api_games_post",
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ],
-    "parameters": [
-     {
-      "name": "X-Client-Id",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Client-Id"
-      }
-     }
-    ],
+    "summary": "Post Bot Game",
+    "description": "Create an all-bot game (bots playing each other). Human games are\nhosted through a lobby, so a ``human`` seat here is ``422``; an unknown\nbot kind or one that doesn't support the count is ``422`` too; ``503``\nwhen every game slot is taken.",
+    "operationId": "post_bot_game_api_games_post",
     "requestBody": {
-     "required": true,
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/_CreateRequest"
+        "$ref": "#/components/schemas/_BotGameRequest"
        }
       }
-     }
+     },
+     "required": true
     },
     "responses": {
      "200": {
@@ -114,288 +26,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "anyOf": [
-          {
-           "$ref": "#/components/schemas/_CreatedModel"
-          },
-          {
-           "$ref": "#/components/schemas/settlrl_app__api__routers__games___QueuedModel"
-          }
-         ],
-         "title": "Response Post Create Api Games Post"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
-  "/api/games/{game_id}/join": {
-   "post": {
-    "summary": "Post Join",
-    "operationId": "post_join_api_games__game_id__join_post",
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ],
-    "parameters": [
-     {
-      "name": "game_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string",
-       "title": "Game Id"
-      }
-     },
-     {
-      "name": "X-Client-Id",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Client-Id"
-      }
-     }
-    ],
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/_JoinRequest"
-       }
-      }
-     }
-    },
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/_JoinedModel"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
-  "/api/games/{game_id}/leave": {
-   "post": {
-    "summary": "Post Leave",
-    "description": "Leave a lobby that hasn't started. The host (seat-0 owner) closes the\nwhole game and everyone else is bounced; any other participant just frees\ntheir own seat back to open. ``403`` if you hold no seat here, ``409``\nonce the game has started (an in-progress game isn't closable).",
-    "operationId": "post_leave_api_games__game_id__leave_post",
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ],
-    "parameters": [
-     {
-      "name": "game_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string",
-       "title": "Game Id"
-      }
-     },
-     {
-      "name": "X-Seat-Tokens",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Seat-Tokens"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/_LeftModel"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
-  "/api/games/{game_id}/seats": {
-   "post": {
-    "summary": "Post Seat",
-    "description": "Retarget an unclaimed seat before play begins \u2014 open it for a human or\nturn it into a bot (the lobby owner's \"fill to start\" control). Any\nplayer in the game may do this; ``403`` for outsiders, ``409`` if the\nseat is taken or the game has started.",
-    "operationId": "post_seat_api_games__game_id__seats_post",
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ],
-    "parameters": [
-     {
-      "name": "game_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string",
-       "title": "Game Id"
-      }
-     },
-     {
-      "name": "X-Seat-Tokens",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Seat-Tokens"
-      }
-     }
-    ],
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/_SeatRequest"
-       }
-      }
-     }
-    },
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/GameModel"
-        }
-       }
-      }
-     },
-     "422": {
-      "description": "Validation Error",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
-  "/api/games/{game_id}/configure": {
-   "post": {
-    "summary": "Post Configure",
-    "description": "Reconfigure a game that hasn't started \u2014 change the map, player count,\nVP target, seats, or lobby flags. The board is rebuilt in place, keeping\nthe game id, the still-valid seat claims, and the chat. Host only (the\nseat-0 owner): ``403`` otherwise; ``409`` once a move has been played.",
-    "operationId": "post_configure_api_games__game_id__configure_post",
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ],
-    "parameters": [
-     {
-      "name": "game_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string",
-       "title": "Game Id"
-      }
-     },
-     {
-      "name": "X-Seat-Tokens",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Seat-Tokens"
-      }
-     }
-    ],
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/_ConfigureRequest"
-       }
-      }
-     }
-    },
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/GameModel"
+         "$ref": "#/components/schemas/_CreatedModel"
         }
        }
       }
@@ -547,7 +178,7 @@
   "/api/games/{game_id}/events": {
    "get": {
     "summary": "Get Events",
-    "description": "Server-sent events: the requester's snapshot now, then again on every\nstate change (moves, bot plays, chat, joins). ``EventSourceResponse``\nadds the SSE framing, keepalive pings, and client-disconnect teardown.",
+    "description": "Server-sent events: the requester's snapshot now, then again on every\nstate change (moves, bot plays, chat). ``EventSourceResponse`` adds the\nSSE framing, keepalive pings, and client-disconnect teardown.",
     "operationId": "get_events_api_games__game_id__events_get",
     "security": [
      {
@@ -1090,29 +721,6 @@
     }
    }
   },
-  "/api/lobby": {
-   "get": {
-    "summary": "Lobby",
-    "description": "Listed, joinable games (newest first) \u2014 each has an open human seat.",
-    "operationId": "lobby_api_lobby_get",
-    "responses": {
-     "200": {
-      "description": "Successful Response",
-      "content": {
-       "application/json": {
-        "schema": {
-         "items": {
-          "$ref": "#/components/schemas/_LobbyGameModel"
-         },
-         "type": "array",
-         "title": "Response Lobby Api Lobby Get"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
   "/api/matchmake": {
    "post": {
     "summary": "Matchmake",
@@ -1459,7 +1067,7 @@
   "/api/lobbies/{lobby_id}/seats": {
    "post": {
     "summary": "Set Seat",
-    "description": "Host-only: retarget an unclaimed seat \u2014 a bot kind, or open it (online)\n/ take it (hotseat) as human.",
+    "description": "Host-only: retarget a seat \u2014 a bot kind, or open it (online) / take it\n(hotseat) as human. The host can change its own seats (the whole table in\na hotseat) but not seat 0 (its anchor) nor a seat another player holds.",
     "operationId": "set_seat_api_lobbies__lobby_id__seats_post",
     "security": [
      {
@@ -1785,7 +1393,7 @@
            "$ref": "#/components/schemas/_StartedModel"
           },
           {
-           "$ref": "#/components/schemas/settlrl_app__api__routers__lobbies___QueuedModel"
+           "$ref": "#/components/schemas/_QueuedModel"
           }
          ],
          "title": "Response Start Lobby Api Lobbies  Lobby Id  Start Post"
@@ -3586,6 +3194,27 @@
     ],
     "title": "_AdminStatus"
    },
+   "_BotGameRequest": {
+    "properties": {
+     "seed": {
+      "type": "integer",
+      "title": "Seed",
+      "default": 0
+     },
+     "seats": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Seats"
+     }
+    },
+    "type": "object",
+    "required": [
+     "seats"
+    ],
+    "title": "_BotGameRequest"
+   },
    "_ChatRequest": {
     "properties": {
      "text": {
@@ -3690,101 +3319,6 @@
     "type": "object",
     "title": "_ConfigureLobbyRequest"
    },
-   "_ConfigureRequest": {
-    "properties": {
-     "seed": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Seed"
-     },
-     "n_players": {
-      "anyOf": [
-       {
-        "type": "integer",
-        "enum": [
-         2,
-         4
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "N Players"
-     },
-     "number_placement": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "random",
-         "spiral"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Number Placement"
-     },
-     "seats": {
-      "anyOf": [
-       {
-        "items": {
-         "type": "string"
-        },
-        "type": "array"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Seats"
-     },
-     "victory_points_to_win": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Victory Points To Win"
-     },
-     "listed": {
-      "anyOf": [
-       {
-        "type": "boolean"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Listed"
-     },
-     "searchable": {
-      "anyOf": [
-       {
-        "type": "boolean"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Searchable"
-     }
-    },
-    "type": "object",
-    "title": "_ConfigureRequest",
-    "description": "A pre-start reconfiguration of the lobby room's game. Every field is\noptional and merged onto the current setup; the board is rebuilt in place\n(the game id, the still-valid seat claims, and the chat are preserved)."
-   },
    "_CreateLobbyRequest": {
     "properties": {
      "mode": {
@@ -3844,91 +3378,6 @@
     "type": "object",
     "title": "_CreateLobbyRequest"
    },
-   "_CreateRequest": {
-    "properties": {
-     "seed": {
-      "type": "integer",
-      "title": "Seed",
-      "default": 0
-     },
-     "n_players": {
-      "type": "integer",
-      "enum": [
-       2,
-       4
-      ],
-      "title": "N Players",
-      "default": 4
-     },
-     "number_placement": {
-      "type": "string",
-      "enum": [
-       "random",
-       "spiral"
-      ],
-      "title": "Number Placement",
-      "default": "random"
-     },
-     "seats": {
-      "anyOf": [
-       {
-        "items": {
-         "type": "string"
-        },
-        "type": "array"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Seats"
-     },
-     "claim": {
-      "type": "string",
-      "enum": [
-       "all",
-       "first",
-       "none"
-      ],
-      "title": "Claim",
-      "default": "all"
-     },
-     "listed": {
-      "type": "boolean",
-      "title": "Listed",
-      "default": false
-     },
-     "searchable": {
-      "type": "boolean",
-      "title": "Searchable",
-      "default": false
-     },
-     "victory_points_to_win": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Victory Points To Win"
-     },
-     "ticket": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Ticket"
-     }
-    },
-    "type": "object",
-    "title": "_CreateRequest"
-   },
    "_CreatedLobbyModel": {
     "properties": {
      "id": {
@@ -3955,30 +3404,13 @@
      "id": {
       "type": "string",
       "title": "Id"
-     },
-     "seats": {
-      "items": {
-       "type": "string"
-      },
-      "type": "array",
-      "title": "Seats"
-     },
-     "tokens": {
-      "additionalProperties": {
-       "type": "string"
-      },
-      "type": "object",
-      "title": "Tokens"
      }
     },
     "type": "object",
     "required": [
-     "id",
-     "seats",
-     "tokens"
+     "id"
     ],
-    "title": "_CreatedModel",
-    "description": "A fresh game: its id and the creator's seat tokens."
+    "title": "_CreatedModel"
    },
    "_GameSummary": {
     "properties": {
@@ -4059,29 +3491,6 @@
     "type": "object",
     "title": "_JoinRequest"
    },
-   "_JoinedModel": {
-    "properties": {
-     "id": {
-      "type": "string",
-      "title": "Id"
-     },
-     "seat": {
-      "type": "integer",
-      "title": "Seat"
-     },
-     "token": {
-      "type": "string",
-      "title": "Token"
-     }
-    },
-    "type": "object",
-    "required": [
-     "id",
-     "seat",
-     "token"
-    ],
-    "title": "_JoinedModel"
-   },
    "_LeaderboardEntry": {
     "properties": {
      "n_players": {
@@ -4120,75 +3529,6 @@
     ],
     "title": "_LeaderboardEntry",
     "description": "One ranked subject in a player-count bucket."
-   },
-   "_LeftModel": {
-    "properties": {
-     "closed": {
-      "type": "boolean",
-      "title": "Closed"
-     }
-    },
-    "type": "object",
-    "required": [
-     "closed"
-    ],
-    "title": "_LeftModel",
-    "description": "The outcome of leaving: the whole lobby was closed (the host left) or just\nthe caller's seat was freed."
-   },
-   "_LobbyGameModel": {
-    "properties": {
-     "id": {
-      "type": "string",
-      "title": "Id"
-     },
-     "n_players": {
-      "type": "integer",
-      "title": "N Players"
-     },
-     "number_placement": {
-      "type": "string",
-      "title": "Number Placement"
-     },
-     "seats": {
-      "items": {
-       "type": "string"
-      },
-      "type": "array",
-      "title": "Seats"
-     },
-     "claimed": {
-      "items": {
-       "type": "integer"
-      },
-      "type": "array",
-      "title": "Claimed"
-     },
-     "open_seats": {
-      "type": "integer",
-      "title": "Open Seats"
-     },
-     "searchable": {
-      "type": "boolean",
-      "title": "Searchable"
-     },
-     "created_at": {
-      "type": "number",
-      "title": "Created At"
-     }
-    },
-    "type": "object",
-    "required": [
-     "id",
-     "n_players",
-     "number_placement",
-     "seats",
-     "claimed",
-     "open_seats",
-     "searchable",
-     "created_at"
-    ],
-    "title": "_LobbyGameModel",
-    "description": "One joinable game in the lobby."
    },
    "_LobbyListModel": {
     "properties": {
@@ -4501,6 +3841,35 @@
     "title": "_ProviderRequest",
     "description": "A remote bot service to register: its base URL (the bot self-identifies)."
    },
+   "_QueuedModel": {
+    "properties": {
+     "queued": {
+      "type": "boolean",
+      "const": true,
+      "title": "Queued",
+      "default": true
+     },
+     "ticket": {
+      "type": "string",
+      "title": "Ticket"
+     },
+     "position": {
+      "type": "integer",
+      "title": "Position"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ticket",
+     "position",
+     "total"
+    ],
+    "title": "_QueuedModel"
+   },
    "_SeatRequest": {
     "properties": {
      "seat": {
@@ -4548,65 +3917,6 @@
      "game_id"
     ],
     "title": "_StartedModel"
-   },
-   "settlrl_app__api__routers__games___QueuedModel": {
-    "properties": {
-     "queued": {
-      "type": "boolean",
-      "const": true,
-      "title": "Queued",
-      "default": true
-     },
-     "ticket": {
-      "type": "string",
-      "title": "Ticket"
-     },
-     "position": {
-      "type": "integer",
-      "title": "Position"
-     },
-     "total": {
-      "type": "integer",
-      "title": "Total"
-     }
-    },
-    "type": "object",
-    "required": [
-     "ticket",
-     "position",
-     "total"
-    ],
-    "title": "_QueuedModel",
-    "description": "The server is at its concurrency cap: the caller's place in line. They\nre-POST with ``ticket`` until they get a :class:`_CreatedModel` back."
-   },
-   "settlrl_app__api__routers__lobbies___QueuedModel": {
-    "properties": {
-     "queued": {
-      "type": "boolean",
-      "const": true,
-      "title": "Queued",
-      "default": true
-     },
-     "ticket": {
-      "type": "string",
-      "title": "Ticket"
-     },
-     "position": {
-      "type": "integer",
-      "title": "Position"
-     },
-     "total": {
-      "type": "integer",
-      "title": "Total"
-     }
-    },
-    "type": "object",
-    "required": [
-     "ticket",
-     "position",
-     "total"
-    ],
-    "title": "_QueuedModel"
    }
   },
   "securitySchemes": {

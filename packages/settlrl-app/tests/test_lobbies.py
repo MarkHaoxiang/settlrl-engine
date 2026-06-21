@@ -127,18 +127,11 @@ def test_only_the_host_starts_or_configures(client: TestClient) -> None:
     )
 
 
-def test_the_one_game_guard_spans_lobbies(client: TestClient) -> None:
+def test_hosting_a_second_lobby_is_refused(client: TestClient) -> None:
     acct = _bearer(_token(client, "a@example.com"))
     client.post("/api/lobbies", json={"mode": "online", "n_players": 2}, headers=acct)
-    # Already hosting a lobby: a second lobby, a direct game, and quick match all refuse.
     assert (
         client.post("/api/lobbies", json={"mode": "online"}, headers=acct).status_code
-        == 409
-    )
-    assert (
-        client.post(
-            "/api/games", json={"seed": 0, "seats": ["human", "random"]}, headers=acct
-        ).status_code
         == 409
     )
 

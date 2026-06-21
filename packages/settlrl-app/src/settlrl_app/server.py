@@ -162,7 +162,7 @@ def create_app(
         routers.bots,
         routers.me,
         routers.leaderboard,
-        routers.lobby,
+        routers.quickmatch,
         routers.lobbies,
         routers.admin,
     ):

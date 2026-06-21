@@ -1,4 +1,8 @@
-"""The public game lobby: open games anyone can join, plus Elo Quick Match."""
+"""Quick Match: pair near-rated players into one game, bots filling the rest.
+
+Unlike a hosted lobby (:mod:`settlrl_app.api.routers.lobbies`), a match forms a
+full table at once and goes straight to a game — there is no staging step.
+"""
 
 from typing import Annotated, Literal
 
@@ -7,19 +11,6 @@ from pydantic import BaseModel
 
 from settlrl_app.api.deps import ClientId, Deps, uid
 from settlrl_app.storage.db import User
-
-
-class _LobbyGameModel(BaseModel):
-    """One joinable game in the lobby."""
-
-    id: str
-    n_players: int
-    number_placement: str
-    seats: list[str]  # seat kinds; "human" seats are the open ones
-    claimed: list[int]  # seats already taken
-    open_seats: int  # unclaimed human seats a joiner can take
-    searchable: bool  # the host marked it open to Quick Match
-    created_at: float
 
 
 class _MatchRequest(BaseModel):
@@ -47,23 +38,6 @@ class _MatchFound(BaseModel):
 def build(deps: Deps) -> APIRouter:
     router = APIRouter()
     CurrentUser = Annotated[User | None, Depends(deps.auth.optional_user)]
-
-    @router.get("/api/lobby")
-    def lobby() -> list[_LobbyGameModel]:
-        """Listed, joinable games (newest first) — each has an open human seat."""
-        return [
-            _LobbyGameModel(
-                id=h.id,
-                n_players=h.session.n_players,
-                number_placement=h.session.number_placement,
-                seats=list(h.session.seats),
-                claimed=sorted(h.claims),
-                open_seats=len(h.open_human_seats()),
-                searchable=h.searchable,
-                created_at=h.created_at,
-            )
-            for h in deps.registry.open_games()
-        ]
 
     @router.post("/api/matchmake")
     async def matchmake(

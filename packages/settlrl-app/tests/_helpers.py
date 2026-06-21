@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 import httpx
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from settlrl_agents.service.app import create_app as create_bot_app
 from settlrl_agents.service.bots import BUNDLED, make_bot
 from settlrl_app.bots.providers import ProviderRegistry, RemoteBotProvider
@@ -20,6 +21,49 @@ from settlrl_app.bots.providers import ProviderRegistry, RemoteBotProvider
 # The bot kinds the in-process services offer (used as ``external_kinds`` when a
 # test constructs a GameSession with bot seats directly).
 BOT_KINDS = frozenset(BUNDLED)
+
+
+def start_game(
+    client: TestClient,
+    seats: Sequence[str],
+    *,
+    headers: dict[str, str] | None = None,
+    seed: int = 0,
+    vp: int | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Start a human game through a lobby (the only way to make one now).
+
+    Opens a hotseat lobby the host holds entirely, retargets the non-human
+    ``seats`` to their bot kinds, and starts it. Returns the new game id and a
+    header carrying the host's seat tokens (plus any account ``headers``), so the
+    caller can act on the game as the human seat(s)."""
+    body: dict[str, object] = {"mode": "hotseat", "n_players": len(seats), "seed": seed}
+    if vp is not None:
+        body["victory_points_to_win"] = vp
+    created = client.post("/api/lobbies", json=body, headers=headers).json()
+    lobby_id, held = created["id"], created["tokens"]
+    hdrs = {**(headers or {}), "X-Seat-Tokens": ",".join(held.values())}
+    for seat, kind in enumerate(seats):
+        if kind != "human":
+            client.post(
+                f"/api/lobbies/{lobby_id}/seats",
+                json={"seat": seat, "kind": kind},
+                headers=hdrs,
+            )
+    game_id = client.post(
+        f"/api/lobbies/{lobby_id}/start", json={}, headers=hdrs
+    ).json()["game_id"]
+    return game_id, hdrs
+
+
+def bot_game(client: TestClient, seats: Sequence[str], *, seed: int = 0) -> str:
+    """Create an all-bot game (the one direct game create that remains) and
+    return its id — for the bot-driver / finished-game tests."""
+    return str(
+        client.post("/api/games", json={"seed": seed, "seats": list(seats)}).json()[
+            "id"
+        ]
+    )
 
 
 def asgi_client(app: FastAPI) -> httpx.AsyncClient:

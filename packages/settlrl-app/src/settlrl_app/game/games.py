@@ -254,14 +254,6 @@ class GameHandle:
         """The seats this anonymous browser holds (the guest one-game guard)."""
         return sorted(s for s, cid in self.claim_clients.items() if cid == client_id)
 
-    def release_seat(self, seat: int) -> None:
-        """Free a claimed human seat back to open — a participant leaving a lobby
-        before it starts."""
-        self.claims.pop(seat, None)
-        self.claim_users.pop(seat, None)
-        self.claim_clients.pop(seat, None)
-        self.claim_names.pop(seat, None)
-
 
 class GameRegistry:
     """Id-addressed live games.
@@ -361,20 +353,6 @@ class GameRegistry:
                 return handle
         return None
 
-    def remove(self, game_id: str) -> None:
-        """Drop a game and wake its SSE/driver waiters so they exit — a host
-        closing an unstarted lobby. Idempotent; the freed slot is reusable at
-        once. Mirrors eviction's teardown but is caller-driven."""
-        handle = self._games.pop(game_id, None)
-        if handle is None:
-            return
-        handle.closed = True
-        handle._wake()
-        if handle.journal is not None:
-            handle.journal.close()
-        if self._store is not None and not handle.session.terminal():
-            self._store.remove(game_id)
-
     def all_handles(self) -> list[GameHandle]:
         """A snapshot of the live handles (e.g. to start drivers after a
         restart)."""
@@ -388,16 +366,6 @@ class GameRegistry:
     def active_count(self) -> int:
         """Live (non-terminal) games currently held."""
         return self._active_count()
-
-    def open_games(self) -> list[GameHandle]:
-        """Listed, joinable games for the public lobby: not over, with at least
-        one unclaimed human seat. Newest first."""
-        open_ = [
-            h
-            for h in self._games.values()
-            if h.listed and not h.session.terminal() and h.open_human_seats()
-        ]
-        return sorted(open_, key=lambda h: h.created_at, reverse=True)
 
     def _insert(self, handle: GameHandle) -> None:
         """Place an already-built handle (used by restore; no eviction)."""

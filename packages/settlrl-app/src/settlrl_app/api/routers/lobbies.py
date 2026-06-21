@@ -300,14 +300,17 @@ def build(deps: Deps) -> APIRouter:
         user: CurrentUser = None,
         x_seat_tokens: SeatTokens = None,
     ) -> _LobbyModel:
-        """Host-only: retarget an unclaimed seat — a bot kind, or open it (online)
-        / take it (hotseat) as human."""
+        """Host-only: retarget a seat — a bot kind, or open it (online) / take it
+        (hotseat) as human. The host can change its own seats (the whole table in
+        a hotseat) but not seat 0 (its anchor) nor a seat another player holds."""
         lobby = lobby_of(lobby_id)
         owned = lobby.seats.owned(tokens(x_seat_tokens), uid(user))
         if 0 not in owned:
             raise HTTPException(status_code=403, detail="only the host can set seats")
-        if req.seat in lobby.seats.tokens:
-            raise HTTPException(status_code=409, detail="seat is already taken")
+        if req.seat == 0:
+            raise HTTPException(status_code=409, detail="the host keeps seat 0")
+        if req.seat in lobby.seats.tokens and req.seat not in owned:
+            raise HTTPException(status_code=409, detail="seat is taken by a player")
         if req.kind != HUMAN and req.kind not in bots.catalog():
             raise HTTPException(
                 status_code=422, detail=f"unknown bot kind: {req.kind!r}"

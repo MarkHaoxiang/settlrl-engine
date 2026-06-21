@@ -17,14 +17,9 @@ import TopBar from "../components/TopBar";
 import { BotIcon } from "../components/icons";
 import { useGame } from "../lib/useGame";
 import { BUILD_COSTS, actionMeta } from "../lib/actionMeta";
-import {
-  joinGame,
-  type GameAction,
-  type GameSnapshot,
-} from "../lib/game";
+import { type GameAction, type GameSnapshot } from "../lib/game";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
-import { authToken } from "../lib/auth";
-import { clearCurrentPlace, saveTokens, setCurrentPlace, tokensFor, type SeatTokens } from "../lib/seats";
+import { clearCurrentPlace, setCurrentPlace, tokensFor, type SeatTokens } from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
 import Button from "../components/Button";
@@ -56,43 +51,11 @@ export default function PlayView() {
   const navigate = useNavigate();
   // The seats this browser owns in this game (multiplayer identity).
   const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
-  const [joinFailed, setJoinFailed] = useState(false);
-  // One join request at a time: the token effect above re-fires this one
-  // before the first claim resolves, and a double-join would grab two seats.
-  const joining = useRef(false);
   useEffect(() => {
     setTokens(gameId ? tokensFor(gameId) : {});
-    setJoinFailed(false);
     setEndDismissed(false);
-    joining.current = false;
   }, [gameId]);
   const { snapshot, error, busy, act, chat } = useGame(gameId ?? null, tokens);
-  // Deep-linked with no claim: take the first free human seat, else spectate.
-  // When signed in, wait for the snapshot and skip if the account already owns a
-  // seat here (your_seats covers us; a join would grab a second seat).
-  useEffect(() => {
-    if (!gameId || joinFailed || joining.current || Object.keys(tokens).length > 0) return;
-    // The tokens state is stale in the render right after navigating from
-    // start(); read storage directly so a creator's own fresh claims never
-    // trigger a join (which would grab an invitee's seat).
-    if (Object.keys(tokensFor(gameId)).length > 0) return;
-    if (authToken()) {
-      if (!snapshot) return;
-      if (snapshot.your_seats.length > 0) return;
-    }
-    joining.current = true;
-    joinGame(gameId).then(
-      (j) => {
-        saveTokens(gameId, { [j.seat]: j.token });
-        joining.current = false;
-        setTokens(tokensFor(gameId));
-      },
-      () => {
-        joining.current = false;
-        setJoinFailed(true);
-      }
-    );
-  }, [gameId, tokens, joinFailed, snapshot]);
 
   // The seats this client controls: the server's your_seats (token- or
   // account-owned) once a snapshot is in, else the local tokens.

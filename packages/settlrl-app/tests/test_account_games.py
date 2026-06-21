@@ -11,7 +11,7 @@ import time
 from collections.abc import Iterator
 
 import pytest
-from _helpers import bot_registry
+from _helpers import bot_registry, start_game
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry
 from settlrl_app.server import create_app
@@ -41,11 +41,9 @@ def test_authenticated_creator_is_recognised_without_the_seat_token(
     client: TestClient,
 ) -> None:
     token = _token(client, "a@example.com")
-    game = client.post(
-        "/api/games",
-        json={"seed": 0, "seats": ["human", "random", "random", "random"]},
-        headers=_bearer(token),
-    ).json()["id"]
+    game, _ = start_game(
+        client, ["human", "random", "random", "random"], headers=_bearer(token)
+    )
 
     # The account owns seat 0 with only the bearer token — no seat token sent.
     snap = client.get(f"/api/games/{game}", headers=_bearer(token)).json()
@@ -65,11 +63,9 @@ def test_authenticated_creator_is_recognised_without_the_seat_token(
 def test_other_users_and_anonymous_own_nothing(client: TestClient) -> None:
     owner = _token(client, "owner@example.com")
     other = _token(client, "other@example.com")
-    game = client.post(
-        "/api/games",
-        json={"seed": 0, "seats": ["human", "random", "random", "random"]},
-        headers=_bearer(owner),
-    ).json()["id"]
+    game, _ = start_game(
+        client, ["human", "random", "random", "random"], headers=_bearer(owner)
+    )
 
     assert (
         client.get(f"/api/games/{game}", headers=_bearer(other)).json()["your_seats"]
@@ -80,41 +76,24 @@ def test_other_users_and_anonymous_own_nothing(client: TestClient) -> None:
 
 def test_seat_names_show_account_holders_and_bots(client: TestClient) -> None:
     token = _token(client, "alice@example.com")
-    game = client.post(
-        "/api/games",
-        # Online seating: the creator claims only seat 0, seat 2 stays open.
-        json={
-            "seed": 0,
-            "seats": ["human", "random", "human", "random"],
-            "claim": "first",
-        },
-        headers=_bearer(token),
-    ).json()["id"]
+    game, _ = start_game(
+        client, ["human", "random", "random", "random"], headers=_bearer(token)
+    )
 
-    # The creator's seat carries their account label; bot seats (kind in
-    # status.seats) and the still-open human seat have no name.
+    # The account's seat carries its label; bot seats have no name.
     snap = client.get(f"/api/games/{game}", headers=_bearer(token)).json()
     assert snap["seat_names"] == ["alice", None, None, None]
-    assert snap["status"]["seats"] == ["human", "random", "human", "random"]
-
-    # An anonymous join fills the open seat but stays nameless ("Guest" on the UI).
-    client.post(f"/api/games/{game}/join", json={"seat": 2})
-    snap = client.get(f"/api/games/{game}", headers=_bearer(token)).json()
-    assert snap["seat_names"][2] is None
+    assert snap["status"]["seats"] == ["human", "random", "random", "random"]
 
 
 def test_my_games_lists_only_the_users_games(client: TestClient) -> None:
     a = _token(client, "a@example.com")
     b = _token(client, "b@example.com")
-    game_a = client.post(
-        "/api/games",
-        json={"seed": 0, "seats": ["human", "random", "random", "random"]},
-        headers=_bearer(a),
-    ).json()["id"]
-    client.post(
-        "/api/games",
-        json={"seed": 1, "seats": ["human", "random", "random", "random"]},
-        headers=_bearer(b),
+    game_a, _ = start_game(
+        client, ["human", "random", "random", "random"], headers=_bearer(a)
+    )
+    start_game(
+        client, ["human", "random", "random", "random"], headers=_bearer(b), seed=1
     )
 
     mine = client.get("/api/me/games", headers=_bearer(a)).json()
@@ -126,20 +105,19 @@ def test_my_games_lists_only_the_users_games(client: TestClient) -> None:
 def test_join_ties_the_seat_to_the_account(client: TestClient) -> None:
     a = _token(client, "a@example.com")
     b = _token(client, "b@example.com")
-    # Two human seats, none claimed at create.
-    game = client.post(
-        "/api/games",
-        json={
-            "seed": 0,
-            "seats": ["human", "human", "random", "random"],
-            "claim": "none",
-        },
-        headers=_bearer(a),
-    ).json()["id"]
-
-    seat = client.post(f"/api/games/{game}/join", json={}, headers=_bearer(b)).json()[
-        "seat"
+    # a hosts an online table (holding seat 0); b joins the open seat; starting
+    # carries that claim into the game, tied to b's account.
+    lobby = client.post(
+        "/api/lobbies", json={"mode": "online", "n_players": 2}, headers=_bearer(a)
+    ).json()
+    lid = lobby["id"]
+    a_hdr = {**_bearer(a), "X-Seat-Tokens": ",".join(lobby["tokens"].values())}
+    joined = client.post(f"/api/lobbies/{lid}/join", json={}, headers=_bearer(b)).json()
+    seat = int(next(iter(joined["tokens"])))
+    game = client.post(f"/api/lobbies/{lid}/start", json={}, headers=a_hdr).json()[
+        "game_id"
     ]
+
     snap = client.get(f"/api/games/{game}", headers=_bearer(b)).json()
     assert snap["your_seats"] == [seat]
 
@@ -155,11 +133,7 @@ def test_finished_owned_game_appears_in_history_and_record_is_served() -> None:
         ) as client,
     ):
         h = _bearer(_token(client, "h@example.com"))
-        game = client.post(
-            "/api/games",
-            json={"seed": 3, "n_players": 2, "seats": ["human", "random"]},
-            headers=h,
-        ).json()["id"]
+        game, _ = start_game(client, ["human", "random"], headers=h, seed=3)
 
         # Play the human seat (random legal moves) while the driver plays the
         # bot, until the game ends.
@@ -206,11 +180,7 @@ def test_leaderboard_rates_accounts_and_bots() -> None:
         ) as client,
     ):
         h = _bearer(_token(client, "champ@example.com"))
-        game = client.post(
-            "/api/games",
-            json={"seed": 3, "n_players": 2, "seats": ["human", "random"]},
-            headers=h,
-        ).json()["id"]
+        game, _ = start_game(client, ["human", "random"], headers=h, seed=3)
 
         for _ in range(6000):
             snap = client.get(f"/api/games/{game}", headers=h).json()
@@ -243,11 +213,9 @@ def test_account_seat_ownership_survives_a_restart() -> None:
             create_app(state_dir=state_dir, providers=bot_registry())
         ) as first:
             token = _token(first, "a@example.com")
-            game = first.post(
-                "/api/games",
-                json={"seed": 0, "seats": ["human", "random", "random", "random"]},
-                headers=_bearer(token),
-            ).json()["id"]
+            game, _ = start_game(
+                first, ["human", "random", "random", "random"], headers=_bearer(token)
+            )
 
         # A fresh app restores games + accounts from the same state dir.
         with TestClient(
