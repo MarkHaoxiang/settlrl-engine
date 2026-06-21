@@ -7,7 +7,7 @@ consumes them unchanged.
 """
 
 from settlrl_learn.features import FEATURE_DIM, features
-from settlrl_learn.model import (
+from settlrl_learn.nn.mlp import (
     AZParams,
     MLPParams,
     az_forward,

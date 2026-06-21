@@ -25,10 +25,10 @@ from _symmetry import (
 from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_engine.board import Board
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
-from settlrl_learn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.azgnn import AZGraphNet, az_gnn_loss
-from settlrl_learn.graph import board_sample
-from settlrl_learn.graphnet import PRESETS, GraphNet
+from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
+from settlrl_learn.nn.graph import board_sample
+from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 
 _OUT, _W = 4, 8
 

@@ -35,7 +35,7 @@ from settlrl_agents.policy import StatefulSpec
 from settlrl_agents.value import heuristic_value
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from settlrl_engine.mechanics.longest_road import longest_road_length
-from settlrl_learn.graph import Sample, board_sample
+from settlrl_learn.nn.graph import Sample, board_sample
 
 _CACHE = Path(__file__).resolve().parents[2] / "runs" / "_cache" / "0003"
 

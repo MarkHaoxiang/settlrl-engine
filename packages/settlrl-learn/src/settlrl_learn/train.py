@@ -12,7 +12,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from settlrl_learn.model import MLPParams, mlp
+from settlrl_learn.nn.mlp import MLPParams, mlp
 
 Loss = Callable[
     [MLPParams, Float[Array, "n features"], Float[Array, "n"]], Float[Array, ""]

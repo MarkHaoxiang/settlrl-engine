@@ -29,8 +29,8 @@ import optax
 from settlrl_engine.board import make_board
 from settlrl_engine.board.layout import EDGE_V, N_EDGES, N_VERTICES
 from settlrl_engine.mechanics.longest_road import longest_road_length
-from settlrl_learn.graph import Sample, board_sample
-from settlrl_learn.graphnet import PRESETS, GraphNet
+from settlrl_learn.nn.graph import Sample, board_sample
+from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 
 # vertex -> incident (edge, other vertex), host-side.
 _EV = np.asarray(EDGE_V)

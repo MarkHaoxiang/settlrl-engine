@@ -11,7 +11,7 @@ from jaxtyping import install_import_hook
 # heterogeneous, and jaxtyping unifies dim names across a variadic tuple, so
 # the annotation is per-layer documentation that cannot hold globally.
 install_import_hook(
-    ["settlrl_learn.features", "settlrl_learn.graph"], "beartype.beartype"
+    ["settlrl_learn.features", "settlrl_learn.nn.graph"], "beartype.beartype"
 )
 
 if "JAX_PLATFORMS" not in os.environ and "PYTEST_XDIST_WORKER" in os.environ:

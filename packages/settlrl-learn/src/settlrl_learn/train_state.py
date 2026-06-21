@@ -22,7 +22,7 @@ import optax
 import orbax.checkpoint as ocp
 from jaxtyping import Array, Float, Int
 
-from settlrl_learn.model import AZParams
+from settlrl_learn.nn.mlp import AZParams
 
 
 class TrainState(NamedTuple):

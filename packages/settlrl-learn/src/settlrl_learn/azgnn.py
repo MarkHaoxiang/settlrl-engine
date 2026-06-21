@@ -1,9 +1,9 @@
 """AlphaZero with a GNN trunk (the experiment-0003 ``gn_global`` net).
 
-The GNN reads the board *graph* (``settlrl_learn.graph.board_sample``), not the
+The GNN reads the board *graph* (``settlrl_learn.nn.graph.board_sample``), not the
 flat engineered vector, so it needs its own self-play / training path: this
 module mirrors :mod:`settlrl_learn.selfplay` + :mod:`settlrl_learn.alphazero` for
-an equinox :class:`~settlrl_learn.graphnet.GraphNet` with a shared trunk feeding
+an equinox :class:`~settlrl_learn.nn.graphnet.GraphNet` with a shared trunk feeding
 a value head (win-prob logit, ``value_scale=2``) and an ``N_FLAT`` policy head.
 
 Self-play -> a flashbax on-device replay -> train -> periodic arena vs
@@ -40,9 +40,9 @@ from settlrl_engine.board.state import BoardState, GamePhase, IntScalar
 from settlrl_engine.env import N_FLAT, BatchedSettlrlEnv, flat_to_action
 from settlrl_engine.mechanics.action import ActionType
 
-from settlrl_learn import action_layout as al
 from settlrl_learn.features import FEATURE_DIM
-from settlrl_learn.graph import (
+from settlrl_learn.nn import action_layout as al
+from settlrl_learn.nn.graph import (
     EDGE_DIM,
     GLOBAL_DIM,
     N_DIR_EDGES,
@@ -50,7 +50,7 @@ from settlrl_learn.graph import (
     Sample,
     board_sample,
 )
-from settlrl_learn.graphnet import PRESETS, GraphNetConfig, GraphTrunk, readout_dim
+from settlrl_learn.nn.graphnet import PRESETS, GraphNetConfig, GraphTrunk, readout_dim
 
 # undirected-edge endpoints and tile corner-vertices, for the spatial heads.
 _EDGE_U, _EDGE_W = EDGE_V[:, 0], EDGE_V[:, 1]

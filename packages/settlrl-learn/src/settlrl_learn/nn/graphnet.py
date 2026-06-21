@@ -39,7 +39,7 @@ from jaxtyping import Array, Float
 from settlrl_engine.board.layout import N_VERTICES
 from settlrl_engine.board.state import KeyScalar
 
-from settlrl_learn.graph import RECEIVERS, SENDERS, Sample
+from settlrl_learn.nn.graph import RECEIVERS, SENDERS, Sample
 
 
 class GraphNetConfig(NamedTuple):
@@ -195,7 +195,7 @@ class GraphTrunk(eqx.Module):
     cfg: GraphNetConfig = eqx.field(static=True)
 
     def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
-        from settlrl_learn.graph import EDGE_DIM, GLOBAL_DIM, NODE_DIM
+        from settlrl_learn.nn.graph import EDGE_DIM, GLOBAL_DIM, NODE_DIM
 
         w = cfg.width
         keys = jax.random.split(key, 3 + cfg.layers)

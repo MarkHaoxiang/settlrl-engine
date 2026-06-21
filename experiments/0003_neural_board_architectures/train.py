@@ -20,7 +20,7 @@ import wandb
 from data import Dataset
 from jaxtyping import Array, Float
 from settlrl_learn.experiment import Run
-from settlrl_learn.graph import Sample
+from settlrl_learn.nn.graph import Sample
 from sklearn.metrics import roc_auc_score
 
 

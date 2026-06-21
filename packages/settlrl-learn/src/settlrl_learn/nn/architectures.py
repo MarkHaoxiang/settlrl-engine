@@ -1,4 +1,4 @@
-"""Architectures over a :class:`~settlrl_learn.graph.Sample`, in equinox.
+"""Architectures over a :class:`~settlrl_learn.nn.graph.Sample`, in equinox.
 
 All four read the *same* position and emit ``out_dim`` logits/regressands, so a
 benchmark isolates representation x architecture:
@@ -11,7 +11,7 @@ benchmark isolates representation x architecture:
   edges);
 - ``gnn`` -- message passing over the board graph (jraph ``GraphNetwork``), then a
   global readout (uses topology and edge ownership);
-- the configurable :class:`~settlrl_learn.graphnet.GraphNet` presets
+- the configurable :class:`~settlrl_learn.nn.graphnet.GraphNet` presets
   (``gn_*`` in ``graphnet.PRESETS``) -- the strong, ablatable graph net (attention
   vs message passing, normalisation, global node, count-preserving readout).
 
@@ -36,7 +36,7 @@ from settlrl_engine.board.layout import N_VERTICES
 from settlrl_engine.board.state import KeyScalar
 
 from settlrl_learn.features import FEATURE_DIM
-from settlrl_learn.graph import (
+from settlrl_learn.nn.graph import (
     EDGE_DIM,
     GLOBAL_DIM,
     N_DIR_EDGES,
@@ -45,7 +45,7 @@ from settlrl_learn.graph import (
     SENDERS,
     Sample,
 )
-from settlrl_learn.graphnet import PRESETS, GraphNet
+from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 
 Model = Callable[[Sample], Float[Array, "out"]]
 
@@ -157,7 +157,7 @@ def make_model(
 ) -> eqx.Module:
     """Build the named architecture: a fixed baseline (``mlp_engineered`` /
     ``mlp_flat`` / ``deepset`` / ``gnn``) or a configurable ``GraphNet`` preset
-    (``settlrl_learn.graphnet.PRESETS``), whose ``width`` / ``layers`` /
+    (``settlrl_learn.nn.graphnet.PRESETS``), whose ``width`` / ``layers`` /
     ``head_depth`` are taken from ``width`` / ``layers`` / ``depth`` here so the
     experiment's capacity knobs apply across presets."""
     if arch == "mlp_engineered":

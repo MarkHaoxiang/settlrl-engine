@@ -23,7 +23,7 @@ from settlrl_engine.belief import belief_view
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 
 from settlrl_learn.features import features
-from settlrl_learn.model import AZParams, make_az
+from settlrl_learn.nn.mlp import AZParams, make_az
 
 
 class SelfPlaySamples(NamedTuple):

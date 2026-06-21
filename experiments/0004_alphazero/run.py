@@ -27,7 +27,7 @@ class AlphaZeroConfig(Config):
     width: int = 64
     depth: int = 2  # trunk hidden layers (GNN: readout-head hidden layers)
     layers: int = 3  # GNN message-passing layers (ignored by mlp)
-    gnn_preset: str = "gn_global"  # settlrl_learn.graphnet.PRESETS key
+    gnn_preset: str = "gn_global"  # settlrl_learn.nn.graphnet.PRESETS key
     # search
     num_simulations: int = 64
     max_num_considered_actions: int = 16
@@ -194,7 +194,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     import numpy as np
     from settlrl_agents.value import heuristic_value
     from settlrl_learn import azgnn
-    from settlrl_learn.graphnet import PRESETS
+    from settlrl_learn.nn.graphnet import PRESETS
 
     base = PRESETS.get(cfg.gnn_preset, PRESETS["gn_global"])
     netcfg = base._replace(width=cfg.width, layers=cfg.layers, head_depth=cfg.depth)

@@ -1,7 +1,7 @@
 """AlphaZero training: a flashbax replay buffer + the policy/value loss step.
 
 Consumes :class:`~settlrl_learn.selfplay.SelfPlaySamples` and improves an
-:class:`~settlrl_learn.model.AZParams` net by imitating the search's policy
+:class:`~settlrl_learn.nn.mlp.AZParams` net by imitating the search's policy
 (cross-entropy) and predicting the game outcome (value logistic). Composable:
 the experiment owns the loop (self-play -> add -> train -> repeat); these are
 the pieces.
@@ -25,7 +25,7 @@ from settlrl_agents.search import make_search
 from settlrl_engine.env import N_FLAT
 
 from settlrl_learn.features import FEATURE_DIM
-from settlrl_learn.model import AZParams, az_forward, make_az
+from settlrl_learn.nn.mlp import AZParams, az_forward, make_az
 from settlrl_learn.selfplay import SelfPlaySamples, self_play
 from settlrl_learn.train_state import TrainState, load_train_state, save_train_state
 
