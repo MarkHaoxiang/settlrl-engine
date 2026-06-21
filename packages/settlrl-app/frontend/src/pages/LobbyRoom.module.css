@@ -13,7 +13,7 @@
   grid-template-columns: minmax(220px, 1fr) minmax(360px, 1.4fr) minmax(260px, 1fr);
   gap: 16px;
   width: min(1180px, 96vw);
-  align-items: start;
+  align-items: stretch;
 }
 
 @media (max-width: 900px) {
@@ -124,16 +124,68 @@
   gap: 4px;
 }
 
-.miniBtn {
+.iconBtn {
   composes: button from "../styles/ui.module.css";
-  padding: 2px 9px;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  line-height: 0;
 }
 
-.botSelect {
-  composes: panel from "../styles/ui.module.css";
-  padding: 2px 6px;
+/* -- bot picker overlay -- */
+
+.picker {
+  width: min(360px, 90vw);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pickerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pickerClose {
+  composes: button from "../styles/ui.module.css";
+  padding: 2px 8px;
+  font-size: 14px;
+}
+
+.pickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pickerItem {
+  composes: button from "../styles/ui.module.css";
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 4px 10px;
+  text-align: left;
+  padding: 10px 12px;
+}
+
+.pickerName {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.pickerDesc {
+  grid-column: 2 / 4;
   font-size: 12px;
+  opacity: 0.65;
+}
+
+.pickerCheck {
+  grid-row: 1;
+  grid-column: 3;
+  font-weight: 700;
 }
 
 /* -- flags / actions -- */

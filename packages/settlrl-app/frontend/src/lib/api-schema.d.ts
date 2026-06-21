@@ -239,7 +239,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Replay
+         * @description The currently loaded replay's opening state, or ``null`` when none is
+         *     loaded — the page's load-time probe, so a fresh visit doesn't 404.
+         */
+        get: operations["get_replay_api_replay_get"];
         put?: never;
         /**
          * Post Replay
@@ -1782,6 +1787,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_replay_api_replay_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayStateModel"] | null;
                 };
             };
         };

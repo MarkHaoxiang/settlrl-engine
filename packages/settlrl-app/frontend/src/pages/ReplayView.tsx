@@ -1,24 +1,34 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import BoardView from "../components/BoardView";
 import ChatPanel from "../components/ChatPanel";
 import TopBar from "../components/TopBar";
 import { actionMeta } from "../lib/actionMeta";
+import { currentUser, type AuthUser } from "../lib/auth";
 import { PLAYER_COLORS, playerName } from "../lib/boardData";
+import { useHistory, type PastGame } from "../lib/queries";
 import {
+  currentReplay,
   fetchReplayState,
   loadReplay,
   loadReplayFromGame,
   type ReplayState,
 } from "../lib/replay";
-import { lastGameId } from "../lib/seats";
 import ui from "../styles/ui.module.css";
 import s from "./ReplayView.module.css";
 
 const PLAY_INTERVAL_MS = 600;
 
-// The pair of ways to load a record: a saved .json file, or the most recent
-// game from this browser. Rendered both on the empty state and (small) in the bar.
-function LoadButtons({
+const outcome = (g: PastGame): string =>
+  g.winner == null
+    ? "Game over"
+    : g.seats.includes(g.winner)
+      ? "You won 🎉"
+      : `${playerName(g.winner)} won`;
+
+// Open a saved .json record from disk. Rendered on the empty state and (small)
+// in the playback bar.
+function OpenFileButton({
   small,
   onLoad,
   onError,
@@ -54,44 +64,89 @@ function LoadButtons({
       <button className={cn} title="Open a saved record file" onClick={() => fileRef.current?.click()}>
         {small ? "📂" : "📂 Open record file…"}
       </button>
-      <button
-        className={cn}
-        title="Replay your most recent game on this browser, as played so far"
-        onClick={() => {
-          const last = lastGameId();
-          if (!last) onError("no recent game on this browser");
-          else loadReplayFromGame(last).then(onLoad, (e: unknown) => onError(String(e)));
-        }}
-      >
-        {small ? "🎮" : "🎮 Replay your last game"}
-      </button>
     </>
+  );
+}
+
+// The signed-in account's finished games, each replayable in place. Possibly
+// empty, or a sign-in prompt when signed out — the only account-aware source of
+// games to replay (no per-browser "last game").
+function MyGamesList({
+  user,
+  checked,
+  onPick,
+}: {
+  user: AuthUser | null;
+  checked: boolean;
+  onPick: (id: string) => void;
+}) {
+  const games = useHistory(user).data ?? [];
+  if (!checked) return null;
+  return (
+    <div className={s.gamesSection}>
+      <span className={s.gamesLabel}>Your games</span>
+      {!user ? (
+        <span className={s.gamesMsg}>
+          <Link to="/login" className={ui.link}>
+            Sign in
+          </Link>{" "}
+          to replay your games.
+        </span>
+      ) : games.length === 0 ? (
+        <span className={s.gamesMsg}>No finished games yet.</span>
+      ) : (
+        <div className={s.gamesList}>
+          {games.map((g) => (
+            <button key={g.id} className={s.gameRow} onClick={() => onPick(g.id)}>
+              <b>{outcome(g)}</b>
+              <span className={s.gameMeta}>
+                {g.n_players}p · {new Date(g.finished_at * 1000).toLocaleDateString()}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 export default function ReplayView() {
   const [state, setState] = useState<ReplayState | null>(null);
   const [checked, setChecked] = useState(false); // initial server probe done
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [userChecked, setUserChecked] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0); // drop out-of-order seek responses
 
-  // Pick up a replay already loaded on the server (e.g. after a refresh).
+  // Pick up a replay already loaded on the server (e.g. after a refresh). The
+  // probe returns null (not 404) when nothing is loaded, so a fresh visit is clean.
   useEffect(() => {
     let cancelled = false;
-    fetchReplayState(0).then(
+    currentReplay().then(
       (s) => {
-        if (!cancelled) {
-          setState(s);
-          setChecked(true);
-        }
+        if (cancelled) return;
+        if (s) setState(s);
+        setChecked(true);
       },
-      () => !cancelled && setChecked(true) // none loaded yet
+      () => !cancelled && setChecked(true)
     );
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    void currentUser().then((u) => {
+      setUser(u);
+      setUserChecked(true);
+    });
+  }, []);
+
+  const pickGame = (id: string) =>
+    loadReplayFromGame(id).then(loaded, (e: unknown) =>
+      setError(e instanceof Error ? e.message : String(e))
+    );
 
   const apply = (p: Promise<ReplayState>) => {
     const n = ++seq.current;
@@ -133,19 +188,18 @@ export default function ReplayView() {
 
   if (!checked) return null;
 
-  // No record loaded yet: offer the two ways to get one.
+  // No record loaded yet: open a saved file, or pick one of your account's games.
   if (!state) {
     return (
       <div className={s.page}>
         <TopBar mode="Replay" />
         <div className={s.loadDialog}>
           <span className={s.loadTitle}>Replay a game</span>
-          <span className={s.loadSub}>
-            Open a saved game record, or replay your most recent game from its first move.
-          </span>
+          <span className={s.loadSub}>Open a saved record file, or pick one of your games.</span>
           <div className={s.loadRow}>
-            <LoadButtons onLoad={loaded} onError={setError} />
+            <OpenFileButton onLoad={loaded} onError={setError} />
           </div>
+          <MyGamesList user={user} checked={userChecked} onPick={(id) => void pickGame(id)} />
           {error && <span className={s.error}>{error}</span>}
         </div>
       </div>
@@ -214,7 +268,7 @@ export default function ReplayView() {
               </span>
             )}
             <span className={s.loadGroup}>
-              <LoadButtons small onLoad={loaded} onError={setError} />
+              <OpenFileButton small onLoad={loaded} onError={setError} />
               <a
                 href="/api/replay/record"
                 download="settlrl-game.json"

@@ -39,6 +39,52 @@
   font-size: 12px;
 }
 
+/* -- your-games picker (empty state) -- */
+
+.gamesSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  border-top: 1px solid var(--divider);
+  padding-top: 14px;
+}
+
+.gamesLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.gamesMsg {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.gamesList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.gameRow {
+  composes: button from "../styles/ui.module.css";
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.gameMeta {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
 .layout {
   display: flex;
   width: 100vw;

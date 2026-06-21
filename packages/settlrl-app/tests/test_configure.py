@@ -20,6 +20,15 @@ def client() -> Iterator[TestClient]:
         yield c
 
 
+@pytest.fixture()
+def client_no_random() -> Iterator[TestClient]:
+    """A server whose only bot service is ``greedy`` — no ``random`` kind exists,
+    the production shape where the count-growth seat fill must not assume one."""
+    reg = bot_registry(["greedy"])
+    with TestClient(create_app(GameRegistry(), providers=reg)) as c:
+        yield c
+
+
 def _token(client: TestClient, email: str) -> str:
     client.post("/api/auth/register", json={"email": email, "password": "password1"})
     return str(
@@ -39,16 +48,25 @@ def _host_open_game(client: TestClient, headers: dict[str, str]) -> str:
     return str(
         client.post(
             "/api/games",
-            json={"seed": 1, "n_players": 2, "seats": ["human", "human"], "claim": "first"},
+            json={
+                "seed": 1,
+                "n_players": 2,
+                "seats": ["human", "human"],
+                "claim": "first",
+            },
             headers=headers,
         ).json()["id"]
     )
 
 
-def test_configure_reseeds_and_sets_vp_keeping_claim_and_chat(client: TestClient) -> None:
+def test_configure_reseeds_and_sets_vp_keeping_claim_and_chat(
+    client: TestClient,
+) -> None:
     host = _bearer(_token(client, "host@example.com"))
     game = _host_open_game(client, host)
-    client.post(f"/api/games/{game}/chat", json={"text": "hi all", "player": 0}, headers=host)
+    client.post(
+        f"/api/games/{game}/chat", json={"text": "hi all", "player": 0}, headers=host
+    )
 
     before = client.get(f"/api/games/{game}", headers=host).json()
     res = client.post(
@@ -76,13 +94,33 @@ def test_configure_to_two_players_drops_the_now_gone_claims(client: TestClient) 
         json={"n_players": 4, "seats": ["human"] * 4, "claim": "all"},
         headers=host,
     ).json()["id"]
-    assert client.get(f"/api/games/{game}", headers=host).json()["your_seats"] == [0, 1, 2, 3]
+    assert client.get(f"/api/games/{game}", headers=host).json()["your_seats"] == [
+        0,
+        1,
+        2,
+        3,
+    ]
 
     snap = client.post(
         f"/api/games/{game}/configure", json={"n_players": 2}, headers=host
     ).json()
     assert snap["status"]["seats"] == ["human", "human"]
     assert snap["your_seats"] == [0, 1]  # seats 2 and 3 (and their claims) are gone
+
+
+def test_configure_grows_count_opening_human_seats(
+    client_no_random: TestClient,
+) -> None:
+    # Growing the count without naming seats must open the new ones for humans —
+    # not assume a "random" bot service that isn't registered here (it would 422).
+    host = _bearer(_token(client_no_random, "host@example.com"))
+    game = _host_open_game(client_no_random, host)
+
+    res = client_no_random.post(
+        f"/api/games/{game}/configure", json={"n_players": 4}, headers=host
+    )
+    assert res.status_code == 200, res.json()
+    assert res.json()["status"]["seats"] == ["human", "human", "human", "human"]
 
 
 def test_configure_updates_lobby_flags(client: TestClient) -> None:
@@ -106,11 +144,15 @@ def test_configure_is_host_only(client: TestClient) -> None:
     other = _bearer(_token(client, "other@example.com"))
     client.post(f"/api/games/{game}/join", json={"seat": 1}, headers=other)
     assert (
-        client.post(f"/api/games/{game}/configure", json={"seed": 5}, headers=other).status_code
+        client.post(
+            f"/api/games/{game}/configure", json={"seed": 5}, headers=other
+        ).status_code
         == 403
     )
     # Anonymous, holding no seat, is likewise refused.
-    assert client.post(f"/api/games/{game}/configure", json={"seed": 5}).status_code == 403
+    assert (
+        client.post(f"/api/games/{game}/configure", json={"seed": 5}).status_code == 403
+    )
 
 
 def test_configure_rejected_once_a_move_is_played(client: TestClient) -> None:
@@ -118,7 +160,11 @@ def test_configure_rejected_once_a_move_is_played(client: TestClient) -> None:
     # One human + bots: ready from the start, so the host can play immediately.
     game = client.post(
         "/api/games",
-        json={"seed": 0, "seats": ["human", "random", "random", "random"], "claim": "first"},
+        json={
+            "seed": 0,
+            "seats": ["human", "random", "random", "random"],
+            "claim": "first",
+        },
         headers=host,
     ).json()["id"]
     snap = client.get(f"/api/games/{game}", headers=host).json()
@@ -128,7 +174,9 @@ def test_configure_rejected_once_a_move_is_played(client: TestClient) -> None:
         headers=host,
     )
     assert (
-        client.post(f"/api/games/{game}/configure", json={"seed": 7}, headers=host).status_code
+        client.post(
+            f"/api/games/{game}/configure", json={"seed": 7}, headers=host
+        ).status_code
         == 409
     )
 

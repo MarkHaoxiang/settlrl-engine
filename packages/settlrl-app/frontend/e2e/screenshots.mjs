@@ -25,6 +25,7 @@ const FIXTURES = {
     { n_players: 4, kind: "account", name: "bob", rating: 1502, games: 12, wins: 3 },
   ],
   "/api/bots": { greedy: { title: "Greedy", description: "a bot", counts: [2, 3, 4] } },
+  "/api/replay": null, // no replay loaded -> the landing state (open file / your games)
   "/api/lobby": [
     { id: "lob12345", n_players: 4, number_placement: "random", seats: ["human", "human", "random", "human"], claimed: [0], open_seats: 2, searchable: true, created_at: Date.now() / 1000 - 40 },
     { id: "lob67890", n_players: 2, number_placement: "spiral", seats: ["human", "human"], claimed: [0], open_seats: 1, searchable: false, created_at: Date.now() / 1000 - 600 },
@@ -55,6 +56,7 @@ const SCREENS = [
   ["lobby", "/lobby", true],
   ["leaderboard", "/leaderboard", true],
   ["profile", "/profile", true],
+  ["replay", "/replay", true],
   ["login", "/login", false],
   ["help", "/help", true],
   ["admin", "/admin", true],
@@ -70,7 +72,8 @@ for (const [name, path, signedIn] of SCREENS) {
       const p = new URL(route.request().url()).pathname;
       if (p === "/api/users/me" && !signedIn)
         return route.fulfill({ status: 401, json: { detail: "Unauthorized" } });
-      route.fulfill({ json: FIXTURES[p] ?? [] });
+      // `p in FIXTURES` (not `?? []`) so an explicit null fixture stays null.
+      route.fulfill({ json: p in FIXTURES ? FIXTURES[p] : [] });
     });
     const page = await ctx.newPage();
     await page.addInitScript(

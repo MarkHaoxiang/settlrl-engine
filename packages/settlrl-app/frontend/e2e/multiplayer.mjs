@@ -115,22 +115,6 @@ await F.goto(`${BASE}/play/${onlineId}`);
 await F.waitForTimeout(1200);
 check("invitee claims the second seat", String(await seatsOf(F, onlineId)) === "1");
 
-// --- seat-recovery link ------------------------------------------------------
-// A fresh browser with no storage opens F's resume link and inherits seat 1
-// (not a new auto-joined seat), and the token is stripped from the URL.
-const fTokens = await F.evaluate(
-  (gid) => JSON.parse(localStorage.getItem("settlrl-seats") ?? "{}")[gid] ?? {},
-  onlineId
-);
-const tokenStr = Object.entries(fTokens)
-  .map(([s, t]) => `${s}:${t}`)
-  .join(",");
-const G = await page();
-await G.goto(`${BASE}/play/${onlineId}?tokens=${encodeURIComponent(tokenStr)}`);
-await G.waitForTimeout(1200);
-check("resume link restores the held seat", String(await seatsOf(G, onlineId)) === "1");
-check("resume link is stripped from the URL", !G.url().includes("tokens="));
-
 await browser.close();
 if (failures > 0) {
   console.error(`${failures} check(s) failed`);

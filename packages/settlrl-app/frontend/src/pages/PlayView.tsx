@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import BoardView, {
   type BoardInteraction,
   type BoardTargetPoint,
@@ -24,14 +24,7 @@ import {
 } from "../lib/game";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import { authToken } from "../lib/auth";
-import {
-  parseTokens,
-  rememberGame,
-  resumeLink,
-  saveTokens,
-  tokensFor,
-  type SeatTokens,
-} from "../lib/seats";
+import { saveTokens, tokensFor, type SeatTokens } from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
 import Button from "../components/Button";
@@ -61,34 +54,17 @@ const PHASE_LABEL: Record<string, string> = {
 export default function PlayView() {
   const { id: gameId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   // The seats this browser owns in this game (multiplayer identity).
   const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
   const [joinFailed, setJoinFailed] = useState(false);
   // One join request at a time: the token effect above re-fires this one
   // before the first claim resolves, and a double-join would grab two seats.
   const joining = useRef(false);
-  // A resume link (?tokens=seat:token,...) restores held seats, then is
-  // stripped from the URL so it isn't re-applied or shared on. Declared before
-  // the auto-join effect so storage holds the seat before that effect's guard.
-  useEffect(() => {
-    if (!gameId) return;
-    const raw = searchParams.get("tokens");
-    if (!raw) return;
-    const incoming = parseTokens(raw);
-    if (Object.keys(incoming).length > 0) {
-      saveTokens(gameId, incoming);
-      setTokens(tokensFor(gameId));
-    }
-    searchParams.delete("tokens");
-    setSearchParams(searchParams, { replace: true });
-  }, [gameId, searchParams, setSearchParams]);
   useEffect(() => {
     setTokens(gameId ? tokensFor(gameId) : {});
     setJoinFailed(false);
     setEndDismissed(false);
     joining.current = false;
-    if (gameId) rememberGame(gameId);
   }, [gameId]);
   const { snapshot, error, busy, act, chat } = useGame(gameId ?? null, tokens);
   // Deep-linked with no claim: take the first free human seat, else spectate.
@@ -142,8 +118,8 @@ export default function PlayView() {
   const [endDismissed, setEndDismissed] = useState(false);
 
   // A game still waiting for players belongs in its lobby room, not on the board:
-  // bounce there (this keeps old /play invite & resume links working). Play only
-  // begins once every human seat is claimed.
+  // bounce there (this keeps old /play invite links working). Play only begins
+  // once every human seat is claimed.
   useEffect(() => {
     if (!gameId || !snapshot) return;
     const st = snapshot.status;
@@ -400,15 +376,6 @@ export default function PlayView() {
           >
             🔗
           </Button>
-          {gameId && mySeats.length > 0 && (
-            <Button
-              variant="small"
-              title="Copy a link that restores your seat on another device or after clearing storage"
-              onClick={() => void navigator.clipboard.writeText(resumeLink(gameId, tokens))}
-            >
-              🔑
-            </Button>
-          )}
           <Button variant="small" onClick={() => navigate("/lobby")}>
             New game
           </Button>

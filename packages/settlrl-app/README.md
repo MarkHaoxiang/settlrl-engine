@@ -30,9 +30,8 @@ Claiming a human seat (creating or joining a game) issues a bearer token, and ev
 proves its seats via the `X-Seat-Tokens` header: snapshots are per-seat views — your own
 hand arrives in full, everyone else's only as public counts, and the legal-move list only
 ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
-link, and opening it claims a free human seat (or spectates when none is left); the 🔑 button
-copies a resume link that carries your seat tokens, so you can restore the exact seats you
-hold on another device or after clearing storage. A game with unclaimed human seats stays in its
+link, and opening it claims a free human seat (or spectates when none is left). You keep your
+seats through your signed-in account or this browser's storage. A game with unclaimed human seats stays in its
 **[lobby room](#lobby)** (`/lobby/{id}`) — the host sets up the board, seats, and win target there
 while players join and chat — and begins on its own once every human seat is filled (the host can
 bot-fill the open seats to start now); the server serves no moves and advances neither bots nor

@@ -275,7 +275,9 @@ def build(deps: Deps) -> APIRouter:
         async with handle.lock:
             owned = handle.owned_seats(tokens(x_seat_tokens), uid(user))
             if 0 not in owned:
-                raise HTTPException(status_code=403, detail="only the host can configure")
+                raise HTTPException(
+                    status_code=403, detail="only the host can configure"
+                )
             session = handle.session
             if session.moves_played > 0:
                 raise HTTPException(status_code=409, detail="game already started")
@@ -284,8 +286,11 @@ def build(deps: Deps) -> APIRouter:
             if req.seats is not None:
                 seats = list(req.seats)
             else:
+                # Growing the count opens the new seats for humans — never assume
+                # a bot kind exists (no "random" service may be registered); the
+                # host fills them from the live catalog afterwards.
                 cur = session.seats
-                seats = [cur[i] if i < len(cur) else "random" for i in range(n)]
+                seats = [cur[i] if i < len(cur) else HUMAN for i in range(n)]
             if len(seats) != n:
                 raise HTTPException(status_code=422, detail=f"expected {n} seats")
             # A claimed seat that survives the new count stays human — you can't

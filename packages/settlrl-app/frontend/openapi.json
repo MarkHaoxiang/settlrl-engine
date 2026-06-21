@@ -658,6 +658,31 @@
    }
   },
   "/api/replay": {
+   "get": {
+    "summary": "Get Replay",
+    "description": "The currently loaded replay's opening state, or ``null`` when none is\nloaded \u2014 the page's load-time probe, so a fresh visit doesn't 404.",
+    "operationId": "get_replay_api_replay_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/ReplayStateModel"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "title": "Response Get Replay Api Replay Get"
+        }
+       }
+      }
+     }
+    }
+   },
    "post": {
     "summary": "Post Replay",
     "description": "Load a game record (the ``GameRecord`` JSON document) for replay;\nreturns the opening state. ``422`` if the record is malformed or fails\nreplay validation.",

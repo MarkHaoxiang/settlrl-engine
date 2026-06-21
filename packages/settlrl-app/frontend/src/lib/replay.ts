@@ -32,3 +32,10 @@ export async function loadReplayFromGame(gameId: string): Promise<ReplayState> {
 export async function fetchReplayState(move: number): Promise<ReplayState> {
   return adapt(await api<ReplayWire>(`/api/replay/state?move=${move}`));
 }
+
+// The replay currently loaded on the server (one server-wide), or null. Unlike
+// fetchReplayState this never 404s, so it's the safe page-load probe.
+export async function currentReplay(): Promise<ReplayState | null> {
+  const wire = await api<ReplayWire | null>("/api/replay");
+  return wire ? adapt(wire) : null;
+}

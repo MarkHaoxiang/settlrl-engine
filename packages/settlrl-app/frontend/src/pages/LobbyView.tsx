@@ -8,7 +8,7 @@ import { authToken, currentUser, type AuthUser } from "../lib/auth";
 import { HUMAN, matchmake, type NewGameConfig, type PlayerCount } from "../lib/game";
 import { useCreateGame } from "../lib/useCreateGame";
 import { useLobby, type LobbyGame } from "../lib/queries";
-import { rememberGame, saveTokens } from "../lib/seats";
+import { saveTokens } from "../lib/seats";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyView.module.css";
 
@@ -95,7 +95,6 @@ export default function LobbyView() {
       } else {
         searchActive.current = false;
         saveTokens(res.id, { [res.seat]: res.token });
-        rememberGame(res.id);
         navigate(`/play/${res.id}`);
       }
     } catch {

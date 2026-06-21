@@ -5,11 +5,12 @@
 // the table fills (every human seat claimed) everyone is sent into /play/:id.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import BoardView from "../components/BoardView";
 import Button from "../components/Button";
 import ChatPanel from "../components/ChatPanel";
+import Modal from "../components/Modal";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
 import { BotIcon, HumanIcon, MapIcon } from "../components/icons";
@@ -26,14 +27,7 @@ import {
   type NumberPlacement,
   type PlayerCount,
 } from "../lib/game";
-import {
-  parseTokens,
-  rememberGame,
-  resumeLink,
-  saveTokens,
-  tokensFor,
-  type SeatTokens,
-} from "../lib/seats";
+import { saveTokens, tokensFor, type SeatTokens } from "../lib/seats";
 import { useGame } from "../lib/useGame";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyRoom.module.css";
@@ -44,12 +38,13 @@ const botLabel = (kind: string, spec?: BotSpec) =>
 export default function LobbyRoom() {
   const { id: gameId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
   const [joinFailed, setJoinFailed] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  // The seat whose bot-picker overlay is open (null = closed).
+  const [picker, setPicker] = useState<number | null>(null);
   const joining = useRef(false);
   const [bots, setBots] = useState<Record<string, BotSpec>>({});
 
@@ -58,25 +53,8 @@ export default function LobbyRoom() {
     fetchBots().then(setBots).catch(() => setBots({}));
   }, []);
 
-  // A resume link (?tokens=…) restores held seats, then is stripped from the URL.
   useEffect(() => {
-    if (!gameId) return;
-    const raw = searchParams.get("tokens");
-    if (!raw) return;
-    const incoming = parseTokens(raw);
-    if (Object.keys(incoming).length > 0) {
-      saveTokens(gameId, incoming);
-      setTokens(tokensFor(gameId));
-    }
-    searchParams.delete("tokens");
-    setSearchParams(searchParams, { replace: true });
-  }, [gameId, searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (gameId) {
-      setTokens(tokensFor(gameId));
-      rememberGame(gameId);
-    }
+    if (gameId) setTokens(tokensFor(gameId));
     joining.current = false;
     setJoinFailed(false);
   }, [gameId]);
@@ -200,34 +178,24 @@ export default function LobbyRoom() {
                   {isHost && !claimed.has(i) && (
                     <div className={s.seatControls}>
                       <button
-                        className={cx(s.miniBtn, human && ui.selected)}
+                        className={cx(s.iconBtn, human && ui.selected)}
                         title="Open this seat for a human player"
+                        aria-label="Open this seat for a human player"
                         onClick={() => retarget(i, "human")}
                       >
-                        Human
+                        <HumanIcon size={16} />
                       </button>
-                      {/* Only offer a bot when the server actually serves one. */}
+                      {/* Only offer a bot when the server actually serves one; the
+                          icon opens the catalog overlay to pick which. */}
                       {botNames.length > 0 && (
                         <button
-                          className={cx(s.miniBtn, !human && ui.selected)}
+                          className={cx(s.iconBtn, !human && ui.selected)}
                           title="Fill this seat with a bot"
-                          onClick={() => retarget(i, defaultBot)}
+                          aria-label="Fill this seat with a bot"
+                          onClick={() => setPicker(i)}
                         >
-                          Bot
+                          <BotIcon size={16} />
                         </button>
-                      )}
-                      {!human && botNames.length > 1 && (
-                        <select
-                          className={s.botSelect}
-                          value={kind}
-                          onChange={(e) => retarget(i, e.target.value)}
-                        >
-                          {botNames.map((b) => (
-                            <option key={b} value={b}>
-                              {botLabel(b, bots[b])}
-                            </option>
-                          ))}
-                        </select>
                       )}
                     </div>
                   )}
@@ -321,15 +289,6 @@ export default function LobbyRoom() {
             <Button onClick={copyInvite} title="Others join the open seats by opening this link">
               {linkCopied ? "Copied!" : "🔗 Invite link"}
             </Button>
-            {mySeats.length > 0 && (
-              <Button
-                variant="small"
-                title="Copy a link that restores your seat on another device"
-                onClick={() => void navigator.clipboard.writeText(resumeLink(gameId, tokens))}
-              >
-                🔑
-              </Button>
-            )}
             {isHost && botNames.length > 0 && (
               <Button selected onClick={startGame} title="Fill open seats with bots and start">
                 Start game
@@ -353,6 +312,39 @@ export default function LobbyRoom() {
           />
         </div>
       </div>
+
+      {picker !== null && (
+        <Modal onClose={() => setPicker(null)} title="Choose a bot">
+          <div className={cx(ui.panel, s.picker)}>
+            <div className={s.pickerHead}>
+              <span className={ui.sectionLabel}>Choose a bot</span>
+              <button className={s.pickerClose} aria-label="Close" onClick={() => setPicker(null)}>
+                ✕
+              </button>
+            </div>
+            <div className={s.pickerList}>
+              {botNames.map((b) => {
+                const current = seatKinds[picker] === b;
+                return (
+                  <button
+                    key={b}
+                    className={cx(s.pickerItem, current && ui.selected)}
+                    onClick={() => {
+                      void retarget(picker, b);
+                      setPicker(null);
+                    }}
+                  >
+                    <BotIcon size={20} />
+                    <span className={s.pickerName}>{botLabel(b, bots[b])}</span>
+                    <span className={s.pickerDesc}>{bots[b]?.description}</span>
+                    {current && <span className={s.pickerCheck}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {msg && <div className={ui.overlayMsg}>{msg}</div>}
     </div>

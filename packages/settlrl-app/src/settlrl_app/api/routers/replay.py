@@ -53,6 +53,13 @@ def build(deps: Deps) -> APIRouter:
             )
         return await load_replay(replays, record)
 
+    @router.get("/api/replay")
+    async def get_replay() -> ReplayStateModel | None:
+        """The currently loaded replay's opening state, or ``null`` when none is
+        loaded — the page's load-time probe, so a fresh visit doesn't 404."""
+        async with replays.lock:
+            return None if replays.session is None else replays.session.state(0)
+
     @router.get("/api/replay/state")
     async def get_replay_state(move: int = 0) -> ReplayStateModel:
         """The loaded replay after ``move`` moves (0 = the opening board).

@@ -407,6 +407,18 @@ def test_replay_state_404_until_loaded(client: TestClient) -> None:
     assert client.get("/api/replay/state").status_code == 404
 
 
+def test_replay_probe_is_null_not_404_until_loaded() -> None:
+    # The page's load-time probe must not 404 on a fresh visit; it returns null,
+    # then the loaded opening state once a record is posted.
+    with _finished_bot_game() as (client, game):
+        probe = client.get("/api/replay")
+        assert probe.status_code == 200 and probe.json() is None
+        doc = client.get(f"/api/games/{game}/record").json()
+        client.post("/api/replay", json=doc)
+        loaded = client.get("/api/replay")
+        assert loaded.status_code == 200 and loaded.json()["move"] == 0
+
+
 def test_replay_rejects_bad_records(client: TestClient) -> None:
     assert client.post("/api/replay", json={"seed": 1}).status_code == 422
     assert (
