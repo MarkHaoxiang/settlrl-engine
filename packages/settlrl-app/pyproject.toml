@@ -21,8 +21,10 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "aiosqlite>=0.20.0",
     # Typed, validated env config (one Settings class) instead of scattered
-    # os.environ.get + manual int/float/bool/csv parsing.
+    # os.environ.get + manual int/float/bool/csv parsing. python-dotenv backs
+    # the .secrets/.env file source (pydantic-settings doesn't pull it itself).
     "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
     # Multiplayer rating (the leaderboard): the patent-free Weng-Lin / Plackett-
     # Luce model. Rates a whole game from one rank vector, so we don't hand-roll
     # the math.

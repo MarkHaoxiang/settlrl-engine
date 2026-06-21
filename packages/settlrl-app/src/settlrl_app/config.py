@@ -1,9 +1,11 @@
-"""The server's runtime configuration, read once from the environment.
+"""The server's runtime configuration, read once at startup.
 
-One typed model instead of scattered ``os.environ.get`` + manual int/float/bool/
-csv parsing: pydantic-settings does the coercion, validation, and ``.env`` support.
-``SETTLRL_APP_*`` are this app's own knobs; the unprefixed ``ROOT_PATH`` / ``HOST``
-/ ``PORT`` / ``RELOAD`` follow the usual deployment conventions.
+pydantic-settings does the coercion, validation, and precedence: a real
+environment variable wins, else a key from the local ``.secrets/.env`` file
+(git-ignored — for values like admin emails kept out of the committed compose
+file), else the default declared here. ``SETTLRL_APP_*`` are this app's own
+knobs; the unprefixed ``ROOT_PATH`` / ``HOST`` / ``PORT`` / ``RELOAD`` follow
+the usual deployment conventions.
 """
 
 from typing import Annotated
@@ -13,7 +15,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="SETTLRL_APP_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="SETTLRL_APP_", env_file=".secrets/.env", extra="ignore"
+    )
 
     # Persistence + runtime knobs (SETTLRL_APP_*).
     state_dir: str | None = None  # a dir to journal games into (None = in-memory)
