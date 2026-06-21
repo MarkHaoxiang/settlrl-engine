@@ -107,12 +107,13 @@ class _Tree(NamedTuple):
 class _Descent(NamedTuple):
     """One simulation's forward walk; carried through the descent ``while_loop``.
     ``exp_parent`` >= 0 marks the node a new leaf attaches to (the expansion). The
-    leaf is scored once *after* the loop (:func:`_evaluate`), so the only thing
-    carried for it is ``prev_state`` — the pre-step parent, needed to take a dice
-    edge's roll expectation from before the roll."""
+    leaf is scored once *after* the loop (:func:`_evaluate`); ``prev_state`` carries
+    the pre-step parent for a dice leaf's roll expectation, and is ``None`` (not
+    carried) when ``expected_rolls`` is off — the single-sample leaf needs no
+    parent."""
 
     state: BoardState
-    prev_state: BoardState  # the step's parent (for a roll leaf's _roll_ev)
+    prev_state: BoardState | None  # step's parent for _roll_ev; None if single-sample
     cur: _Node
     depth: IntScalar  # edges taken so far
     path_node: _PathI
@@ -269,6 +270,7 @@ class _Cfg(NamedTuple):
     max_depth: int
     max_considered: int
     value_scale: float
+    expected_rolls: bool  # roll leaf = exact 11-roll expectation; else 1 sampled roll
     n_nodes: int  # num_simulations + 1
     table: _Table  # the Sequential-Halving considered-visits schedule
 
@@ -331,7 +333,7 @@ def _determinize(
     state = sample_world(key, view, player)
     return _Descent(
         state=state,
-        prev_state=state,
+        prev_state=state if cfg.expected_rolls else None,
         cur=jnp.int32(0),
         depth=jnp.int32(0),
         path_node=jnp.zeros((cfg.max_depth,), jnp.int32),
@@ -370,7 +372,7 @@ def _descend(
         is_leaf = tree.children[walk.cur, action] < 0  # unexpanded edge -> stop here
         return _Descent(
             state=next_state,
-            prev_state=walk.state,
+            prev_state=walk.state if cfg.expected_rolls else None,
             cur=jnp.where(is_leaf, walk.cur, tree.children[walk.cur, action]),
             depth=walk.depth + 1,
             path_node=walk.path_node.at[walk.depth].set(walk.cur),
@@ -387,12 +389,18 @@ def _evaluate(
     cfg: _Cfg, layout: BoardLayout, walk: _Descent, player: Player
 ) -> tuple[Value, Player]:
     # EVALUATE: score the descent's leaf once, here, rather than on every step.
-    # When the edge into the leaf was a (non-winning) dice roll, the value is the
-    # roll expectation taken from the pre-roll parent (`prev_state`); any other
-    # leaf takes the plain state value. Keying off the last path action (not just a
-    # grown edge) matches a `max_depth` truncation that lands on a roll edge. Also
-    # returns the leaf's mover, stored on the new node for the backup frame.
+    # The leaf's mover is stored on the new node for the backup frame.
+    #
+    # `_step` already applies one sampled dice outcome, so the plain leaf value is
+    # a single-sample roll. With `expected_rolls`, a roll-edge leaf instead takes
+    # the exact 11-roll expectation from the pre-roll parent (`prev_state`) —
+    # variance reduction at 11x the value-fn calls. Keying off the last path action
+    # (not just a grown edge) also covers a `max_depth` truncation onto a roll.
     leaf = walk.state
+    mover = agent_selection_single(leaf).astype(jnp.int32)
+    if not cfg.expected_rolls:
+        return _value(cfg, layout, leaf, player), mover
+    assert walk.prev_state is not None  # carried whenever expected_rolls is on
     last_action = walk.path_act[walk.depth - 1]  # edge into the leaf
     roll_leaf = (walk.depth > 0) & (ROW_TYPE[last_action] == _ROLL_T)
     value = jnp.where(
@@ -400,7 +408,7 @@ def _evaluate(
         _roll_ev(cfg, layout, walk.prev_state, player),
         _value(cfg, layout, leaf, player),
     )
-    return value, agent_selection_single(leaf).astype(jnp.int32)
+    return value, mover
 
 
 # --- the search: one re-determinizing tree, built over the engine ---
@@ -478,12 +486,17 @@ def make_tree(
     max_depth: int,
     max_considered: int,
     value_scale: float,
+    expected_rolls: bool = True,
 ) -> TreeSearch:
     """Build one SO-ISMCTS tree (a :data:`TreeSearch` over :func:`_run`).
     ``prior`` (when given) is the *interior* node prior — a learned policy head;
     otherwise interior nodes use the tier table. The root prior is supplied per
     call (``root_logits``). The returned function is pure (the caller
-    ``jit``/``vmap``s it)."""
+    ``jit``/``vmap``s it).
+
+    ``expected_rolls`` scores a dice-edge leaf by the exact 11-roll expectation
+    (variance reduction at 11x the value-fn calls); False uses the single sampled
+    post-roll state already produced by the step (much cheaper, noisier leaf)."""
     cfg = _Cfg(
         value=value,
         prior=prior,
@@ -491,6 +504,7 @@ def make_tree(
         max_depth=max_depth,
         max_considered=max_considered,
         value_scale=value_scale,
+        expected_rolls=expected_rolls,
         n_nodes=num_simulations + 1,
         table=jnp.asarray(_considered_table(max_considered, num_simulations)),
     )

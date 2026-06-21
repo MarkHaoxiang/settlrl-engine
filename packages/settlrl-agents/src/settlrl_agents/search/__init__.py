@@ -65,6 +65,7 @@ def make_search_weights(
     prior_scale: float = 1.0,
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
+    expected_rolls: bool = True,
 ) -> PolicyWeights:
     """Re-determinizing SO-ISMCTS, returning the improved-policy weights (the
     AlphaZero policy target; :func:`make_search` argmaxes these).
@@ -83,6 +84,7 @@ def make_search_weights(
         max_depth=max_depth,
         max_considered=max_num_considered_actions,
         value_scale=value_scale,
+        expected_rolls=expected_rolls,
     )
 
     def root_logits(
@@ -179,6 +181,7 @@ def make_search(
     prior_scale: float = 1.0,
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
+    expected_rolls: bool = True,
 ) -> BeliefPolicy:
     """Re-determinizing search as a :class:`BeliefPolicy`: the masked argmax of
     the improved policy. Parameters are :func:`make_search_weights`'; tiny noise
@@ -194,6 +197,7 @@ def make_search(
         prior_scale=prior_scale,
         propose_rate=propose_rate,
         trade_penalty=trade_penalty,
+        expected_rolls=expected_rolls,
     )
 
     def policy(
