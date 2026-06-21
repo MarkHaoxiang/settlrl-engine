@@ -24,7 +24,7 @@ import {
 } from "../lib/game";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import { authToken } from "../lib/auth";
-import { saveTokens, tokensFor, type SeatTokens } from "../lib/seats";
+import { clearCurrentGame, saveTokens, setCurrentGame, tokensFor, type SeatTokens } from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
 import Button from "../components/Button";
@@ -128,6 +128,14 @@ export default function PlayView() {
       !st.terminal && st.seats.some((k, i) => k === "human" && !claimed.has(i));
     if (stillWaiting) navigate(`/lobby/${gameId}`, { replace: true });
   }, [gameId, snapshot, navigate]);
+
+  // Track this as the browser's current game (the one-game-at-a-time guard for
+  // guests): held while it's live and we hold a seat, forgotten once it ends.
+  useEffect(() => {
+    if (!gameId || !snapshot || mySeats.length === 0) return;
+    if (snapshot.status.terminal) clearCurrentGame(gameId);
+    else setCurrentGame(gameId);
+  }, [gameId, snapshot, mySeats]);
 
   const actions = snapshot?.actions ?? [];
 

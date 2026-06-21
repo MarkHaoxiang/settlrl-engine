@@ -64,6 +64,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/games/{game_id}/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Leave
+         * @description Leave a lobby that hasn't started. The host (seat-0 owner) closes the
+         *     whole game and everyone else is bounced; any other participant just frees
+         *     their own seat back to open. ``403`` if you hold no seat here, ``409``
+         *     once the game has started (an in-progress game isn't closable).
+         */
+        post: operations["post_leave_api_games__game_id__leave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/games/{game_id}/seats": {
         parameters: {
             query?: never;
@@ -1285,6 +1308,15 @@ export interface components {
             wins: number;
         };
         /**
+         * _LeftModel
+         * @description The outcome of leaving: the whole lobby was closed (the host left) or just
+         *     the caller's seat was freed.
+         */
+        _LeftModel: {
+            /** Closed */
+            closed: boolean;
+        };
+        /**
          * _LobbyGameModel
          * @description One joinable game in the lobby.
          */
@@ -1502,6 +1534,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_JoinedModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_leave_api_games__game_id__leave_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Seat-Tokens"?: string | null;
+            };
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_LeftModel"];
                 };
             };
             /** @description Validation Error */

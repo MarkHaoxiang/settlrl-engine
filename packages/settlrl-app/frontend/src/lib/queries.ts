@@ -2,10 +2,12 @@
 // These replace the per-component fetch + useState + useEffect dance with cached
 // queries (loading/error state, refetch, dedupe) and schema-derived types.
 
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import type { AuthUser } from "./auth";
 import { client, unwrap } from "./client";
+import { clearCurrentGame, currentGameId } from "./seats";
 import type { components } from "./api-schema";
 
 type Schemas = components["schemas"];
@@ -22,6 +24,33 @@ export function useMyGames(user: AuthUser | null) {
     queryFn: () => unwrap(client.GET("/api/me/games")),
     enabled: !!user,
   });
+}
+
+// The one live game the user is currently in, or null — drives the "you're
+// already in a game" gate. Signed in: the account's first live game (server
+// truth). Guest: the locally-tracked game, verified live and forgotten once it's
+// gone or finished. Returns the id optimistically while the guest probe loads,
+// so the gate never briefly lets a second game through.
+export function useCurrentGame(user: AuthUser | null): string | null {
+  const mine = useMyGames(user);
+  const localId = currentGameId();
+  const guest = useQuery({
+    queryKey: ["game-live", localId],
+    queryFn: () =>
+      unwrap(
+        client.GET("/api/games/{game_id}", { params: { path: { game_id: localId! } } })
+      ),
+    enabled: !user && !!localId,
+    retry: false,
+  });
+  const guestDead =
+    !user && !!localId && (guest.isError || (guest.data?.status.terminal ?? false));
+  useEffect(() => {
+    if (guestDead && localId) clearCurrentGame(localId);
+  }, [guestDead, localId]);
+
+  if (user) return mine.data?.[0]?.id ?? null;
+  return localId && !guestDead ? localId : null;
 }
 
 // The signed-in user's finished games, newest first; idle until signed in.

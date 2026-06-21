@@ -176,6 +176,67 @@
     }
    }
   },
+  "/api/games/{game_id}/leave": {
+   "post": {
+    "summary": "Post Leave",
+    "description": "Leave a lobby that hasn't started. The host (seat-0 owner) closes the\nwhole game and everyone else is bounced; any other participant just frees\ntheir own seat back to open. ``403`` if you hold no seat here, ``409``\nonce the game has started (an in-progress game isn't closable).",
+    "operationId": "post_leave_api_games__game_id__leave_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "game_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Game Id"
+      }
+     },
+     {
+      "name": "X-Seat-Tokens",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Seat-Tokens"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/_LeftModel"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/games/{game_id}/seats": {
    "post": {
     "summary": "Post Seat",
@@ -3224,6 +3285,20 @@
     ],
     "title": "_LeaderboardEntry",
     "description": "One ranked subject in a player-count bucket."
+   },
+   "_LeftModel": {
+    "properties": {
+     "closed": {
+      "type": "boolean",
+      "title": "Closed"
+     }
+    },
+    "type": "object",
+    "required": [
+     "closed"
+    ],
+    "title": "_LeftModel",
+    "description": "The outcome of leaving: the whole lobby was closed (the host left) or just\nthe caller's seat was freed."
    },
    "_LobbyGameModel": {
     "properties": {

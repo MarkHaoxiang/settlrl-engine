@@ -21,13 +21,20 @@ import {
   configureGame,
   fetchBots,
   joinGame,
+  leaveGame,
   setSeat,
   type BotSpec,
   type GameConfig,
   type NumberPlacement,
   type PlayerCount,
 } from "../lib/game";
-import { saveTokens, tokensFor, type SeatTokens } from "../lib/seats";
+import {
+  clearCurrentGame,
+  saveTokens,
+  setCurrentGame,
+  tokensFor,
+  type SeatTokens,
+} from "../lib/seats";
 import { useGame } from "../lib/useGame";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyRoom.module.css";
@@ -74,6 +81,7 @@ export default function LobbyRoom() {
     joinGame(gameId).then(
       (j) => {
         saveTokens(gameId, { [j.seat]: j.token });
+        setCurrentGame(gameId);
         joining.current = false;
         setTokens(tokensFor(gameId));
       },
@@ -95,6 +103,15 @@ export default function LobbyRoom() {
     if (gameId && snapshot && !waiting) navigate(`/play/${gameId}`, { replace: true });
   }, [gameId, snapshot, waiting, navigate]);
 
+  // The game vanished (the host closed the lobby, or it was evicted): the stream
+  // 404s — stop tracking it and bounce back to the lobby list.
+  useEffect(() => {
+    if (error) {
+      clearCurrentGame(gameId ?? undefined);
+      navigate("/lobby", { replace: true });
+    }
+  }, [error, gameId, navigate]);
+
   if (error) return <div className={ui.overlayMsg}>{error}</div>;
   if (!snapshot || !status || !gameId) return <div className={ui.overlayMsg}>Loading lobby…</div>;
 
@@ -108,6 +125,17 @@ export default function LobbyRoom() {
     .filter((b) => bots[b].counts.includes(n))
     .sort();
   const defaultBot = botNames.includes("random") ? "random" : (botNames[0] ?? "random");
+
+  // Leave before the game starts: the host (seat 0) closes the whole lobby and
+  // everyone else is bounced; any other participant just frees their seat.
+  const leave = () =>
+    leaveGame(gameId, tokens).then(
+      () => {
+        clearCurrentGame(gameId);
+        navigate("/lobby");
+      },
+      (e) => setMsg(String(e))
+    );
 
   const reconfigure = (cfg: GameConfig) =>
     configureGame(gameId, tokens, cfg).catch((e) => setMsg(String(e)));
@@ -288,6 +316,12 @@ export default function LobbyRoom() {
           <div className={s.actions}>
             <Button onClick={copyInvite} title="Others join the open seats by opening this link">
               {linkCopied ? "Copied!" : "🔗 Invite link"}
+            </Button>
+            <Button
+              onClick={() => void leave()}
+              title={isHost ? "Close this lobby for everyone" : "Leave this lobby"}
+            >
+              {isHost ? "Close lobby" : "Leave"}
             </Button>
             {isHost && botNames.length > 0 && (
               <Button selected onClick={startGame} title="Fill open seats with bots and start">

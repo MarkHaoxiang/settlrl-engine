@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createGame, type NewGameConfig } from "./game";
-import { saveTokens } from "./seats";
+import { saveTokens, setCurrentGame } from "./seats";
 
 const QUEUE_POLL_MS = 3000;
 
@@ -29,6 +29,7 @@ export function useCreateGame() {
       } else {
         setQueue(null);
         saveTokens(res.id, res.tokens);
+        setCurrentGame(res.id);
         navigate(`/lobby/${res.id}`);
       }
     } catch (e) {

@@ -25,8 +25,14 @@ from starlette.responses import Response
 from settlrl_app.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
 from settlrl_app.api.routers.replay import load_replay
 from settlrl_app.api.views import game_model
-from settlrl_app.game.games import QueuePosition, RegistryFullError, win_threshold
+from settlrl_app.game.games import (
+    GameHandle,
+    QueuePosition,
+    RegistryFullError,
+    win_threshold,
+)
 from settlrl_app.storage.db import User
+from settlrl_app.storage.store import GameStore
 
 
 class _CreateRequest(BaseModel):
@@ -107,6 +113,13 @@ class _ConfigureRequest(BaseModel):
     searchable: bool | None = None
 
 
+class _LeftModel(BaseModel):
+    """The outcome of leaving: the whole lobby was closed (the host left) or just
+    the caller's seat was freed."""
+
+    closed: bool
+
+
 class _ActionRequest(BaseModel):
     flat: int
 
@@ -141,6 +154,19 @@ def _validate_seat_kinds(
             )
 
 
+def _rejournal(store: GameStore, handle: GameHandle) -> None:
+    """Rewrite an unstarted game's journal from its current claims and chat. The
+    journal records claims additively, so freeing a seat is expressed by
+    rebuilding (the header write is an upsert). Safe pre-start only: no moves are
+    journalled yet, so none are lost."""
+    handle.journal = store.create(handle.id, handle.session.setup.to_dict())
+    for seat, token in handle.claims.items():
+        handle.journal.claim(seat, token, handle.claim_users.get(seat))
+    for entry in handle.session.log():
+        if entry.kind == "chat":
+            handle.journal.chat(entry.player, entry.text)
+
+
 def build(deps: Deps) -> APIRouter:
     router = APIRouter()
     registry, bots = deps.registry, deps.bots
@@ -171,6 +197,7 @@ def build(deps: Deps) -> APIRouter:
             raise HTTPException(
                 status_code=401, detail="sign in to list a game in the lobby"
             )
+        deps.guard_one_game(user)
         catalog = bots.catalog()
         _validate_seat_kinds(req.seats, req.n_players, catalog)
         try:
@@ -217,6 +244,7 @@ def build(deps: Deps) -> APIRouter:
         game_id: str, req: _JoinRequest, user: CurrentUser = None
     ) -> _JoinedModel:
         handle = deps.handle_of(game_id)
+        deps.guard_one_game(user, allow=game_id)
         async with handle.lock:
             try:
                 seat, token = handle.claim(req.seat, uid(user))
@@ -226,6 +254,33 @@ def build(deps: Deps) -> APIRouter:
                 handle.claim_names[seat] = user.email.split("@", 1)[0]
             handle.bump()
         return _JoinedModel(id=game_id, seat=seat, token=token)
+
+    @router.post("/api/games/{game_id}/leave")
+    async def post_leave(
+        game_id: str, user: CurrentUser = None, x_seat_tokens: SeatTokens = None
+    ) -> _LeftModel:
+        """Leave a lobby that hasn't started. The host (seat-0 owner) closes the
+        whole game and everyone else is bounced; any other participant just frees
+        their own seat back to open. ``403`` if you hold no seat here, ``409``
+        once the game has started (an in-progress game isn't closable)."""
+        handle = deps.handle_of(game_id)
+        async with handle.lock:
+            owned = handle.owned_seats(tokens(x_seat_tokens), uid(user))
+            if not owned:
+                raise HTTPException(status_code=403, detail="you are not in this game")
+            if handle.ready():
+                raise HTTPException(
+                    status_code=409, detail="the game has already started"
+                )
+            if 0 in owned:
+                registry.remove(game_id)
+                return _LeftModel(closed=True)
+            for seat in owned:
+                handle.release_seat(seat)
+            if deps.store is not None and handle.journal is not None:
+                _rejournal(deps.store, handle)
+            handle.bump()
+            return _LeftModel(closed=False)
 
     @router.post("/api/games/{game_id}/seats")
     async def post_seat(

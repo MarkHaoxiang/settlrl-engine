@@ -249,6 +249,19 @@ export async function configureGame(
   );
 }
 
+// Leave an unstarted lobby: the host (seat 0) closes the whole game (others are
+// bounced), anyone else just frees their own seat. Returns whether the whole
+// game was closed. 409 if the game has already started.
+export async function leaveGame(
+  gameId: string,
+  tokens: SeatTokens
+): Promise<{ closed: boolean }> {
+  return api(`/api/games/${gameId}/leave`, {
+    method: "POST",
+    headers: seatHeaders(tokens),
+  });
+}
+
 // Still finding an Elo match: re-POST with the ticket to keep polling.
 export interface MatchQueued {
   queued: true;

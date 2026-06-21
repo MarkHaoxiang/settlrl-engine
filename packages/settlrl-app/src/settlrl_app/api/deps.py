@@ -77,3 +77,17 @@ class Deps:
         if handle is None:
             raise HTTPException(status_code=404, detail="no such game")
         return handle
+
+    def guard_one_game(self, user: User | None, allow: str | None = None) -> None:
+        """Enforce one live game per account: raise 409 (carrying the existing
+        game's id, so the client can offer to resume it) when a signed-in
+        ``user`` already holds a seat in a live game other than ``allow``. Guests
+        carry no server identity and pass — their limit is only client-side."""
+        if user is None:
+            return
+        existing = self.registry.live_game_for_user(str(user.id))
+        if existing is not None and existing.id != allow:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "you are already in a game", "game_id": existing.id},
+            )

@@ -24,6 +24,11 @@
   cursor: pointer;
 }
 
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .buttonSmall {
   composes: button;
   padding: 5px 12px;

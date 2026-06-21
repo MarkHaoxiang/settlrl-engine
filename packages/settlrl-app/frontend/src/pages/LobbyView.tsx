@@ -4,11 +4,12 @@ import AccountMenu from "../components/AccountMenu";
 import Button from "../components/Button";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
+import { useQueryClient } from "@tanstack/react-query";
 import { authToken, currentUser, type AuthUser } from "../lib/auth";
-import { HUMAN, matchmake, type NewGameConfig, type PlayerCount } from "../lib/game";
+import { HUMAN, leaveGame, matchmake, type NewGameConfig, type PlayerCount } from "../lib/game";
 import { useCreateGame } from "../lib/useCreateGame";
-import { useLobby, type LobbyGame } from "../lib/queries";
-import { saveTokens } from "../lib/seats";
+import { useCurrentGame, useLobby, type LobbyGame } from "../lib/queries";
+import { clearCurrentGame, saveTokens, setCurrentGame, tokensFor } from "../lib/seats";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyView.module.css";
 
@@ -22,7 +23,15 @@ const ago = (epoch: number): string => {
   return `${Math.round(mins / 60)}h ago`;
 };
 
-function GameRow({ game, onJoin }: { game: LobbyGame; onJoin: (id: string) => void }) {
+function GameRow({
+  game,
+  onJoin,
+  disabled,
+}: {
+  game: LobbyGame;
+  onJoin: (id: string) => void;
+  disabled?: boolean;
+}) {
   const seated = game.n_players - game.open_seats;
   return (
     <div className={s.row}>
@@ -35,7 +44,12 @@ function GameRow({ game, onJoin }: { game: LobbyGame; onJoin: (id: string) => vo
           {seated}/{game.n_players} seated · {game.number_placement} map · {ago(game.created_at)}
         </span>
       </div>
-      <Button selected onClick={() => onJoin(game.id)}>
+      <Button
+        selected
+        disabled={disabled}
+        title={disabled ? "Leave your current game first" : undefined}
+        onClick={() => onJoin(game.id)}
+      >
         Join
       </Button>
     </div>
@@ -46,6 +60,10 @@ export default function LobbyView() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const navigate = useNavigate();
   const games = useLobby().data ?? [];
+  const qc = useQueryClient();
+  // The one game you're already in (account or guest); you can only be in one at
+  // a time, so creating / matching / joining another is gated until you leave it.
+  const currentId = useCurrentGame(user);
   // The active Quick Match search, if any (its player count + how many wait).
   const [searching, setSearching] = useState<{ n: PlayerCount; waiting: number } | null>(null);
   const ticket = useRef<string | undefined>(undefined);
@@ -95,6 +113,7 @@ export default function LobbyView() {
       } else {
         searchActive.current = false;
         saveTokens(res.id, { [res.seat]: res.token });
+        setCurrentGame(res.id);
         navigate(`/play/${res.id}`);
       }
     } catch {
@@ -117,6 +136,21 @@ export default function LobbyView() {
     setSearching(null);
   };
 
+  // Leave the game you're currently in (the host closes it; anyone else frees
+  // their seat), so you're free to start a new one. A 409 means it has already
+  // started — it can't be left, only finished.
+  const leaveCurrent = async () => {
+    if (!currentId) return;
+    try {
+      await leaveGame(currentId, tokensFor(currentId));
+    } catch {
+      // Already gone, or started and unleavable — either way stop tracking it.
+    }
+    clearCurrentGame(currentId);
+    void qc.invalidateQueries({ queryKey: ["me", "games"] });
+    void qc.invalidateQueries({ queryKey: ["game-live"] });
+  };
+
   return (
     <div className={s.page}>
       <div className={ui.toolbarTopRight}>
@@ -129,11 +163,33 @@ export default function LobbyView() {
 
       <h1 className={s.title}>Play</h1>
 
+      {currentId && (
+        <Panel className={s.box}>
+          <span className={ui.sectionLabel}>You're in a game</span>
+          <div className={s.quickRow}>
+            <span className={s.muted}>
+              You can only be in one game at a time. Resume it, or leave to start another.
+            </span>
+            <div className={s.quickButtons}>
+              <Button selected onClick={() => navigate(`/play/${currentId}`)}>
+                Resume
+              </Button>
+              <Button onClick={() => void leaveCurrent()}>Leave</Button>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       <Panel className={s.box}>
         <span className={ui.sectionLabel}>Host a game</span>
         <div className={s.quickRow}>
           <span className={s.muted}>Open a lobby room: pick the board, players and bots, invite friends, then start.</span>
-          <Button selected onClick={host}>
+          <Button
+            selected
+            disabled={!!currentId}
+            title={currentId ? "Leave your current game first" : undefined}
+            onClick={host}
+          >
             Create game
           </Button>
         </div>
@@ -152,10 +208,20 @@ export default function LobbyView() {
           <div className={s.quickRow}>
             <span className={s.muted}>Pair with players near your rating; bots fill the rest.</span>
             <div className={s.quickButtons}>
-              <Button selected onClick={() => startMatch(2)}>
+              <Button
+                selected
+                disabled={!!currentId}
+                title={currentId ? "Leave your current game first" : undefined}
+                onClick={() => startMatch(2)}
+              >
                 2 players
               </Button>
-              <Button selected onClick={() => startMatch(4)}>
+              <Button
+                selected
+                disabled={!!currentId}
+                title={currentId ? "Leave your current game first" : undefined}
+                onClick={() => startMatch(4)}
+              >
                 4 players
               </Button>
             </div>
@@ -170,7 +236,9 @@ export default function LobbyView() {
             No open games right now. Host one above and list it in the lobby for others to join.
           </span>
         ) : (
-          games.map((g) => <GameRow key={g.id} game={g} onJoin={join} />)
+          games.map((g) => (
+            <GameRow key={g.id} game={g} onJoin={join} disabled={!!currentId} />
+          ))
         )}
       </Panel>
 

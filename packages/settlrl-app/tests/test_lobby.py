@@ -90,8 +90,10 @@ def test_searchable_flag_requires_sign_in_and_surfaces_in_the_lobby(
     assert [g["id"] for g in lobby] == [doc["id"]]
     assert lobby[0]["searchable"] is True
 
-    # A listed-but-not-searchable game reports the flag off.
-    doc2 = _create(client, headers=auth, seed=2, claim="first", listed=True)
+    # A listed-but-not-searchable game reports the flag off (hosted by a second
+    # account — one account holds only one live game at a time).
+    auth2 = _bearer(_token(client, "owner2@example.com"))
+    doc2 = _create(client, headers=auth2, seed=2, claim="first", listed=True)
     off = next(g for g in client.get("/api/lobby").json() if g["id"] == doc2["id"])
     assert off["searchable"] is False
 

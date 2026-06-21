@@ -238,6 +238,13 @@ class GameHandle:
         """The seats this account owns in this game (for the user's game list)."""
         return sorted(s for s, uid in self.claim_users.items() if uid == user_id)
 
+    def release_seat(self, seat: int) -> None:
+        """Free a claimed human seat back to open — a participant leaving a lobby
+        before it starts."""
+        self.claims.pop(seat, None)
+        self.claim_users.pop(seat, None)
+        self.claim_names.pop(seat, None)
+
 
 class GameRegistry:
     """Id-addressed live games.
@@ -319,6 +326,29 @@ class GameRegistry:
         if handle is not None:
             handle.touch()
         return handle
+
+    def live_game_for_user(self, user_id: str) -> GameHandle | None:
+        """The one non-terminal game this account holds a seat in, or None — the
+        one-game-at-a-time guard. Returns the first found (a player is held to a
+        single live game, so at most one is expected)."""
+        for handle in self._games.values():
+            if not handle.session.terminal() and handle.seats_for_user(user_id):
+                return handle
+        return None
+
+    def remove(self, game_id: str) -> None:
+        """Drop a game and wake its SSE/driver waiters so they exit — a host
+        closing an unstarted lobby. Idempotent; the freed slot is reusable at
+        once. Mirrors eviction's teardown but is caller-driven."""
+        handle = self._games.pop(game_id, None)
+        if handle is None:
+            return
+        handle.closed = True
+        handle._wake()
+        if handle.journal is not None:
+            handle.journal.close()
+        if self._store is not None and not handle.session.terminal():
+            self._store.remove(game_id)
 
     def all_handles(self) -> list[GameHandle]:
         """A snapshot of the live handles (e.g. to start drivers after a

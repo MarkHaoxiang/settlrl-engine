@@ -74,6 +74,7 @@ def build(deps: Deps) -> APIRouter:
         their rating; anonymous callers match at a fresh player's rating."""
         if deps.matchmaker is None:
             raise HTTPException(status_code=503, detail="matchmaking is unavailable")
+        deps.guard_one_game(user)
         match = await deps.matchmaker.matchmake(req.n_players, req.ticket, uid(user))
         if match.result is not None:
             game_id, seat, token = match.result
