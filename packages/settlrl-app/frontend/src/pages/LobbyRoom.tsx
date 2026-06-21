@@ -1,10 +1,11 @@
-// The lobby room for one game (/lobby/:id): a full-page, three-column staging
-// area — Players (left), Map & settings (middle), Chat (right). The game already
-// exists, so the room renders the live board straight from the SSE snapshot and
-// the host's edits reconfigure it in place (every participant sees them). When
-// the table fills (every human seat claimed) everyone is sent into /play/:id.
+// The lobby room for one table (/lobby/:id): a full-page, three-column staging
+// area — Players (left), Map & settings (middle), Chat (right). A lobby holds
+// only configuration and claimed seats (no engine); the board is a preview from
+// the seed. The host edits it live (every participant sees it) and Starts only
+// once every seat is decided, at which point it materialises into a game and
+// everyone is sent into /play/:id.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import AccountMenu from "../components/AccountMenu";
 import BoardView from "../components/BoardView";
@@ -17,25 +18,22 @@ import { BotIcon, HumanIcon, MapIcon } from "../components/icons";
 import { authToken, currentUser, type AuthUser } from "../lib/auth";
 import { PLAYER_COLORS, playerName } from "../lib/boardData";
 import { cx } from "../lib/cx";
+import { fetchBots, type BotSpec, type LogEntry } from "../lib/game";
 import {
-  configureGame,
-  fetchBots,
-  joinGame,
-  leaveGame,
-  setSeat,
-  type BotSpec,
-  type GameConfig,
-  type NumberPlacement,
-  type PlayerCount,
-} from "../lib/game";
+  configureLobby,
+  joinLobby,
+  leaveLobby,
+  setLobbySeat,
+  startLobby,
+} from "../lib/lobby";
 import {
-  clearCurrentGame,
+  clearCurrentPlace,
   saveTokens,
-  setCurrentGame,
+  setCurrentPlace,
   tokensFor,
   type SeatTokens,
 } from "../lib/seats";
-import { useGame } from "../lib/useGame";
+import { useLobby } from "../lib/useLobby";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyRoom.module.css";
 
@@ -43,10 +41,10 @@ const botLabel = (kind: string, spec?: BotSpec) =>
   spec?.title ?? (kind === "mcts" ? "MCTS" : kind.charAt(0).toUpperCase() + kind.slice(1));
 
 export default function LobbyRoom() {
-  const { id: gameId } = useParams<{ id: string }>();
+  const { id: lobbyId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [tokens, setTokens] = useState<SeatTokens>(() => (gameId ? tokensFor(gameId) : {}));
+  const [tokens, setTokens] = useState<SeatTokens>(() => (lobbyId ? tokensFor(lobbyId) : {}));
   const [joinFailed, setJoinFailed] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -61,105 +59,109 @@ export default function LobbyRoom() {
   }, []);
 
   useEffect(() => {
-    if (gameId) setTokens(tokensFor(gameId));
+    if (lobbyId) setTokens(tokensFor(lobbyId));
     joining.current = false;
     setJoinFailed(false);
-  }, [gameId]);
+  }, [lobbyId]);
 
-  const { snapshot, error, chat } = useGame(gameId ?? null, tokens);
+  const { snapshot, error, chat } = useLobby(lobbyId ?? null, tokens);
 
-  // An invitee arriving with no seat takes the first free human seat (else
-  // spectates). Signed-in players already owning a seat here are skipped.
+  // An invitee arriving at an online table with no seat takes the first open one
+  // (else spectates). A hotseat has no open seats, so a visitor just spectates.
   useEffect(() => {
-    if (!gameId || joinFailed || joining.current || Object.keys(tokens).length > 0) return;
-    if (Object.keys(tokensFor(gameId)).length > 0) return;
-    if (authToken()) {
-      if (!snapshot) return;
-      if (snapshot.your_seats.length > 0) return;
-    }
+    if (!lobbyId || joinFailed || joining.current || Object.keys(tokens).length > 0) return;
+    if (Object.keys(tokensFor(lobbyId)).length > 0) return;
+    if (!snapshot || snapshot.mode !== "online" || snapshot.your_seats.length > 0) return;
+    if (snapshot.seats_claimed.length >= snapshot.n_players) return;
     joining.current = true;
-    joinGame(gameId).then(
+    joinLobby(lobbyId).then(
       (j) => {
-        saveTokens(gameId, { [j.seat]: j.token });
-        setCurrentGame(gameId);
+        saveTokens(lobbyId, j.tokens);
+        setCurrentPlace(lobbyId, "lobby");
         joining.current = false;
-        setTokens(tokensFor(gameId));
+        setTokens(tokensFor(lobbyId));
       },
       () => {
         joining.current = false;
         setJoinFailed(true);
       }
     );
-  }, [gameId, tokens, joinFailed, snapshot]);
+  }, [lobbyId, tokens, joinFailed, snapshot]);
 
-  const status = snapshot?.status;
-  const seatKinds = status?.seats ?? [];
-  const claimed = useMemo(() => new Set(snapshot?.seats_claimed ?? []), [snapshot]);
-  const humanSeats = seatKinds.flatMap((k, i) => (k === "human" ? [i] : []));
-  const waiting = !!status && !status.terminal && humanSeats.some((i) => !claimed.has(i));
-
-  // The table is full (or the game's over): play has begun — drop into it.
+  // Someone started the table: follow everyone into the game.
   useEffect(() => {
-    if (gameId && snapshot && !waiting) navigate(`/play/${gameId}`, { replace: true });
-  }, [gameId, snapshot, waiting, navigate]);
+    if (snapshot?.started_game_id) {
+      setCurrentPlace(snapshot.started_game_id, "game");
+      navigate(`/play/${snapshot.started_game_id}`, { replace: true });
+    }
+  }, [snapshot?.started_game_id, navigate]);
 
-  // The game vanished (the host closed the lobby, or it was evicted): the stream
-  // 404s — stop tracking it and bounce back to the lobby list.
+  // The lobby vanished (the host closed it, or it was evicted): stop tracking it
+  // and bounce back to the lobby list.
   useEffect(() => {
     if (error) {
-      clearCurrentGame(gameId ?? undefined);
+      clearCurrentPlace(lobbyId ?? undefined);
       navigate("/lobby", { replace: true });
     }
-  }, [error, gameId, navigate]);
+  }, [error, lobbyId, navigate]);
 
   if (error) return <div className={ui.overlayMsg}>{error}</div>;
-  if (!snapshot || !status || !gameId) return <div className={ui.overlayMsg}>Loading lobby…</div>;
+  if (!snapshot || !lobbyId) return <div className={ui.overlayMsg}>Loading lobby…</div>;
 
+  const { kinds, n_players: n, mode } = snapshot;
   const mySeats = snapshot.your_seats;
   const isHost = mySeats.includes(0);
-  const n = seatKinds.length as PlayerCount;
-  const placement = (snapshot.number_placement as NumberPlacement) ?? "random";
+  const isOnline = mode === "online";
+  const claimed = new Set(snapshot.seats_claimed);
+  const placement = snapshot.number_placement;
   const signedIn = !!authToken();
 
   const botNames = Object.keys(bots)
     .filter((b) => bots[b].counts.includes(n))
     .sort();
-  const defaultBot = botNames.includes("random") ? "random" : (botNames[0] ?? "random");
 
-  // Leave before the game starts: the host (seat 0) closes the whole lobby and
-  // everyone else is bounced; any other participant just frees their seat.
-  const leave = () =>
-    leaveGame(gameId, tokens).then(
-      () => {
-        clearCurrentGame(gameId);
-        navigate("/lobby");
-      },
-      (e) => setMsg(String(e))
-    );
-
-  const reconfigure = (cfg: GameConfig) =>
-    configureGame(gameId, tokens, cfg).catch((e) => setMsg(String(e)));
+  const reconfigure = (cfg: Parameters<typeof configureLobby>[2]) =>
+    configureLobby(lobbyId, tokens, cfg).catch((e) => setMsg(String(e)));
   const retarget = (seat: number, kind: string) =>
-    setSeat(gameId, tokens, seat, kind).catch((e) => setMsg(String(e)));
+    setLobbySeat(lobbyId, tokens, seat, kind).catch((e) => setMsg(String(e)));
 
   const seatLabel = (i: number): string =>
-    seatKinds[i] !== "human"
-      ? botLabel(seatKinds[i], bots[seatKinds[i]])
+    kinds[i] !== "human"
+      ? botLabel(kinds[i], bots[kinds[i]])
       : claimed.has(i)
         ? (snapshot.seat_names[i] ?? "Guest") + (mySeats.includes(i) ? " (you)" : "")
         : "open";
 
-  // Bot-fill every still-open human seat so a vs-bots game can start now; the
-  // table then becomes full and the redirect above carries everyone into play.
-  const startGame = () => {
-    for (const i of humanSeats) if (!claimed.has(i)) void retarget(i, defaultBot);
-  };
+  // Materialise the table into a game (host only; enabled once every seat is
+  // decided). The host jumps straight in; everyone else follows via the SSE.
+  const start = () =>
+    startLobby(lobbyId, tokens).then((res) => {
+      if ("game_id" in res) {
+        setCurrentPlace(res.game_id, "game");
+        navigate(`/play/${res.game_id}`, { replace: true });
+      } else {
+        setMsg(`Server busy — you're #${res.position} in line; starting soon.`);
+      }
+    }, (e) => setMsg(String(e)));
+
+  const leave = () =>
+    leaveLobby(lobbyId, tokens).then(() => {
+      clearCurrentPlace(lobbyId);
+      navigate("/lobby");
+    }, (e) => setMsg(String(e)));
 
   const copyInvite = () => {
     void navigator.clipboard.writeText(window.location.href);
     setLinkCopied(true);
     window.setTimeout(() => setLinkCopied(false), 1500);
   };
+
+  const log = snapshot.chat.map((c, i) => ({
+    id: i,
+    kind: "chat",
+    player: (c.player ?? null) as number | null,
+    text: String(c.text),
+  })) as unknown as LogEntry[];
 
   return (
     <div className={s.page}>
@@ -170,7 +172,7 @@ export default function LobbyRoom() {
       <Link to="/lobby" className={ui.backLink}>
         ‹ Lobby
       </Link>
-      <h1 className={s.title}>Lobby</h1>
+      <h1 className={s.title}>{isOnline ? "Online table" : "Local hotseat"}</h1>
 
       <div className={s.columns}>
         {/* Players */}
@@ -193,7 +195,7 @@ export default function LobbyRoom() {
             </div>
           )}
           <div className={s.seatList}>
-            {seatKinds.map((kind, i) => {
+            {kinds.map((kind, i) => {
               const human = kind === "human";
               const open = human && !claimed.has(i);
               return (
@@ -207,14 +209,12 @@ export default function LobbyRoom() {
                     <div className={s.seatControls}>
                       <button
                         className={cx(s.iconBtn, human && ui.selected)}
-                        title="Open this seat for a human player"
-                        aria-label="Open this seat for a human player"
+                        title={isOnline ? "Open this seat for a human player" : "Take this seat yourself"}
+                        aria-label="Human seat"
                         onClick={() => retarget(i, "human")}
                       >
                         <HumanIcon size={16} />
                       </button>
-                      {/* Only offer a bot when the server actually serves one; the
-                          icon opens the catalog overlay to pick which. */}
                       {botNames.length > 0 && (
                         <button
                           className={cx(s.iconBtn, !human && ui.selected)}
@@ -274,7 +274,7 @@ export default function LobbyRoom() {
                   className={s.vpInput}
                   min={3}
                   max={20}
-                  value={status.victory_points_to_win}
+                  value={snapshot.victory_points_to_win}
                   onChange={(e) => {
                     const v = Number(e.target.value);
                     if (Number.isFinite(v) && v >= 3) reconfigure({ victoryPointsToWin: Math.round(v) });
@@ -287,25 +287,25 @@ export default function LobbyRoom() {
           ) : (
             <div className={s.field}>
               <span className={s.dim}>
-                {n} players · {placement} map · first to {status.victory_points_to_win} VP
+                {n} players · {placement} map · first to {snapshot.victory_points_to_win} VP
               </span>
             </div>
           )}
 
-          {isHost && (
+          {isHost && isOnline && (
             <div className={s.flags}>
               <button
                 className={cx(s.flagBtn, snapshot.listed && ui.selected)}
                 disabled={!signedIn}
-                title={signedIn ? "Show this game in the public lobby" : "Sign in to list a game"}
+                title={signedIn ? "Show this table in the public list" : "Sign in to list a table"}
                 onClick={() => reconfigure({ listed: !snapshot.listed })}
               >
-                {snapshot.listed ? "Listed" : "List in lobby"}
+                {snapshot.listed ? "Listed" : "List publicly"}
               </button>
               <button
                 className={cx(s.flagBtn, snapshot.searchable && ui.selected)}
                 disabled={!signedIn}
-                title={signedIn ? "Open this game to Quick Match" : "Sign in to enable Quick Match"}
+                title={signedIn ? "Open this table to Quick Match" : "Sign in to enable Quick Match"}
                 onClick={() => reconfigure({ searchable: !snapshot.searchable })}
               >
                 {snapshot.searchable ? "Searchable" : "Open to Quick Match"}
@@ -314,35 +314,46 @@ export default function LobbyRoom() {
           )}
 
           <div className={s.actions}>
-            <Button onClick={copyInvite} title="Others join the open seats by opening this link">
-              {linkCopied ? "Copied!" : "🔗 Invite link"}
-            </Button>
+            {isOnline && (
+              <Button onClick={copyInvite} title="Others join the open seats by opening this link">
+                {linkCopied ? "Copied!" : "🔗 Invite link"}
+              </Button>
+            )}
             <Button
               onClick={() => void leave()}
               title={isHost ? "Close this lobby for everyone" : "Leave this lobby"}
             >
               {isHost ? "Close lobby" : "Leave"}
             </Button>
-            {isHost && botNames.length > 0 && (
-              <Button selected onClick={startGame} title="Fill open seats with bots and start">
+            {isHost && (
+              <Button
+                selected
+                disabled={!snapshot.ready}
+                onClick={() => void start()}
+                title={snapshot.ready ? "Start the game" : "Fill every open seat first"}
+              >
                 Start game
               </Button>
             )}
           </div>
           <span className={s.dim}>
-            {humanSeats.filter((i) => claimed.has(i)).length} / {humanSeats.length} seats filled —
-            {isHost ? " start now or wait for players to join." : " waiting for the host to start."}
+            {snapshot.seats_claimed.length} / {n} seats taken —
+            {snapshot.ready
+              ? " ready to start."
+              : isHost
+                ? " fill the open seats with players or bots."
+                : " waiting for the host to start."}
           </span>
         </Panel>
 
         {/* Chat */}
         <div className={s.chat}>
           <ChatPanel
-            entries={snapshot.log}
+            entries={log}
             onSend={(text) => chat(text, mySeats[0] ?? null)}
             players={snapshot.board.players}
             you={mySeats[0]}
-            identities={seatKinds.map((_, i) => seatLabel(i))}
+            identities={kinds.map((_, i) => seatLabel(i))}
           />
         </div>
       </div>
@@ -358,11 +369,11 @@ export default function LobbyRoom() {
             </div>
             <div className={s.pickerList}>
               {botNames.map((b) => {
-                const current = seatKinds[picker] === b;
+                const here = kinds[picker] === b;
                 return (
                   <button
                     key={b}
-                    className={cx(s.pickerItem, current && ui.selected)}
+                    className={cx(s.pickerItem, here && ui.selected)}
                     onClick={() => {
                       void retarget(picker, b);
                       setPicker(null);
@@ -371,7 +382,7 @@ export default function LobbyRoom() {
                     <BotIcon size={20} />
                     <span className={s.pickerName}>{botLabel(b, bots[b])}</span>
                     <span className={s.pickerDesc}>{bots[b]?.description}</span>
-                    {current && <span className={s.pickerCheck}>✓</span>}
+                    {here && <span className={s.pickerCheck}>✓</span>}
                   </button>
                 );
               })}

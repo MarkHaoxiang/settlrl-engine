@@ -32,7 +32,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       .catch(() => resp.statusText);
     throw new ApiError(resp.status, detail);
   }
-  return (await resp.json()) as T;
+  const text = await resp.text(); // tolerate an empty body (e.g. 204 No Content)
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 // Subscribe to a server-sent-event stream (fetch-based: EventSource can't

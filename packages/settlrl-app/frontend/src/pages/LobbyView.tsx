@@ -4,12 +4,18 @@ import AccountMenu from "../components/AccountMenu";
 import Button from "../components/Button";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
-import { useQueryClient } from "@tanstack/react-query";
 import { authToken, currentUser, type AuthUser } from "../lib/auth";
-import { HUMAN, leaveGame, matchmake, type NewGameConfig, type PlayerCount } from "../lib/game";
-import { useCreateGame } from "../lib/useCreateGame";
-import { useCurrentGame, useLobby, type LobbyGame } from "../lib/queries";
-import { clearCurrentGame, saveTokens, setCurrentGame, tokensFor } from "../lib/seats";
+import { matchmake, type PlayerCount } from "../lib/game";
+import { createLobby, leaveLobby, type LobbyMode } from "../lib/lobby";
+import { useLobbies, type LobbyListing } from "../lib/queries";
+import {
+  clearCurrentPlace,
+  currentPlace,
+  saveTokens,
+  setCurrentPlace,
+  tokensFor,
+  type CurrentPlace,
+} from "../lib/seats";
 import ui from "../styles/ui.module.css";
 import s from "./LobbyView.module.css";
 
@@ -23,32 +29,32 @@ const ago = (epoch: number): string => {
   return `${Math.round(mins / 60)}h ago`;
 };
 
-function GameRow({
-  game,
+function LobbyRow({
+  lobby,
   onJoin,
   disabled,
 }: {
-  game: LobbyGame;
+  lobby: LobbyListing;
   onJoin: (id: string) => void;
   disabled?: boolean;
 }) {
-  const seated = game.n_players - game.open_seats;
+  const seated = lobby.n_players - lobby.open_seats;
   return (
     <div className={s.row}>
       <div className={s.rowMain}>
         <span className={s.players}>
-          {game.n_players} players
-          {game.searchable && <span className={s.qmTag}>⚡ Quick Match</span>}
+          {lobby.n_players} players
+          {lobby.searchable && <span className={s.qmTag}>⚡ Quick Match</span>}
         </span>
         <span className={s.muted}>
-          {seated}/{game.n_players} seated · {game.number_placement} map · {ago(game.created_at)}
+          {seated}/{lobby.n_players} seated · {lobby.number_placement} map · {ago(lobby.created_at)}
         </span>
       </div>
       <Button
         selected
         disabled={disabled}
         title={disabled ? "Leave your current game first" : undefined}
-        onClick={() => onJoin(game.id)}
+        onClick={() => onJoin(lobby.id)}
       >
         Join
       </Button>
@@ -59,50 +65,38 @@ function GameRow({
 export default function LobbyView() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const navigate = useNavigate();
-  const games = useLobby().data ?? [];
-  const qc = useQueryClient();
-  // The one game you're already in (account or guest); you can only be in one at
-  // a time, so creating / matching / joining another is gated until you leave it.
-  const currentId = useCurrentGame(user);
+  const lobbies = useLobbies().data ?? [];
+  // The place you're already in (a lobby or a live game); you can only be in one
+  // at a time, so hosting / matching / joining another is gated until you leave.
+  const [current, setCurrent] = useState<CurrentPlace | null>(currentPlace());
+  const [error, setError] = useState<string | null>(null);
   // The active Quick Match search, if any (its player count + how many wait).
   const [searching, setSearching] = useState<{ n: PlayerCount; waiting: number } | null>(null);
   const ticket = useRef<string | undefined>(undefined);
   const timer = useRef<number | null>(null);
-  // Guards against a double-click starting a second poll loop: the two loops
-  // would each enqueue their own ticket and the matchmaker would pair this
-  // browser with itself, dropping it into a game where it holds every seat.
   const searchActive = useRef(false);
-  // Hosting opens a game straight away and drops the host into its lobby room
-  // (where the board, seats, VP and flags are all editable before it starts).
-  const { start: hostGame, queue, error: createError, cancel: abortCreate } = useCreateGame();
 
   useEffect(() => {
     void currentUser().then(setUser);
   }, []);
-  // Stop polling if the view unmounts mid-search.
   useEffect(() => () => void (timer.current !== null && window.clearTimeout(timer.current)), []);
 
-  // Joining is just a deep link: the lobby room claims the first free seat.
+  // Joining a listed lobby is a deep link; the lobby room claims a free seat.
   const join = (id: string) => navigate(`/lobby/${id}`);
 
-  // Host opens a table of open human seats and lands in its lobby room to set it
-  // up — invite people into the seats, or fill any with a bot there (from the
-  // server's live catalog; no bot kind is baked in here). Open seats keep the
-  // room up until the host fills them and starts.
-  const host = () => {
-    const config: NewGameConfig = {
-      seed: Math.floor(Math.random() * 65536),
-      nPlayers: 4,
-      numberPlacement: "random",
-      seats: [{ kind: HUMAN }, { kind: HUMAN }, { kind: HUMAN }, { kind: HUMAN }],
-      claim: "first",
-      listed: !!authToken(),
-      searchable: false,
-    };
-    hostGame(config);
+  // Open a lobby — a local hotseat (you drive every seat) or an online table
+  // (others join the open seats) — and land in its room to set it up and start.
+  const host = (mode: LobbyMode) => {
+    createLobby({ mode, listed: mode === "online" && !!authToken() }).then(
+      (res) => {
+        saveTokens(res.id, res.tokens);
+        setCurrentPlace(res.id, "lobby");
+        navigate(`/lobby/${res.id}`);
+      },
+      (e: unknown) => setError(`Could not open the lobby: ${String(e)}`)
+    );
   };
 
-  // Re-POST the ticket on an interval until a seat comes back, then drop into it.
   const poll = async (n: PlayerCount) => {
     try {
       const res = await matchmake(n, ticket.current);
@@ -113,7 +107,7 @@ export default function LobbyView() {
       } else {
         searchActive.current = false;
         saveTokens(res.id, { [res.seat]: res.token });
-        setCurrentGame(res.id);
+        setCurrentPlace(res.id, "game");
         navigate(`/play/${res.id}`);
       }
     } catch {
@@ -122,7 +116,7 @@ export default function LobbyView() {
     }
   };
   const startMatch = (n: PlayerCount) => {
-    if (searchActive.current) return; // a search is already running
+    if (searchActive.current) return;
     searchActive.current = true;
     ticket.current = undefined;
     setSearching({ n, waiting: 0 });
@@ -136,20 +130,20 @@ export default function LobbyView() {
     setSearching(null);
   };
 
-  // Leave the game you're currently in (the host closes it; anyone else frees
-  // their seat), so you're free to start a new one. A 409 means it has already
-  // started — it can't be left, only finished.
+  // Leave the lobby you're in so you're free to start another (a live game can't
+  // be abandoned — only resumed). The host closes it; anyone else frees a seat.
   const leaveCurrent = async () => {
-    if (!currentId) return;
+    if (!current || current.kind !== "lobby") return;
     try {
-      await leaveGame(currentId, tokensFor(currentId));
+      await leaveLobby(current.id, tokensFor(current.id));
     } catch {
-      // Already gone, or started and unleavable — either way stop tracking it.
+      // Already gone — either way stop tracking it.
     }
-    clearCurrentGame(currentId);
-    void qc.invalidateQueries({ queryKey: ["me", "games"] });
-    void qc.invalidateQueries({ queryKey: ["game-live"] });
+    clearCurrentPlace(current.id);
+    setCurrent(null);
   };
+
+  const gated = !!current;
 
   return (
     <div className={s.page}>
@@ -163,18 +157,26 @@ export default function LobbyView() {
 
       <h1 className={s.title}>Play</h1>
 
-      {currentId && (
+      {current && (
         <Panel className={s.box}>
-          <span className={ui.sectionLabel}>You're in a game</span>
+          <span className={ui.sectionLabel}>You're in a {current.kind === "lobby" ? "lobby" : "game"}</span>
           <div className={s.quickRow}>
             <span className={s.muted}>
-              You can only be in one game at a time. Resume it, or leave to start another.
+              You can only be in one at a time. Resume it
+              {current.kind === "lobby" ? ", or leave to start another." : "."}
             </span>
             <div className={s.quickButtons}>
-              <Button selected onClick={() => navigate(`/play/${currentId}`)}>
+              <Button
+                selected
+                onClick={() =>
+                  navigate(current.kind === "lobby" ? `/lobby/${current.id}` : `/play/${current.id}`)
+                }
+              >
                 Resume
               </Button>
-              <Button onClick={() => void leaveCurrent()}>Leave</Button>
+              {current.kind === "lobby" && (
+                <Button onClick={() => void leaveCurrent()}>Leave</Button>
+              )}
             </div>
           </div>
         </Panel>
@@ -183,15 +185,26 @@ export default function LobbyView() {
       <Panel className={s.box}>
         <span className={ui.sectionLabel}>Host a game</span>
         <div className={s.quickRow}>
-          <span className={s.muted}>Open a lobby room: pick the board, players and bots, invite friends, then start.</span>
-          <Button
-            selected
-            disabled={!!currentId}
-            title={currentId ? "Leave your current game first" : undefined}
-            onClick={host}
-          >
-            Create game
-          </Button>
+          <span className={s.muted}>
+            Local hotseat (pass-and-play on this device) or an online table others can join.
+          </span>
+          <div className={s.quickButtons}>
+            <Button
+              disabled={gated}
+              title={gated ? "Leave your current game first" : undefined}
+              onClick={() => host("hotseat")}
+            >
+              Local hotseat
+            </Button>
+            <Button
+              selected
+              disabled={gated}
+              title={gated ? "Leave your current game first" : undefined}
+              onClick={() => host("online")}
+            >
+              Online table
+            </Button>
+          </div>
         </div>
       </Panel>
 
@@ -210,16 +223,16 @@ export default function LobbyView() {
             <div className={s.quickButtons}>
               <Button
                 selected
-                disabled={!!currentId}
-                title={currentId ? "Leave your current game first" : undefined}
+                disabled={gated}
+                title={gated ? "Leave your current game first" : undefined}
                 onClick={() => startMatch(2)}
               >
                 2 players
               </Button>
               <Button
                 selected
-                disabled={!!currentId}
-                title={currentId ? "Leave your current game first" : undefined}
+                disabled={gated}
+                title={gated ? "Leave your current game first" : undefined}
                 onClick={() => startMatch(4)}
               >
                 4 players
@@ -230,28 +243,17 @@ export default function LobbyView() {
       </Panel>
 
       <Panel className={s.box}>
-        <span className={ui.sectionLabel}>Open games</span>
-        {games.length === 0 ? (
+        <span className={ui.sectionLabel}>Open tables</span>
+        {lobbies.length === 0 ? (
           <span className={s.empty}>
-            No open games right now. Host one above and list it in the lobby for others to join.
+            No open tables right now. Host one above and list it for others to join.
           </span>
         ) : (
-          games.map((g) => (
-            <GameRow key={g.id} game={g} onJoin={join} disabled={!!currentId} />
-          ))
+          lobbies.map((l) => <LobbyRow key={l.id} lobby={l} onJoin={join} disabled={gated} />)
         )}
       </Panel>
 
-      {createError && <div className={ui.overlayMsg}>{createError}</div>}
-      {queue && (
-        <div className={ui.overlayMsg}>
-          You're #{queue.position} of {queue.total} in line…
-          <div className={s.queueSub}>The server is busy; your game starts automatically.</div>
-          <Button variant="small" className={s.queueCancel} onClick={abortCreate}>
-            Cancel
-          </Button>
-        </div>
-      )}
+      {error && <div className={ui.overlayMsg}>{error}</div>}
     </div>
   );
 }

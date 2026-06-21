@@ -24,7 +24,7 @@ import {
 } from "../lib/game";
 import { deriveTransfers, tradeTransfer, type FlyToken } from "../lib/transfers";
 import { authToken } from "../lib/auth";
-import { clearCurrentGame, saveTokens, setCurrentGame, tokensFor, type SeatTokens } from "../lib/seats";
+import { clearCurrentPlace, saveTokens, setCurrentPlace, tokensFor, type SeatTokens } from "../lib/seats";
 import { PLAYER_COLORS, playerName, type DevCardKind, type ResourceKind } from "../lib/boardData";
 import { cubeEq, edgeEq, hexEq, type Hex } from "../lib/hex";
 import Button from "../components/Button";
@@ -133,8 +133,8 @@ export default function PlayView() {
   // guests): held while it's live and we hold a seat, forgotten once it ends.
   useEffect(() => {
     if (!gameId || !snapshot || mySeats.length === 0) return;
-    if (snapshot.status.terminal) clearCurrentGame(gameId);
-    else setCurrentGame(gameId);
+    if (snapshot.status.terminal) clearCurrentPlace(gameId);
+    else setCurrentPlace(gameId, "game");
   }, [gameId, snapshot, mySeats]);
 
   const actions = snapshot?.actions ?? [];
