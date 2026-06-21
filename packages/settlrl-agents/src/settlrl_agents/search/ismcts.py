@@ -96,7 +96,6 @@ class _Tree(NamedTuple):
     # steps + roll_ev, not the action-axis width, so this likely won't move it.
 
     mover: _NodeI
-    visits: _NodeF
     children: _EdgeI  # child node id per edge, -1 = unexpanded
     n: _EdgeF  # edge visit counts
     w: _EdgeF  # edge value sums (searcher frame)
@@ -107,11 +106,13 @@ class _Tree(NamedTuple):
 
 class _Descent(NamedTuple):
     """One simulation's forward walk; carried through the descent ``while_loop``.
-    ``exp_parent`` >= 0 marks the node a new leaf attaches to (the expansion)."""
+    ``exp_parent`` >= 0 marks the node a new leaf attaches to (the expansion). The
+    leaf is scored once *after* the loop (:func:`_evaluate`), so the only thing
+    carried for it is ``prev_state`` — the pre-step parent, needed to take a dice
+    edge's roll expectation from before the roll."""
 
     state: BoardState
-    legal: _LegalMask
-    leaf: Value  # searcher-frame value to back up
+    prev_state: BoardState  # the step's parent (for a roll leaf's _roll_ev)
     cur: _Node
     depth: IntScalar  # edges taken so far
     path_node: _PathI
@@ -119,7 +120,6 @@ class _Descent(NamedTuple):
     done: BoolScalar
     exp_parent: _Node
     exp_act: _Action
-    exp_mover: Player
 
 
 # --- Sequential Halving: the considered-visits schedule (static, baked) ---
@@ -168,10 +168,10 @@ def _completed_q(
     probs = jax.nn.softmax(logits)
     # mixed value: blend the node's raw value with its prior-weighted visited-Q.
     sum_n = n.sum()
-    safe = jnp.maximum(1e-37, probs)  # floor so a zero-prior visited action is finite
-    sum_probs = jnp.where(visited, safe, 0.0).sum()
+    floored_probs = jnp.maximum(1e-37, probs)  # floor a zero-prior visited action
+    sum_probs = jnp.where(visited, floored_probs, 0.0).sum()
     weighted_q = jnp.where(
-        visited, safe * q / jnp.where(sum_probs > 0, sum_probs, 1.0), 0.0
+        visited, floored_probs * q / jnp.where(sum_probs > 0, sum_probs, 1.0), 0.0
     ).sum()
     mixed = (raw + sum_n * weighted_q) / (sum_n + 1.0)
     completed = jnp.where(visited, q, mixed)
@@ -193,37 +193,48 @@ def _interior_select(
 
 def _root_select(
     tree: _Tree,
+    cfg: _Cfg,
     gumbel: _FlatVec,
-    sim_index: IntScalar,
     num_considered: IntScalar,
-    legal: _LegalMask,
+    candidates: _LegalMask,
+    world_legal: _LegalMask,
     player: Player,
-    table: _Table,
 ) -> _Action:
-    """The root action under Gumbel + Sequential Halving: among candidates at the
-    schedule's current visit count, the highest ``gumbel + prior + completed_Q``."""
-    cq, logits = _completed_q(tree, jnp.int32(0), legal, player)
+    """The root action for this simulation: the Sequential-Halving pick over the
+    fixed ``candidates`` set (the highest ``gumbel + prior + completed_Q`` among
+    candidates at the schedule's current visit count), guarded to this
+    determinization's ``world_legal``. A candidate can be illegal in some worlds
+    (e.g. steal targets), so fall back to interior selection when the pick is."""
+    sim_index = jnp.minimum(tree.n[0].sum().astype(jnp.int32), cfg.num_simulations - 1)
+    cq, logits = _completed_q(tree, jnp.int32(0), candidates, player)
     visits = tree.n[0]
-    considered_visit = table[num_considered, sim_index]
+    considered_visit = cfg.table[num_considered, sim_index]
     norm_logits = logits - jnp.max(logits)
     penalty = jnp.where(visits == considered_visit, 0.0, -jnp.inf)
     score = jnp.maximum(-1e9, gumbel + norm_logits + cq) + penalty
-    return jnp.argmax(jnp.where(legal > 0, score, -jnp.inf)).astype(jnp.int32)
+    a_root = jnp.argmax(jnp.where(candidates > 0, score, -jnp.inf)).astype(jnp.int32)
+    return jnp.where(
+        world_legal[a_root] > 0,
+        a_root,
+        _interior_select(tree, jnp.int32(0), world_legal, player),
+    )
 
 
 # --- expand + backup: grow the tree, then propagate the leaf value ---
 
 
-def _expand(tree: _Tree, walk: _Descent, leaf_prior: _PriorLogits) -> _Tree:
+def _expand(
+    tree: _Tree, walk: _Descent, value: Value, mover: Player, leaf_prior: _PriorLogits
+) -> _Tree:
     """Attach the descent's new leaf node — its mover, prior, and value — at the
     next free slot (a no-op when the simulation grew no node)."""
     grew = walk.exp_parent >= 0
     new_id = tree.size  # always <= n_nodes - 1 (<=1 node added per sim)
     safe_parent = jnp.maximum(walk.exp_parent, 0)
     return tree._replace(
-        mover=tree.mover.at[new_id].set(jnp.where(grew, walk.exp_mover, tree.mover[new_id])),
+        mover=tree.mover.at[new_id].set(jnp.where(grew, mover, tree.mover[new_id])),
         prior=tree.prior.at[new_id].set(jnp.where(grew, leaf_prior, tree.prior[new_id])),
-        raw=tree.raw.at[new_id].set(jnp.where(grew, walk.leaf, tree.raw[new_id])),
+        raw=tree.raw.at[new_id].set(jnp.where(grew, value, tree.raw[new_id])),
         children=tree.children.at[safe_parent, walk.exp_act].set(
             jnp.where(grew, new_id, tree.children[safe_parent, walk.exp_act])
         ),
@@ -231,16 +242,15 @@ def _expand(tree: _Tree, walk: _Descent, leaf_prior: _PriorLogits) -> _Tree:
     )  # fmt: skip
 
 
-def _backup(tree: _Tree, walk: _Descent, max_depth: int) -> _Tree:
+def _backup(tree: _Tree, walk: _Descent, value: Value, max_depth: int) -> _Tree:
     """Add the descent's leaf value and a visit to every edge on its path."""
 
     def body(j: IntScalar, tree: _Tree) -> _Tree:
         node, act = walk.path_node[j], walk.path_act[j]
         use = (j < walk.depth).astype(jnp.float32)  # past the real depth -> no-op
         return tree._replace(
-            visits=tree.visits.at[node].add(use),
             n=tree.n.at[node, act].add(use),
-            w=tree.w.at[node, act].add(use * walk.leaf),
+            w=tree.w.at[node, act].add(use * value),
         )
 
     return cast(_Tree, jax.lax.fori_loop(0, max_depth, body, tree))
@@ -266,22 +276,24 @@ class _Cfg(NamedTuple):
 # --- engine interface: facts about one determinized state ---
 
 
-def _facts(
-    cfg: _Cfg, layout: BoardLayout, state: BoardState, player: Player
-) -> tuple[_LegalMask, Player, BoolScalar, Value]:
-    legal = flat_available_for(layout, state).astype(jnp.float32)
-    term = current_player_won(state)
+def _legal_mask(layout: BoardLayout, state: BoardState) -> _LegalMask:
+    return flat_available_for(layout, state).astype(jnp.float32)
+
+
+def _value(cfg: _Cfg, layout: BoardLayout, state: BoardState, player: Player) -> Value:
+    """Searcher-frame value of a state: ±1 once the mover has won, else the
+    tanh-squashed value function."""
+    terminal = current_player_won(state)
     win = state.current_player.astype(jnp.int32) == player
-    v = jnp.tanh(cfg.value(layout, state, player) / cfg.value_scale)
-    leaf = jnp.where(term, jnp.where(win, 1.0, -1.0), v)
-    return legal, agent_selection_single(state).astype(jnp.int32), term, leaf
+    eval_value = jnp.tanh(cfg.value(layout, state, player) / cfg.value_scale)
+    return jnp.where(terminal, jnp.where(win, 1.0, -1.0), eval_value)
 
 
 def _step(layout: BoardLayout, state: BoardState, action: _Action) -> BoardState:
     atype, aparams = flat_to_action(action)
     avail = action_available(layout, state, atype, aparams)
-    nxt, _ = apply_action(layout, state, atype, aparams, avail)
-    return nxt
+    next_state, _ = apply_action(layout, state, atype, aparams, avail)
+    return next_state
 
 
 def _interior_logits(
@@ -317,19 +329,16 @@ def _determinize(
     # DETERMINIZE: sample a world consistent with the belief, and seed the walk
     # over it at the root (depth 0, node 0, nothing expanded yet).
     state = sample_world(key, view, player)
-    legal, _, term, leaf = _facts(cfg, layout, state, player)
     return _Descent(
         state=state,
-        legal=legal,
-        leaf=leaf,
+        prev_state=state,
         cur=jnp.int32(0),
         depth=jnp.int32(0),
         path_node=jnp.zeros((cfg.max_depth,), jnp.int32),
         path_act=jnp.zeros((cfg.max_depth,), jnp.int32),
-        done=term | (legal.sum() == 0),
+        done=current_player_won(state),
         exp_parent=jnp.int32(-1),
         exp_act=jnp.int32(0),
-        exp_mover=jnp.int32(0),
     )
 
 
@@ -342,43 +351,56 @@ def _descend(
     player: Player,
 ) -> _Descent:
     # SELECT: from the root, follow already-expanded edges (root action by
-    # Sequential Halving, interior by the improved-policy rule) until an
-    # unexpanded edge or a terminal/dead end. The leaf state is EVALUATED as it is
-    # reached (there is no rollout — `_facts`/`_roll_ev` give the leaf value
-    # carried in `_Descent.leaf`).
+    # Sequential Halving, interior by the improved-policy rule) until an unexpanded
+    # edge or a terminal state. No value function runs in the loop — the leaf is
+    # scored once after it by `_evaluate`; the body does only the cheap terminal
+    # test needed to stop.
     def cond(walk: _Descent) -> BoolScalar:
         return (~walk.done) & (walk.depth < cfg.max_depth)
 
     def body(walk: _Descent) -> _Descent:
         # `tree` is read-only here; the current node is non-terminal with a legal
         # action.
-        cur0 = walk.cur
-        at_root = (cur0 == 0) & (walk.depth == 0)
-        a = jnp.where(at_root, a_root, _interior_select(tree, cur0, walk.legal, player))
-        nstate = _step(layout, walk.state, a)
-        legal2, mover2, term2, leaf2 = _facts(cfg, layout, nstate, player)
-        is_leaf = tree.children[cur0, a] < 0  # unexpanded edge -> stop here
-        # A dice edge's value is the expectation over the 11 rolls.
-        leaf2 = jax.lax.cond(
-            (ROW_TYPE[a] == _ROLL_T) & ~term2,
-            lambda: _roll_ev(cfg, layout, walk.state, player),
-            lambda: leaf2,
+        legal = _legal_mask(layout, walk.state)
+        at_root = (walk.cur == 0) & (walk.depth == 0)
+        action = jnp.where(
+            at_root, a_root, _interior_select(tree, walk.cur, legal, player)
         )
+        next_state = _step(layout, walk.state, action)
+        is_leaf = tree.children[walk.cur, action] < 0  # unexpanded edge -> stop here
         return _Descent(
-            state=nstate,
-            legal=legal2,
-            leaf=leaf2,
-            cur=jnp.where(is_leaf, cur0, tree.children[cur0, a]),
+            state=next_state,
+            prev_state=walk.state,
+            cur=jnp.where(is_leaf, walk.cur, tree.children[walk.cur, action]),
             depth=walk.depth + 1,
-            path_node=walk.path_node.at[walk.depth].set(cur0),
-            path_act=walk.path_act.at[walk.depth].set(a),
-            done=is_leaf | term2 | (legal2.sum() == 0),
-            exp_parent=jnp.where(is_leaf, cur0, jnp.int32(-1)),
-            exp_act=jnp.where(is_leaf, a, jnp.int32(0)),
-            exp_mover=jnp.where(is_leaf, mover2, jnp.int32(0)),
+            path_node=walk.path_node.at[walk.depth].set(walk.cur),
+            path_act=walk.path_act.at[walk.depth].set(action),
+            done=is_leaf | current_player_won(next_state),
+            exp_parent=jnp.where(is_leaf, walk.cur, jnp.int32(-1)),
+            exp_act=jnp.where(is_leaf, action, jnp.int32(0)),
         )
 
     return jax.lax.while_loop(cond, body, walk)
+
+
+def _evaluate(
+    cfg: _Cfg, layout: BoardLayout, walk: _Descent, player: Player
+) -> tuple[Value, Player]:
+    # EVALUATE: score the descent's leaf once, here, rather than on every step.
+    # When the edge into the leaf was a (non-winning) dice roll, the value is the
+    # roll expectation taken from the pre-roll parent (`prev_state`); any other
+    # leaf takes the plain state value. Keying off the last path action (not just a
+    # grown edge) matches a `max_depth` truncation that lands on a roll edge. Also
+    # returns the leaf's mover, stored on the new node for the backup frame.
+    leaf = walk.state
+    last_action = walk.path_act[walk.depth - 1]  # edge into the leaf
+    roll_leaf = (walk.depth > 0) & (ROW_TYPE[last_action] == _ROLL_T)
+    value = jnp.where(
+        roll_leaf & ~current_player_won(leaf),
+        _roll_ev(cfg, layout, walk.prev_state, player),
+        _value(cfg, layout, leaf, player),
+    )
+    return value, agent_selection_single(leaf).astype(jnp.int32)
 
 
 # --- the search: one re-determinizing tree, built over the engine ---
@@ -399,20 +421,19 @@ def _run(
     # Root mover is the searcher and its legal set is invariant to the hidden state
     # (its own move), so `mask` fixes the candidate set for halving; one
     # determinization gives the searcher-frame root value for the Q mix.
-    r_legal = mask.astype(jnp.float32)
-    _, _, _, r_leaf = _facts(cfg, layout, sample_world(keys[0], view, player), player)
+    root_legal = mask.astype(jnp.float32)
+    root_value = _value(cfg, layout, sample_world(keys[0], view, player), player)
     gumbel = jax.random.gumbel(k_gumbel, (N_FLAT,))
     num_considered = jnp.minimum(
-        cfg.max_considered, (r_legal > 0).sum().astype(jnp.int32)
+        cfg.max_considered, (root_legal > 0).sum().astype(jnp.int32)
     )
     tree = _Tree(
         mover=jnp.zeros((cfg.n_nodes,), jnp.int32).at[0].set(player),
-        visits=jnp.zeros((cfg.n_nodes,), jnp.float32),
         children=-jnp.ones((cfg.n_nodes, N_FLAT), jnp.int32),
         n=jnp.zeros((cfg.n_nodes, N_FLAT), jnp.float32),
         w=jnp.zeros((cfg.n_nodes, N_FLAT), jnp.float32),
         prior=jnp.zeros((cfg.n_nodes, N_FLAT), jnp.float32).at[0].set(root_logits),
-        raw=jnp.zeros((cfg.n_nodes,), jnp.float32).at[0].set(r_leaf),
+        raw=jnp.zeros((cfg.n_nodes,), jnp.float32).at[0].set(root_value),
         size=jnp.int32(1),
     )
 
@@ -420,35 +441,30 @@ def _run(
         # DETERMINIZE: sample a world and seed the root descent over it.
         walk = _determinize(cfg, keys[s + 1], layout, view, player)
 
-        # SELECT (root): the Sequential-Halving action, guarded to this world's
-        # legality (the candidate set is hidden-state-invariant except for e.g.
-        # steal targets — fall back to interior selection there).
-        sim_index = jnp.minimum(
-            tree.n[0].sum().astype(jnp.int32), cfg.num_simulations - 1
-        )
+        # SELECT (root): the Sequential-Halving action for this simulation.
+        world_legal = _legal_mask(layout, walk.state)
         a_root = _root_select(
-            tree, gumbel, sim_index, num_considered, r_legal, player, cfg.table
-        )
-        a_root = jnp.where(
-            walk.legal[a_root] > 0,
-            a_root,
-            _interior_select(tree, jnp.int32(0), walk.legal, player),
+            tree, cfg, gumbel, num_considered, root_legal, world_legal, player
         )
 
-        # SELECT (descend) + EVALUATE: walk to an unexpanded leaf and score it.
+        # SELECT (descend): walk to an unexpanded leaf (no value work in the loop).
         walk = _descend(cfg, tree, a_root, walk, layout, player)
+
+        # EVALUATE: score the leaf once, here, not per descent step.
+        value, mover = _evaluate(cfg, layout, walk, player)
 
         # EXPAND: attach the new leaf node (its interior prior is a forward on the
         # leaf state; a no-op when the descent grew no node).
-        tree = _expand(tree, walk, _interior_logits(cfg, layout, walk.state, player))
+        leaf_prior = _interior_logits(cfg, layout, walk.state, player)
+        tree = _expand(tree, walk, value, mover, leaf_prior)
 
         # BACKUP: add the leaf value to every edge on the path.
-        return _backup(tree, walk, cfg.max_depth)
+        return _backup(tree, walk, value, cfg.max_depth)
 
     tree = cast(_Tree, jax.lax.fori_loop(0, cfg.num_simulations, simulate, tree))
     # action_weights = softmax(root_logits + completed_Q) over the legal set.
-    cq, logits_l = _completed_q(tree, jnp.int32(0), r_legal, player)
-    return jax.nn.softmax(logits_l + cq)
+    cq, legal_logits = _completed_q(tree, jnp.int32(0), root_legal, player)
+    return jax.nn.softmax(legal_logits + cq)
 
 
 # --- factory ---
