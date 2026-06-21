@@ -67,7 +67,8 @@ PlayerMaskVec = Bool[Array, "players"]
 PlayerU8Vec = UInt8[Array, "players"]  # one game's row of a (batch, players) array
 TradeCountsVec = UInt8[Array, f"resources={N_RESOURCES}"]
 U8Scalar = UInt8[Array, ""]  # a single uint8 state field (one game's GameScalarArray)
-IntScalar = Int[Array, ""]  # a single int index / count (player, vertex, roll, ...)
+IntScalar = Int[Array, ""]  # a single int index / count (vertex, roll, ...)
+Player = IntScalar  # a seat index
 BoolScalar = Bool[Array, ""]  # a single legality / flag
 KeyScalar = Key[Array, ""]  # a single PRNG key
 

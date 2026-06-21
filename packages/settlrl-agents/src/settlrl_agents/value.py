@@ -20,7 +20,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_engine.board.state import BoardState, BoolScalar, IntScalar
+from settlrl_engine.board.state import BoardState, BoolScalar, Player
 
 from settlrl_agents.internal.feature_engineering import BoardFeatures, board_features
 
@@ -37,7 +37,7 @@ class ValueFunction(Protocol):
     """
 
     def __call__(
-        self, layout: BoardLayout, state: BoardState, player: IntScalar
+        self, layout: BoardLayout, state: BoardState, player: Player
     ) -> Value: ...
 
 
@@ -74,7 +74,7 @@ def make_heuristic(
     """
 
     def strength(
-        layout: BoardLayout, state: BoardState, p: IntScalar, exact_dev: BoolScalar
+        layout: BoardLayout, state: BoardState, p: Player, exact_dev: BoolScalar
     ) -> Value:
         f = board_features(layout, state, p, exact_dev)
         return (
@@ -101,7 +101,7 @@ def make_heuristic(
             + w_army_lead * f.army_lead
         )
 
-    def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+    def value(layout: BoardLayout, state: BoardState, player: Player) -> Value:
         players = jnp.arange(state.n_players)
         strengths = jax.vmap(lambda q: strength(layout, state, q, q == player))(players)
         mine = strengths[player]
@@ -129,7 +129,7 @@ def make_linear(weights: Mapping[str, float]) -> ValueFunction:
     coefs = tuple(float(weights[n]) for n in names)
 
     def strength(
-        layout: BoardLayout, state: BoardState, p: IntScalar, exact_dev: BoolScalar
+        layout: BoardLayout, state: BoardState, p: Player, exact_dev: BoolScalar
     ) -> Value:
         f = board_features(layout, state, p, exact_dev)
         out: Value = sum(
@@ -138,7 +138,7 @@ def make_linear(weights: Mapping[str, float]) -> ValueFunction:
         )
         return out
 
-    def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+    def value(layout: BoardLayout, state: BoardState, player: Player) -> Value:
         players = jnp.arange(state.n_players)
         strengths = jax.vmap(lambda q: strength(layout, state, q, q == player))(players)
         mine = strengths[player]
@@ -173,7 +173,7 @@ TUNED_WEIGHTS: dict[int, dict[str, float]] = {
 _TUNED = {n: make_linear(w) for n, w in TUNED_WEIGHTS.items()}
 
 
-def tuned_value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
+def tuned_value(layout: BoardLayout, state: BoardState, player: Player) -> Value:
     """The count-tuned value: ``TUNED_WEIGHTS`` picked by the (static) seated
     player count — 3p uses the 4p weights. Not the default ``heuristic_value``;
     select it explicitly (e.g. ``"value": "tuned"`` in a bench spec)."""

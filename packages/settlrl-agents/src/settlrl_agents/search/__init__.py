@@ -1,19 +1,9 @@
 """The search over the engine: re-determinizing Single-Observer ISMCTS.
 
-A custom fixed-capacity tree (:mod:`search.ismcts`) whose every simulation draws
-a fresh ``sample_world`` determinization and descends forward under it, filtering
-legality per simulation, so a node's backed-up value integrates over the belief
-(the ISMCTS fix for the determinized-searcher strategy fusion a frozen-world PIMC
-suffers). The immediate dice roll is valued by its exact 11-roll expectation at
-the leaf; deeper chance is integrated by the per-simulation resampling — so
-explicit chance nodes buy nothing here. ``num_simulations=0`` collapses the tree
-to its root: a one-step value sweep (the *lookahead* special case), which is also
-the only configuration that offers trades.
-
-This module is the public wrapper: it assembles the root prior (the value sweep,
-a learned ``prior``, or trade-scored proposals), runs the lookahead special case,
-and averages ``num_trees`` independent trees; :func:`make_tree` is the search
-itself.
+The public wrapper around :func:`make_tree`: it assembles the root prior (the
+one-step value sweep, a learned ``prior``, or trade-scored proposals), runs the
+``num_simulations=0`` *lookahead* special case (the bare root sweep, the only
+configuration that offers trades), and averages ``num_trees`` independent trees.
 """
 
 from __future__ import annotations
@@ -23,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_engine.board.state import BoardState, IntScalar, KeyScalar
+from settlrl_engine.board.state import BoardState, KeyScalar, Player
 from settlrl_engine.env import N_FLAT
 from settlrl_engine.mechanics.action import (
     ActionParams,
@@ -79,20 +69,12 @@ def make_search_weights(
     """Re-determinizing SO-ISMCTS, returning the improved-policy weights (the
     AlphaZero policy target; :func:`make_search` argmaxes these).
 
-    Each of ``num_trees`` independent trees (averaged for variance reduction)
-    re-determinizes once per simulation, so leaf values integrate over the
-    belief. ``value`` drives the leaf (``tanh(value / value_scale)``, commensurate
-    with the +/-1 terminal reward) and, when ``prior`` is None, the root prior
-    (one-step sweep over ``prior_scale``); interior nodes take a static tier
-    table. A ``prior`` replaces both the root and interior priors with learned
-    logits (legality-masked here).
-
-    ``num_simulations=0`` is the *lookahead* special case: no tree, the root
-    one-step value sweep over ``num_trees`` sampled worlds. ``propose_rate`` > 0
-    (the search never offers trades by default) lets the root score trade
-    proposals by their accepted outcome under a partner model — gated
-    geometrically per move, ``trade_penalty`` the quality bar below which an offer
-    loses to not trading; offers are root-only.
+    ``value`` drives the leaf and, when ``prior`` is None, the root one-step
+    sweep; a ``prior`` replaces both the root and interior priors with learned
+    logits. ``num_trees`` independent trees are averaged. ``num_simulations=0`` is
+    the *lookahead* special case (the bare root sweep). ``propose_rate`` > 0 lets
+    the root offer trades, scored by their accepted outcome under a partner model
+    minus ``trade_penalty``; offers are root-only.
     """
     tree = make_tree(
         value,
@@ -107,7 +89,7 @@ def make_search_weights(
         key: KeyScalar,
         layout: BoardLayout,
         world: BoardState,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> _Weights:
         """The root prior over one concrete world: the one-step value sweep
@@ -142,7 +124,7 @@ def make_search_weights(
         key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> _Weights:
         """Improved-policy weights from one re-determinizing ISMCTS tree."""
@@ -159,7 +141,7 @@ def make_search_weights(
         key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> _Weights:
         """The root one-step sweep over one sampled world (num_simulations=0)."""
@@ -173,7 +155,7 @@ def make_search_weights(
         key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> _Weights:
         leaf = lookahead if num_simulations == 0 else search_tree
@@ -218,7 +200,7 @@ def make_search(
         key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> FlatAction:
         noise = jax.random.uniform(key, (N_FLAT,)) * 1e-4

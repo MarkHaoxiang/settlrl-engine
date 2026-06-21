@@ -36,7 +36,7 @@ from settlrl_engine.board.state import (
     SETTLEMENT,
     BoardState,
     BoolScalar,
-    IntScalar,
+    Player,
 )
 from settlrl_engine.env import Observation
 
@@ -147,7 +147,7 @@ class BoardFeatures(NamedTuple):
 
 
 def board_features(
-    layout: BoardLayout, state: BoardState, p: IntScalar, exact_dev: BoolScalar
+    layout: BoardLayout, state: BoardState, p: Player, exact_dev: BoolScalar
 ) -> BoardFeatures:
     """Every :class:`BoardFeatures` term for player ``p`` (one fused pass —
     the terms share their intermediates)."""

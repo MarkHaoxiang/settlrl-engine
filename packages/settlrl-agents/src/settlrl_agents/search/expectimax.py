@@ -33,7 +33,7 @@ import numpy as np
 from jaxtyping import Array, Float
 from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_engine.board.state import BoardState, IntScalar, KeyScalar
+from settlrl_engine.board.state import BoardState, KeyScalar, Player
 from settlrl_engine.mechanics.action import ActionType, action_available, apply_action
 from settlrl_engine.mechanics.common import agent_selection_single
 
@@ -88,9 +88,7 @@ def make_setup_search(
         ``(n,)`` movers of the frontier (parents)."""
         movers = jax.vmap(lambda s: agent_selection_single(s).astype(jnp.int32))(states)
 
-        def node(
-            state: BoardState, mover: IntScalar
-        ) -> tuple[BoardState, Array, Array]:
+        def node(state: BoardState, mover: Player) -> tuple[BoardState, Array, Array]:
             avail = jax.vmap(
                 lambda t, prm: action_available(layout, state, t, prm)
             )(_SETUP_TYPE, _SETUP_PARAMS)  # fmt: skip
@@ -113,7 +111,7 @@ def make_setup_search(
         key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> FlatAction:
         me = player.astype(jnp.int32)

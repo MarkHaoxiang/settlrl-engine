@@ -22,7 +22,7 @@ import numpy as np
 from jaxtyping import Array, Bool, Float, Int
 from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_engine.board.state import BoardState, IntScalar, KeyScalar
+from settlrl_engine.board.state import BoardState, KeyScalar, Player
 from settlrl_engine.env import N_FLAT, Observation
 
 FlatMask = Bool[Array, f"flat={N_FLAT}"]
@@ -67,7 +67,7 @@ class PolicyPrior(Protocol):
     """
 
     def __call__(
-        self, layout: BoardLayout, state: BoardState, player: IntScalar
+        self, layout: BoardLayout, state: BoardState, player: Player
     ) -> Float[Array, f"flat={N_FLAT}"]: ...
 
 
@@ -86,7 +86,7 @@ class BeliefPolicy(Protocol):
         key: KeyScalar,
         layout: BoardLayout,
         view: BeliefView,
-        player: IntScalar,
+        player: Player,
         mask: FlatMask,
     ) -> FlatAction: ...
 

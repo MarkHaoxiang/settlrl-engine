@@ -163,107 +163,71 @@ hook — render's conftest never checked engine types, so an int32 slipped by).
 
 `make_search` / `make_search_weights` (`search/__init__.py`) are the
 re-determinizing **Single-Observer ISMCTS**: a custom fixed-capacity tree
-(`search/ismcts.py`, `make_tree`) whose every simulation draws a fresh
-`sample_world` determinization and descends *forward* under it, filtering
-legality per simulation. `make_search` argmaxes the improved policy;
-`make_search_weights` returns the distribution (the AlphaZero policy target —
-experiment 0004). It replaced a former `mcts`/`smcts`/`ismcts`/`lookahead`
-quartet (2026-06-17) and then the `mctx` engine that backed it (2026-06-19,
-commit 742b94b — `make_search` *is* the custom tree now); shared frame/prior/
-dice constants live in `search/_common.py`, the trade/lookahead/`num_trees`
-wrapper in `__init__.py`, and the tree in `ismcts.py`.
+(`search/ismcts.py`, `make_tree`) that determinizes a fresh `sample_world` per
+simulation and descends the live engine, filtering legality per simulation — the
+half mctx's fixed action axis could not express (Cowling 2012; the Canopy custom
+tree). Selection is mctx's Gumbel-MuZero ported onto it (no `mctx` dependency).
+`make_search` argmaxes the improved policy; `make_search_weights` returns the
+distribution (the AlphaZero policy target — experiment 0004). Shared prior/dice
+constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
+`__init__.py`, the tree in `ismcts.py`. It replaced a former
+`mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine
+behind it (2026-06-19, 742b94b). ~5–6 ms/move (B=1 CPU; was 7.4 with mctx).
 
-**The tree (`ismcts.py`).** One XLA program over a fixed-capacity `_Arena`
-(node/edge arrays sized to `num_simulations + 1`), so the whole search stays on
-device and `vmap`s over lanes. Each simulation determinizes once and descends a
-`while_loop`, stepping the engine so legality at every node comes from
-`flat_available_for` on the live determinized state — **true per-simulation
-legality, no no-op edges** (the half mctx's fixed action axis could not express;
-Cowling 2012 / the Canopy custom tree). The loop stops at the first unexpanded
-edge / terminal, so a simulation pays only its own depth of engine steps.
-Selection is **mctx's Gumbel-MuZero, ported onto this tree**: Gumbel + Sequential
-Halving at the root (considered-visits schedule replicated in numpy — no `mctx`
-dependency), deterministic interior selection tracking `softmax(prior +
-completed_Q)`, and the mixed-value completed-Q transform (unvisited →
-prior-weighted blend of the node value and its children's Q, scaled
-`(maxvisit_init + max_visits)·mix_scale`), all over *this* determinization's
-legal set. The caller (`make_search`) assembles the **root prior logits** — the
-raw one-step value sweep, a learned `prior`, or trade-scored proposals — and
-passes them in; the interior prior is the learned `prior` if given, else greedy's
-tier table. `action_weights = softmax(root_logits + completed_Q)` is the policy
-target; the move is its masked argmax. The immediate dice roll is valued by its
-exact 11-roll expectation at the leaf (`ROLL_DICE` children); deeper chance is
-integrated by the per-simulation resampling. ~5–6 ms/move (B=1 CPU), faster than
-the retired mctx search (5.8 vs 7.4 ms); ≤1 node added per simulation so `size`
-never overflows. `num_trees` averages independent such trees.
+**The leaf is the ceiling.** The binding constraint is the stationary heuristic
+leaf, not search machinery: win rate vs lookahead does *not* climb with sims (64
+*loses*), so the lever is the leaf (experiment 0003 / settlrl-learn) and prior
+agents all tied at ~parity — the cleanest one won. The merges, each a falsified
+strength lever:
+- `smcts`'s explicit dice/dev chance nodes (49.3% h2h, ~2× wall-clock; dev node
+  50.5% n=210; 64→128 sims 53.3%→49.5%). Roll-EV leaves + per-simulation
+  resampling subsume them.
+- `mcts` (frozen-world): per-simulation determinization is its principled
+  superset, *parity not a win* at 3p (0.352 ± 0.031, n=244; 64 worlds 0.307 —
+  more doesn't help; ~ties at 2p where the belief is ~exact).
+- the **mctx engine**: its fixed action axis no-oped illegal path-actions; the
+  custom tree reaches the same strength with true per-sim legality and faster.
 
-**Strength: parity with the retired mctx search, ~0.55–0.58 vs lookahead** (2p
-seat-swapped, n≥220 GPU; head-to-head vs old mctx held 0.49–0.52 across 16/32/64
-sims, ±0.03 — not a single-budget fluke). The decisive bug in the first cut of
-the port was the root prior: a tanh+tier *compression* flattened the policy to
-near-uniform (0.184 vs lookahead); the raw value sweep (`values / prior_scale`,
-±20 spread) restored it (commits 928f370 / 742b94b). Contracts in
-`tests/test_ismcts.py` (legal move across setup/mid/late + 4p, legal-supported
-distribution, reproducibility, concentration above uniform, no-legal fallback,
-game completion).
+**Strength: ~0.55–0.58 vs lookahead** (2p seat-swapped, n≥220 GPU; h2h vs old
+mctx 0.49–0.52 across 16/32/64 sims). Contracts in `tests/test_ismcts.py`.
 
-**Why one search (the merges).** The binding constraint is the stationary
-heuristic leaf, not search machinery, so prior agents tied at ~parity and the
-*principled* one wins on cleanliness — the lever stays the leaf (experiment 0003
-/ settlrl-learn), and win rate vs lookahead does **not** climb with sims:
-- `smcts`'s explicit dice/dev chance nodes were **falsified as a strength
-  lever** (56.7% vs lookahead pooled n=319, 49.3% h2h, ~2× wall-clock; dev
-  chance node strength-neutral 50.5% n=210; 64→128 sims 53.3%→49.5%). Roll-EV
-  leaves + per-simulation resampling subsume their purpose — dropped, not ported.
-- `mcts` (frozen-world) re-determinizes nothing; per-simulation determinization
-  is its principled superset (*parity, not a win* at 3p: 0.352 ± 0.031, n=244,
-  32 sims; 64 worlds 0.307 — more worlds doesn't help; ~ties at 2p where the
-  belief is ~exact). Cost: one `sample_world` (~0.05 ms) + the leaf's own depth
-  of engine steps per simulation.
-- the **mctx engine** itself: the re-determinizing Gumbel-MuZero ran on mctx's
-  fixed action axis (root-only legality, illegal path-actions no-op). The custom
-  tree reaches its strength with true per-simulation legality and *faster*, so
-  mctx (and its dependency) were retired.
+Design choices, each fixing a measured ply-2 bias:
+- **Root prior = the raw one-step value sweep** (`values / prior_scale`, ±20
+  spread), not a tanh+tier compression (which flattened it to near-uniform,
+  0.184 vs lookahead — the decisive port bug, 928f370 / 742b94b; uniform made
+  Gumbel's candidates a random subset, 6%). Interior prior = greedy's tier table
+  (uniform + deterministic argmax expanded the lowest-index action); a learned
+  `prior` replaces both.
+- **Two-sided paranoid frame** (searcher vs the table): every node holds the
+  searcher's value signed into the mover's side — the true max^n reduction. At 2p
+  provably identical to flipping on every mover change (632/640 same picks); the
+  every-mover-flip rule negates the searcher's own next turn and went below chance
+  at 4p (20% vs 3× lookahead; the side frame took the same seeds to 32.3%, n=161,
+  chance 25%; 62.2% vs 2× lookahead n=90).
+- **Chance**: per-simulation resampling, plus the immediate roll's exact 11-roll
+  expectation (`ROLL_DICE` leaves).
+- completed-Q does **not** min-max rescale (it amplified any Q ranking to ~8 nats
+  regardless of noise).
 
-`num_simulations=0` is the **lookahead** special case: no tree, just the masked
-argmax of the root one-step value sweep over `num_trees` sampled worlds. It is
-also the *only* configuration that offers trades — `propose_rate` > 0 (default
-0 for the search, 0.5 for the `lookahead` registry entry) lets the root score
-proposals by their *accepted* outcome under a partner model (the same value
-from the partner's seat must prefer accepting) minus `trade_penalty` (0.25, the
-bar below which an offer loses to not trading); the gate withholds proposing
-some moves so a mispredicted-partner proposer can't re-offer forever (the engine
-keeps no rejected-offer memory). Offers are root-only: under the paranoid frame
-the in-tree responder prices every offer as rejected-or-harmful, so proposals
-are excluded from the in-tree prior (`_NO_PROPOSE`) and the search *answers*
-trades through search but never offers one. Lookahead offering measured 37.8%
-pooled (n=373) vs the `propose_rate=0` member at 3p — a modest, consistent edge.
+The "search subtracts value" bug (34–43% vs lookahead, flat across
+sims/candidates/scale): at ~32 sims trees are ~2 plies and full-depth selection
+flipped ~9% of decisions, 92% losing 1-ply value (END_TURN → BUY_DEV/TRADE, the
+optimizer's curse over noisy follow-ups). The fixes above took flips 12% → 7%
+and the search 37% → **57%** vs lookahead (n=200). Defaults are the local
+optimum (sims 64 loses, considered peaks at 16, prior_scale 5 loses, value_scale
+12/38 tie-or-lose to 20). Diagnose decision-level, not by ~20-game matches (SE
+±11%); 4p evals need matched seeds or n ≥ 240.
 
-Frame and tuning evidence (carried over; the search inherits all of it):
-- Frames are two-sided (searcher vs the table): every node holds the searcher's
-  value signed into the mover's side, the discount flips only across the side
-  boundary — the true *paranoid* reduction (scalar backups can't express
-  max^n). At 2p provably identical to flipping on every mover change (632/640
-  same picks); at 4p the every-mover-flip rule negates the searcher's own next
-  turn and measured below chance vs 3× lookahead (20%, n=80) — the side frame
-  took the same seeds to 32.3% (n=161, chance 25%) and 62.2% vs 2× lookahead at
-  3p (n=90).
-- Deviations from a naive Gumbel search, each fixing a measured ply-2 bias: root
-  prior = the one-step value sweep (uniform made Gumbel's candidates a random
-  subset — 6% vs lookahead); interior prior = greedy's tempered tier table
-  (uniform + deterministic interior argmax expanded the lowest-index legal
-  action); `ROLL_DICE` 11-roll expectation; the completed-Q transform does **not**
-  min-max rescale (it amplified any Q ranking to ~8 nats regardless of noise).
-  The month-long
-  "search subtracts value" bug (34–43% vs lookahead, flat across sims/
-  candidates/scale): at ~32 sims trees are ~2 plies and full-depth selection
-  flipped ~9% of decisions, 92% losing 1-ply value, concentrated
-  END_TURN → BUY_DEV/TRADE (optimizer's curse over noisy follow-ups). The fixes
-  took flips 12% → 7% and the search 37% → **57%** vs lookahead (n=200).
-- June 11 sweep: defaults are the local optimum — sims 64 *loses* (44.5%; depth
-  can't pay through the leaf), considered peaks at 16, prior_scale 5 loses,
-  value_scale 12/38 tie-or-lose to 20. Diagnose decision-level, not by ~20-game
-  matches (SE ±11%); 4p evals need matched seeds or n ≥ 240.
+`num_simulations=0` is the **lookahead** special case: no tree, the masked argmax
+of the root one-step sweep over `num_trees` sampled worlds. It is also the *only*
+configuration that offers trades — `propose_rate` > 0 (default 0 for the search,
+0.5 for the `lookahead` registry entry) scores proposals by their *accepted*
+outcome under a partner model (the partner's seat must prefer accepting) minus
+`trade_penalty` (0.25), gated so a mispredicted partner can't re-offer forever.
+Offers are root-only: under the paranoid frame the in-tree responder prices every
+offer as rejected, so proposals are dropped from the in-tree prior (`_NO_PROPOSE`)
+and the search *answers* trades but never offers one. Lookahead offering measured
+37.8% pooled (n=373) at 3p.
 
 ## planner/
 

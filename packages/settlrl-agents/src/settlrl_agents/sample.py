@@ -24,6 +24,7 @@ from settlrl_engine.board.state import (
     BoolScalar,
     IntScalar,
     KeyScalar,
+    Player,
     to_u8,
 )
 
@@ -39,7 +40,7 @@ _MAX_DEAL = 5 * 19
 
 
 def _deal_dev_hands(
-    key: KeyScalar, view: BeliefView, player: IntScalar
+    key: KeyScalar, view: BeliefView, player: Player
 ) -> tuple[UInt8[Array, f"players dev_card_types={N_DEV_CARD_TYPES}"], DevDeckVec]:
     """Deal every opponent's dev hand from the unseen pool, uniformly without
     replacement; returns ``(dev_hand, dev_deck)`` with the remainder as the
@@ -105,7 +106,7 @@ def _deal_resources(key: KeyScalar, view: BeliefView) -> ResBoundsVec:
     return res
 
 
-def sample_world(key: KeyScalar, view: BeliefView, player: IntScalar) -> BoardState:
+def sample_world(key: KeyScalar, view: BeliefView, player: Player) -> BoardState:
     """Sample one concrete world from ``player``'s :class:`BeliefView`.
 
     Public fields are copied through; hand sizes, dev counts, and per-type

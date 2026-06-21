@@ -32,7 +32,7 @@ from settlrl_agents import POLICIES, BeliefSpec, evaluate
 from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
 from settlrl_agents.policy import BeliefPolicy, PolicyPrior
 from settlrl_agents.search import PolicyWeights, make_search, make_search_weights
-from settlrl_agents.search.setup import make_setup_search
+from settlrl_agents.search.expectimax import make_setup_search
 from settlrl_agents.value import Value, ValueFunction, heuristic_value
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import EDGE_V, N_VERTICES, TILE_V, BoardLayout
@@ -150,7 +150,7 @@ def setup_policy(
     ``lookahead(heuristic)`` -- a 1-ply pip-maxing opener; the default, since at 2p
     a depth-6 search ties it (the heuristic value is ~additive, so greedy ≈ optimal
     pairing) at a fraction of the cost. ``setup_depth >= 2`` switches to the
-    probabilistic-expectimax setup search (:func:`search.setup.make_setup_search`,
+    probabilistic-expectimax setup search (:func:`search.expectimax.make_setup_search`,
     opponents Boltzmann-rational at ``setup_temperature``) -- kept for >= 3 players
     and complementarity-aware values, where the deeper opening may pay off."""
     if setup_depth <= 1:
