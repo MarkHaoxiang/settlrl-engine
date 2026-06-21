@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from settlrl_app.api.deps import Deps, uid
+from settlrl_app.api.deps import ClientId, Deps, uid
 from settlrl_app.storage.db import User
 
 
@@ -67,15 +67,17 @@ def build(deps: Deps) -> APIRouter:
 
     @router.post("/api/matchmake")
     async def matchmake(
-        req: _MatchRequest, user: CurrentUser = None
+        req: _MatchRequest, user: CurrentUser = None, x_client_id: ClientId = None
     ) -> _MatchQueued | _MatchFound:
         """Find an Elo-matched game (bots filling the rest of the table), or return
         the caller's place in line to re-poll. A signed-in caller is matched on
         their rating; anonymous callers match at a fresh player's rating."""
         if deps.matchmaker is None:
             raise HTTPException(status_code=503, detail="matchmaking is unavailable")
-        deps.guard_one_game(user)
-        match = await deps.matchmaker.matchmake(req.n_players, req.ticket, uid(user))
+        deps.guard_one_game(user, x_client_id)
+        match = await deps.matchmaker.matchmake(
+            req.n_players, req.ticket, uid(user), x_client_id
+        )
         if match.result is not None:
             game_id, seat, token = match.result
             return _MatchFound(id=game_id, seat=seat, token=token)

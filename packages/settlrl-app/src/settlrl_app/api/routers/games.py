@@ -22,7 +22,14 @@ from settlrl_game.session import HUMAN, GameSession, IllegalActionError
 from sse_starlette.sse import EventSourceResponse
 from starlette.responses import Response
 
-from settlrl_app.api.deps import Deps, SeatTokens, needs_driver, tokens, uid
+from settlrl_app.api.deps import (
+    ClientId,
+    Deps,
+    SeatTokens,
+    needs_driver,
+    tokens,
+    uid,
+)
 from settlrl_app.api.routers.replay import load_replay
 from settlrl_app.api.views import game_model
 from settlrl_app.game.games import (
@@ -188,7 +195,10 @@ def build(deps: Deps) -> APIRouter:
 
     @router.post("/api/games")
     async def post_create(
-        req: _CreateRequest, response: Response, user: CurrentUser = None
+        req: _CreateRequest,
+        response: Response,
+        user: CurrentUser = None,
+        x_client_id: ClientId = None,
     ) -> _CreatedModel | _QueuedModel:
         """Create a game, or return the caller's place in line when the server
         is at its concurrency cap (a ``202`` they re-POST with ``ticket``).
@@ -197,7 +207,7 @@ def build(deps: Deps) -> APIRouter:
             raise HTTPException(
                 status_code=401, detail="sign in to list a game in the lobby"
             )
-        deps.guard_one_game(user)
+        deps.guard_one_game(user, x_client_id)
         catalog = bots.catalog()
         _validate_seat_kinds(req.seats, req.n_players, catalog)
         try:
@@ -230,7 +240,9 @@ def build(deps: Deps) -> APIRouter:
         claiming = (
             humans if req.claim == "all" else humans[:1] if req.claim == "first" else []
         )
-        game_tokens = dict(seated.claim(seat, uid(user)) for seat in claiming)
+        game_tokens = dict(
+            seated.claim(seat, uid(user), x_client_id) for seat in claiming
+        )
         if user is not None:
             label = user.email.split("@", 1)[0]
             for seat in claiming:
@@ -241,13 +253,16 @@ def build(deps: Deps) -> APIRouter:
 
     @router.post("/api/games/{game_id}/join")
     async def post_join(
-        game_id: str, req: _JoinRequest, user: CurrentUser = None
+        game_id: str,
+        req: _JoinRequest,
+        user: CurrentUser = None,
+        x_client_id: ClientId = None,
     ) -> _JoinedModel:
         handle = deps.handle_of(game_id)
-        deps.guard_one_game(user, allow=game_id)
+        deps.guard_one_game(user, x_client_id, allow=game_id)
         async with handle.lock:
             try:
-                seat, token = handle.claim(req.seat, uid(user))
+                seat, token = handle.claim(req.seat, uid(user), x_client_id)
             except (LookupError, ValueError) as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             if user is not None:

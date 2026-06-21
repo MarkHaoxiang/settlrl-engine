@@ -65,6 +65,37 @@ def test_one_account_does_not_fill_both_seats() -> None:
     asyncio.run(scenario())
 
 
+def test_one_guest_browser_does_not_fill_both_seats() -> None:
+    async def scenario() -> None:
+        # The same guest browser (no account, one X-Client-Id) queues from two
+        # tabs — or cancels and re-searches, leaving a stale ticket: it must never
+        # be paired with itself, the way an account is held apart by user id.
+        mm, _ = _matchmaker()
+        a = await mm.matchmake(2, None, None, "browser-1")
+        b = await mm.matchmake(2, None, None, "browser-1")
+        assert a.result is None and b.result is None  # one browser, no match
+
+        # A different browser completes the table.
+        c = await mm.matchmake(2, None, None, "browser-2")
+        assert c.result is not None
+
+    asyncio.run(scenario())
+
+
+def test_a_players_fresh_search_replaces_its_stale_ticket() -> None:
+    async def scenario() -> None:
+        # A new search (no ticket — e.g. after a client-side cancel, or a second
+        # tab) must replace the player's prior pool entry, not stack a second one
+        # that inflates the waiting count.
+        mm, _ = _matchmaker()
+        a = await mm.matchmake(2, None, None, "browser-1")
+        assert a.waiting == 1
+        b = await mm.matchmake(2, None, None, "browser-1")
+        assert b.waiting == 1  # still one of them, not two
+
+    asyncio.run(scenario())
+
+
 def test_lone_waiter_is_bot_filled_once_it_times_out() -> None:
     async def scenario() -> None:
         # never_stuck_s=0: a single waiter forms a game immediately, bots filling
@@ -100,3 +131,15 @@ def test_matchmake_route_pairs_two_callers(client: TestClient) -> None:
     ).json()
     assert resumed["id"] == second["id"]  # both land in the same game
     assert {resumed["seat"], second["seat"]} == {0, 1}
+
+
+def test_matchmake_route_does_not_self_pair_one_browser(client: TestClient) -> None:
+    # Two searches from the same guest browser (same X-Client-Id) must not be
+    # matched together into a game where it holds both seats.
+    hdr = {"X-Client-Id": "browser-1"}
+    first = client.post("/api/matchmake", json={"n_players": 2}, headers=hdr).json()
+    assert first["queued"] is True and first["waiting"] == 1
+    # A second fresh search from the same browser neither pairs with itself nor
+    # adds a ghost to the waiting count.
+    second = client.post("/api/matchmake", json={"n_players": 2}, headers=hdr).json()
+    assert second["queued"] is True and second["waiting"] == 1

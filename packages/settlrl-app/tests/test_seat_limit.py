@@ -95,9 +95,30 @@ def test_join_blocked_while_in_another_game(client: TestClient) -> None:
     assert res.json()["detail"]["game_id"] == mine
 
 
-def test_guest_is_not_limited(client: TestClient) -> None:
+def test_guest_without_a_client_id_is_unrestricted(client: TestClient) -> None:
+    # No X-Client-Id (an old client) has no server identity, so the limit can't
+    # apply — both creates succeed.
     assert client.post("/api/games", json={"seed": 0}).status_code == 200
     assert client.post("/api/games", json={"seed": 1}).status_code == 200
+
+
+def test_guest_browser_is_held_to_one_game(client: TestClient) -> None:
+    hdr = {"X-Client-Id": "browser-1"}
+    game = client.post("/api/games", json={"seed": 0}, headers=hdr).json()["id"]
+    # A second create from the same browser is refused, pointing at the first.
+    res = client.post("/api/games", json={"seed": 1}, headers=hdr)
+    assert res.status_code == 409 and res.json()["detail"]["game_id"] == game
+    # As is joining someone else's open lobby.
+    other = _open_lobby(client, _bearer(_token(client, "host@example.com")))
+    join = client.post(f"/api/games/{other}/join", json={"seat": 1}, headers=hdr)
+    assert join.status_code == 409
+    # A different browser is unaffected.
+    assert (
+        client.post(
+            "/api/games", json={"seed": 2}, headers={"X-Client-Id": "browser-2"}
+        ).status_code
+        == 200
+    )
 
 
 def test_host_close_removes_the_lobby_and_bounces_others(client: TestClient) -> None:

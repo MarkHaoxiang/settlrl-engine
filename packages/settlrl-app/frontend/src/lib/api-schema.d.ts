@@ -1482,7 +1482,9 @@ export interface operations {
     post_create_api_games_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Client-Id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1515,7 +1517,9 @@ export interface operations {
     post_join_api_games__game_id__join_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Client-Id"?: string | null;
+            };
             path: {
                 game_id: string;
             };
@@ -2155,7 +2159,9 @@ export interface operations {
     matchmake_api_matchmake_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Client-Id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

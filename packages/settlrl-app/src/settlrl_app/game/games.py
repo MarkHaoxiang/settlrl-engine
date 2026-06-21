@@ -99,6 +99,11 @@ class GameHandle:
         # seat -> owning user id, for seats claimed by a signed-in account (so
         # the seat follows the user across devices, without the seat token).
         self.claim_users: dict[int, str] = {}
+        # seat -> the anonymous browser id (X-Client-Id) that claimed it, for
+        # guests with no account. In-memory only (a guest's identity is its
+        # localStorage, not journalled) — it backs the one-game-at-a-time guard
+        # for guests, the way claim_users does for accounts.
+        self.claim_clients: dict[int, str] = {}
         # seat -> display name of its human owner (account local-part), for the
         # in-game seat list. Anonymous claimers have no entry (shown "Guest").
         self.claim_names: dict[int, str] = {}
@@ -199,11 +204,16 @@ class GameHandle:
         return all(s in self.claims for s in self.human_seats())
 
     def claim(
-        self, seat: int | None = None, user_id: str | None = None
+        self,
+        seat: int | None = None,
+        user_id: str | None = None,
+        client_id: str | None = None,
     ) -> tuple[int, str]:
         """Claim ``seat`` (or the first unclaimed human seat) and mint its token.
         When ``user_id`` is given (a signed-in claimer) the seat is also tied to
-        that account, so they own it on any device without the token.
+        that account, so they own it on any device without the token; an
+        anonymous ``client_id`` (the claimer's browser) ties it loosely for the
+        guest one-game guard.
 
         Raises ``LookupError`` when no seat is free and ``ValueError`` when the
         requested seat is not a human seat or is already claimed.
@@ -221,6 +231,8 @@ class GameHandle:
         self.claims[seat] = token
         if user_id is not None:
             self.claim_users[seat] = user_id
+        elif client_id is not None:
+            self.claim_clients[seat] = client_id
         if self.journal is not None:
             self.journal.claim(seat, token, user_id)
         return seat, token
@@ -238,11 +250,16 @@ class GameHandle:
         """The seats this account owns in this game (for the user's game list)."""
         return sorted(s for s, uid in self.claim_users.items() if uid == user_id)
 
+    def seats_for_client(self, client_id: str) -> list[int]:
+        """The seats this anonymous browser holds (the guest one-game guard)."""
+        return sorted(s for s, cid in self.claim_clients.items() if cid == client_id)
+
     def release_seat(self, seat: int) -> None:
         """Free a claimed human seat back to open — a participant leaving a lobby
         before it starts."""
         self.claims.pop(seat, None)
         self.claim_users.pop(seat, None)
+        self.claim_clients.pop(seat, None)
         self.claim_names.pop(seat, None)
 
 
@@ -333,6 +350,14 @@ class GameRegistry:
         single live game, so at most one is expected)."""
         for handle in self._games.values():
             if not handle.session.terminal() and handle.seats_for_user(user_id):
+                return handle
+        return None
+
+    def live_game_for_client(self, client_id: str) -> GameHandle | None:
+        """As :meth:`live_game_for_user`, but for an anonymous browser id — the
+        guest one-game guard."""
+        for handle in self._games.values():
+            if not handle.session.terminal() and handle.seats_for_client(client_id):
                 return handle
         return None
 

@@ -3,6 +3,7 @@
 // app works at / and behind a stripped proxy prefix (e.g. /settlrl) alike.
 
 import { EventSourceParserStream } from "eventsource-parser/stream";
+import { clientId } from "./clientId";
 
 export const API_BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
@@ -18,7 +19,11 @@ export class ApiError extends Error {
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(API_BASE + path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Client-Id": clientId(),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!resp.ok) {
     const detail = await resp

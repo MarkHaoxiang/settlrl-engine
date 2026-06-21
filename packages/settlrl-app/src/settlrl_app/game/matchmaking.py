@@ -63,7 +63,17 @@ class _Entry:
     rating: float
     joined_at: float
     last_seen: float
+    # The browser id (X-Client-Id) for an anonymous waiter — the self-pair key
+    # when there's no account.
+    client_id: str | None = None
     result: tuple[str, int, str] | None = None
+
+    @property
+    def identity(self) -> str | None:
+        """The key that must not fill two seats in one match: the account if
+        signed in, else the browser. ``None`` only for a wholly anonymous caller
+        (no id sent), which can't be de-duped."""
+        return self.user_id or self.client_id
 
 
 @dataclass
@@ -110,7 +120,11 @@ class Matchmaker:
         return sum(1 for e in self._pools.get(n_players, []) if e.result is None)
 
     async def matchmake(
-        self, n_players: int, ticket: str | None, user_id: str | None
+        self,
+        n_players: int,
+        ticket: str | None,
+        user_id: str | None,
+        client_id: str | None = None,
     ) -> Match:
         """Enqueue or refresh the caller's ticket and try to form a match. Returns
         the caller's seat once matched, else its still-waiting place in line."""
@@ -120,12 +134,25 @@ class Matchmaker:
             self._prune(pool, now)
             entry = next((e for e in pool if e.ticket == ticket), None)
             if entry is None:
+                # One unmatched ticket per player: a fresh search drops any the
+                # same player left behind (a client-side cancel that never
+                # reached us, a second tab), so a single browser never stacks
+                # duplicate tickets or inflates the waiting count. Matched
+                # tickets are left alone — they hold a real seat.
+                identity = user_id or client_id
+                if identity is not None:
+                    pool[:] = [
+                        e
+                        for e in pool
+                        if e.result is not None or e.identity != identity
+                    ]
                 entry = _Entry(
                     ticket=secrets.token_urlsafe(_TICKET_BYTES),
                     user_id=user_id,
                     rating=await self._rating("account", user_id, n_players),
                     joined_at=now,
                     last_seen=now,
+                    client_id=client_id,
                 )
                 pool.append(entry)
             else:
@@ -152,18 +179,19 @@ class Matchmaker:
         window = elo_window(
             now - oldest.joined_at, self._base_window, self._widen_per_10s
         )
-        # Gather near-Elo waiters, but never the same account twice (a signed-in
-        # player queued from two tabs): one human must not fill two seats.
+        # Gather near-Elo waiters, but never the same player twice (queued from
+        # two tabs, or a cancel that left a stale ticket): one human — by account
+        # or, for a guest, by browser id — must not fill two seats.
         group: list[_Entry] = []
-        seen_users: set[str] = set()
+        seen: set[str] = set()
         for e in waiting:
             if abs(e.rating - oldest.rating) > window:
                 continue
-            if e.user_id is not None and e.user_id in seen_users:
+            if e.identity is not None and e.identity in seen:
                 continue
             group.append(e)
-            if e.user_id is not None:
-                seen_users.add(e.user_id)
+            if e.identity is not None:
+                seen.add(e.identity)
             if len(group) >= n_players:
                 break
         full = len(group) >= n_players
@@ -221,11 +249,9 @@ class Matchmaker:
         except RegistryFullError:
             return  # no slot right now; the waiters poll again
         for seat, entry in enumerate(humans):
-            _, token = handle.claim(seat, entry.user_id)
+            _, token = handle.claim(seat, entry.user_id, entry.client_id)
             if entry.user_id is not None and self._store is not None:
-                handle.claim_names[seat] = await self._store.display_name(
-                    entry.user_id
-                )
+                handle.claim_names[seat] = await self._store.display_name(entry.user_id)
             entry.result = (handle.id, seat, token)
         if needs_driver(handle, self._turn_timeout):
             self._spawn_driver(handle)

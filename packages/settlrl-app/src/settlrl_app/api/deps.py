@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 # The per-request seat-ownership proof: a comma-separated list of seat tokens.
 SeatTokens = Annotated[str | None, Header(alias="X-Seat-Tokens")]
 
+# A stable anonymous per-browser id, so guests (with no account) are held to one
+# game at a time and never matched against themselves. Not an ownership proof —
+# only an identity hint for the one-game guard and matchmaker self-pair dedup.
+ClientId = Annotated[str | None, Header(alias="X-Client-Id")]
+
 
 def tokens(header: str | None) -> list[str]:
     return [t.strip() for t in (header or "").split(",") if t.strip()]
@@ -78,14 +83,24 @@ class Deps:
             raise HTTPException(status_code=404, detail="no such game")
         return handle
 
-    def guard_one_game(self, user: User | None, allow: str | None = None) -> None:
-        """Enforce one live game per account: raise 409 (carrying the existing
-        game's id, so the client can offer to resume it) when a signed-in
-        ``user`` already holds a seat in a live game other than ``allow``. Guests
-        carry no server identity and pass — their limit is only client-side."""
-        if user is None:
+    def guard_one_game(
+        self,
+        user: User | None,
+        client_id: str | None = None,
+        allow: str | None = None,
+    ) -> None:
+        """Enforce one live game per player: raise 409 (carrying the existing
+        game's id, so the client can offer to resume it) when the caller already
+        holds a seat in a live game other than ``allow``. A signed-in ``user`` is
+        keyed by account; a guest by ``client_id`` (its browser). A guest with no
+        client id sent (an old client) passes — the limit is only as strong as
+        its identity."""
+        if user is not None:
+            existing = self.registry.live_game_for_user(str(user.id))
+        elif client_id:
+            existing = self.registry.live_game_for_client(client_id)
+        else:
             return
-        existing = self.registry.live_game_for_user(str(user.id))
         if existing is not None and existing.id != allow:
             raise HTTPException(
                 status_code=409,

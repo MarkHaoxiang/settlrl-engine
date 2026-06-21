@@ -75,15 +75,38 @@
     "summary": "Post Create",
     "description": "Create a game, or return the caller's place in line when the server\nis at its concurrency cap (a ``202`` they re-POST with ``ticket``).\nListing a game publicly (``listed``) requires a signed-in account.",
     "operationId": "post_create_api_games_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "X-Client-Id",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Client-Id"
+      }
+     }
+    ],
     "requestBody": {
+     "required": true,
      "content": {
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/_CreateRequest"
        }
       }
-     },
-     "required": true
+     }
     },
     "responses": {
      "200": {
@@ -114,12 +137,7 @@
        }
       }
      }
-    },
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ]
+    }
    }
   },
   "/api/games/{game_id}/join": {
@@ -139,6 +157,22 @@
       "schema": {
        "type": "string",
        "title": "Game Id"
+      }
+     },
+     {
+      "name": "X-Client-Id",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Client-Id"
       }
      }
     ],
@@ -1084,15 +1118,38 @@
     "summary": "Matchmake",
     "description": "Find an Elo-matched game (bots filling the rest of the table), or return\nthe caller's place in line to re-poll. A signed-in caller is matched on\ntheir rating; anonymous callers match at a fresh player's rating.",
     "operationId": "matchmake_api_matchmake_post",
+    "security": [
+     {
+      "OAuth2PasswordBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "X-Client-Id",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Client-Id"
+      }
+     }
+    ],
     "requestBody": {
+     "required": true,
      "content": {
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/_MatchRequest"
        }
       }
-     },
-     "required": true
+     }
     },
     "responses": {
      "200": {
@@ -1123,12 +1180,7 @@
        }
       }
      }
-    },
-    "security": [
-     {
-      "OAuth2PasswordBearer": []
-     }
-    ]
+    }
    }
   },
   "/api/admin/status": {
