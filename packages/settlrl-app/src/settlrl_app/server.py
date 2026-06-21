@@ -7,6 +7,7 @@ their own registries instead of sharing module state.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +30,8 @@ from settlrl_app.game.matchmaking import Matchmaker
 from settlrl_app.storage.auth import Auth
 from settlrl_app.storage.db import Database
 from settlrl_app.storage.store import GameStore
+
+log = logging.getLogger(__name__)
 
 
 def _build_registry(
@@ -69,6 +72,7 @@ def create_app(
     user_db: str | None = None,
     admin_emails: frozenset[str] = frozenset(),
     providers: ProviderRegistry | None = None,
+    bot_providers: frozenset[str] = frozenset(),
 ) -> FastAPI:
     """Build the app around its own registry (tests pass theirs in).
 
@@ -83,6 +87,9 @@ def create_app(
     (``POST /api/games`` returns their place in line). ``user_db`` overrides the
     shared SQLite path (defaults to ``settlrl.db`` under ``state_dir``, else
     in-memory); ``admin_emails`` are granted admin on register / login.
+    ``bot_providers`` are bot-service base URLs registered on startup (retried
+    until each is reachable), so their bots are seatable without a manual admin
+    call — equivalent to ``POST /api/admin/bot-providers`` for each.
     """
     database = _database(user_db, state_dir)
     registry, store = _build_registry(games, database, state_dir, max_active)
@@ -122,6 +129,20 @@ def create_app(
         matchmaker=matchmaker,
     )
 
+    async def register_provider(url: str) -> None:
+        # The bot service may still be starting (JAX import is slow), so retry
+        # with capped backoff until it answers /info; cancelled on shutdown.
+        delay = 0.5
+        while True:
+            try:
+                provider = await bots.register(url)
+                log.info("registered bot provider %r at %s", provider.name, url)
+                return
+            except Exception as exc:
+                log.warning("bot provider %s not ready (%s); retrying", url, exc)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 10.0)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await database.init()
@@ -132,8 +153,11 @@ def create_app(
         for handle in registry.all_handles():
             if needs_driver(handle, turn_timeout):
                 spawn_driver(handle)
+        registrations = [
+            asyncio.create_task(register_provider(u)) for u in bot_providers
+        ]
         yield
-        for task in drivers:
+        for task in (*drivers, *registrations):
             task.cancel()
         if store is not None:
             await store.aclose()  # flush queued writes before the engine closes
@@ -206,4 +230,5 @@ app = create_app(
     max_active=_settings.max_active,
     user_db=_settings.user_db,
     admin_emails=_settings.admin_emails,
+    bot_providers=_settings.bot_providers,
 )

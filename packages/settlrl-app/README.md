@@ -101,9 +101,11 @@ reloader is a dev file-watcher),
 idle human turn the server auto-plays a move, so an abandoned game still
 finishes instead of stalling), `SETTLRL_APP_MAX_ACTIVE` (default `16`; games
 running at once before new creators are queued — keep it below the registry
-cap), and `ROOT_PATH` (the proxy prefix when served under a path). Run **one
-process, one worker**: live games are held in memory,
-so extra workers would split them.
+cap), `SETTLRL_APP_BOT_PROVIDERS` (comma-separated bot-service base URLs
+registered on startup — retried until each is reachable — so their bots are
+seatable without a manual admin call), and `ROOT_PATH` (the proxy prefix when
+served under a path). Run **one process, one worker**: live games are held in
+memory, so extra workers would split them.
 The registry holds up to 32 games, evicting finished games, hour-idle ones, or
 unstarted ones idle past a few minutes (so a burst of empty games can't pin
 every slot) to make room.

@@ -1,0 +1,16 @@
+# A one-bot service (settlrl-agents[service]), the game server's source of bot
+# moves over HTTP. CPU JAX (the cuda group is excluded). Which bot it serves is
+# the SETTLRL_BOT env var (default greedy); run one container per bot.
+#
+#   docker build -f Dockerfile.bot -t settlrl-bot .
+#   docker run -p 8000:8000 -e SETTLRL_BOT=greedy settlrl-bot
+
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY packages/ packages/
+# No default groups: the CUDA jaxlib stays out, so the image runs CPU JAX.
+RUN uv sync --frozen --no-default-groups --package settlrl-agents --extra service
+ENV BOT_HOST=0.0.0.0 BOT_PORT=8000 RELOAD=0
+EXPOSE 8000
+CMD ["uv", "run", "--no-sync", "settlrl-bot-service"]

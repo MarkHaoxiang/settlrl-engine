@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     user_db: str | None = None  # explicit SQLite path (else settlrl.db under state_dir)
     # Comma-separated (NoDecode: skip the JSON pre-parse so the splitter sees it).
     admin_emails: Annotated[frozenset[str], NoDecode] = frozenset()
+    # Bot-service base URLs registered (with retry) at startup, so seatable bots
+    # survive a restart without a manual admin call.
+    bot_providers: Annotated[frozenset[str], NoDecode] = frozenset()
 
     # Deployment vars (shared conventions, unprefixed).
     root_path: str = Field(default="", validation_alias="ROOT_PATH")  # proxy prefix
@@ -33,7 +36,7 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, validation_alias="PORT")
     reload: bool = Field(default=True, validation_alias="RELOAD")  # dev; 0 in prod
 
-    @field_validator("admin_emails", mode="before")
+    @field_validator("admin_emails", "bot_providers", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
         """Accept a comma-separated env string (the JSON default can't)."""
