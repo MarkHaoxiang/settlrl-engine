@@ -24,10 +24,13 @@ deps only because this subpackage uses them.
   targets line up with the June 11 calibration finding (P(win) =
   σ(0.053·v_heuristic)). The AZ net's logit maps in with `value_scale=2`
   (`tanh(logit/2) = 2P−1`).
-- `model.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts it
+- **Network definitions live under `nn/`** (reorg in progress). `nn/__init__` is
+  import-light (no equinox/jraph) so the shipped plain-JAX path — `features` +
+  `nn/mlp.py`, reached by the package root — pulls no training deps.
+- `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts it
   onto the search's `value`/`prior` seams). Plain-JAX, so the package root
   imports it without pulling training deps.
-- `graph.py` / `architectures.py` — the board-as-graph featurization
+- `nn/graph.py` / `nn/architectures.py` — the board-as-graph featurization
   (`board_sample` → a `Sample` of per-node/-edge/global features + the
   engineered vector, fixed topology as module constants) and the equinox
   architectures over it (`mlp_engineered` / `mlp_flat` / `deepset` / `gnn`,
@@ -50,17 +53,18 @@ deps only because this subpackage uses them.
     vs `lookahead(heuristic)`, the Stage-1 gate), and the `learn` loop. Value
     target is pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a
     search that exposes root Q (see the Canopy reference below).
-  - `graphnet.py::GraphTrunk` — the shared message-passing trunk (encoders +
+  - `nn/graphnet.py::GraphTrunk` — the shared message-passing trunk (encoders +
     layers → per-node embeddings + global + pooled readout); `GraphNet` (single
-    head) and `azgnn.AZGraphNet` both build their heads on it.
-  - `action_layout.py` — the static map from the flat 662 action space to its
+    head) and `nn/board_gnn.py::BoardGNN` both build their heads on it.
+  - `nn/action_layout.py` — the static map from the flat 662 action space to its
     board structure (which actions are per-vertex / -edge / -tile vs. dense
     "other"), and `SCATTER` to place a structure-factored head's compact logits
     back into the flat vector. The robber/knight *victim* collapses to
     no-steal/steal (the opponent-relative features can't individuate victims, so
     a per-victim logit could not be player-relabel invariant).
-  - `azgnn.py` — the AlphaZero loop with a **GNN trunk** (`AZGraphNet` over
-    `graph.board_sample`). The value and policy heads **split right after the
+  - `azgnn.py` — the AlphaZero loop with a **GNN trunk** (`nn/board_gnn.py::BoardGNN`
+    over `nn/graph.py::board_sample`; the net + `gnn_seams` adapter live in
+    `nn/board_gnn.py`). The value and policy heads **split right after the
     trunk** (no shared head MLP). The policy is **structure-factored**: a shared
     per-vertex / per-edge (symmetric endpoints) / per-tile (corner-vertex mean)
     head emits spatial-action logits, a dense head the rest, plus a per-type bias
