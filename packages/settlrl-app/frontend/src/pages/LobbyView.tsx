@@ -5,8 +5,8 @@ import Button from "../components/Button";
 import Panel from "../components/Panel";
 import ThemeToggle from "../components/ThemeToggle";
 import { authToken, currentUser, type AuthUser } from "../lib/auth";
-import { matchmake, type PlayerCount } from "../lib/game";
-import { createLobby, leaveLobby, type LobbyMode } from "../lib/lobby";
+import { fetchGame, matchmake, type PlayerCount } from "../lib/game";
+import { createLobby, getLobby, leaveLobby, type LobbyMode } from "../lib/lobby";
 import { useLobbies, type LobbyListing } from "../lib/queries";
 import {
   clearCurrentPlace,
@@ -79,6 +79,39 @@ export default function LobbyView() {
   useEffect(() => {
     void currentUser().then(setUser);
   }, []);
+
+  // Verify the place we think we're in still exists, so a stale localStorage
+  // entry (its game cleaned up, or finished) doesn't strand a guest behind a
+  // phantom "you're in a game". Forget it if it's gone or over; follow a lobby
+  // that has since started into its game.
+  useEffect(() => {
+    if (!current) return;
+    let cancelled = false;
+    const forget = () => {
+      clearCurrentPlace(current.id);
+      if (!cancelled) setCurrent(null);
+    };
+    void (async () => {
+      try {
+        if (current.kind === "game") {
+          const g = await fetchGame(current.id, tokensFor(current.id));
+          if (g.status.terminal) forget();
+        } else {
+          const lobby = await getLobby(current.id, tokensFor(current.id));
+          if (lobby.started_game_id) {
+            setCurrentPlace(lobby.started_game_id, "game");
+            if (!cancelled) setCurrent({ id: lobby.started_game_id, kind: "game" });
+          }
+        }
+      } catch {
+        forget(); // 404 / cleaned up
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => () => void (timer.current !== null && window.clearTimeout(timer.current)), []);
 
   // Joining a listed lobby is a deep link; the lobby room claims a free seat.
