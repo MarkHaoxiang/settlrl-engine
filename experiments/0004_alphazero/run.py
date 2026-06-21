@@ -208,7 +208,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     )  # fmt: skip
     best = -1.0
 
-    def on_iter(i: int, metrics: dict[str, float], model: azgnn.AZGraphNet) -> None:
+    def on_iter(i: int, metrics: dict[str, float], model: azgnn.BoardGNN) -> None:
         nonlocal best
         run.log(iteration=i, **metrics)  # scalars -> metrics.jsonl
         log: dict[str, object] = {"iteration": i, **metrics}

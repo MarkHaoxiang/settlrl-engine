@@ -25,7 +25,7 @@ from _symmetry import (
 from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_engine.board import Board
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
-from settlrl_learn.azgnn import AZGraphNet, az_gnn_loss
+from settlrl_learn.azgnn import BoardGNN, az_gnn_loss
 from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.nn.graph import board_sample
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
@@ -129,9 +129,9 @@ def test_flat_mlp_is_not_symmetry_invariant() -> None:
     assert moved > 1e-3
 
 
-def _aznet() -> AZGraphNet:
+def _aznet() -> BoardGNN:
     cfg = PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
-    return AZGraphNet(jax.random.key(0), cfg)
+    return BoardGNN(jax.random.key(0), cfg)
 
 
 def test_aznet_value_invariant_policy_equivariant_under_board_symmetry() -> None:
