@@ -15,7 +15,7 @@ A training-side module: not imported by the package root.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, cast
 
@@ -66,6 +66,7 @@ def learn(
     checkpoint_every: int = 1,
     resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], Any], None] | None = None,
+    progress: bool = False,
 ) -> Any:
     """One training loop over ``backend``; returns the final net.
 
@@ -82,7 +83,8 @@ def learn(
 
     The full :class:`RunState` is checkpointed to ``checkpoint_dir/runstate.eqx``
     every ``checkpoint_every`` iterations; ``resume_from`` continues it bit-exactly.
-    ``on_iter(i, metrics, net)`` runs after each iteration."""
+    ``on_iter(i, metrics, net)`` runs after each iteration. ``progress`` shows a
+    tqdm bar over the iterations, its postfix tracking loss / arena win rate."""
     optimizer = optax.adamw(lr, weight_decay=weight_decay)
     buffer = fbx.make_item_buffer(
         max_length=buffer_max, min_length=buffer_min,
@@ -110,8 +112,16 @@ def learn(
         else None
     )
 
+    iters: Iterable[int] = range(int(state.iteration), n_iterations)
+    bar = None
+    if progress:
+        from tqdm.auto import tqdm
+
+        bar = tqdm(iters, initial=int(state.iteration), total=n_iterations, unit="iter")
+        iters = bar
+
     ev: Samples | None = None
-    for i in range(int(state.iteration), n_iterations):
+    for i in iters:
         t0 = time.perf_counter()
         teaching = teacher_weights is not None and i < teacher_iters
         if teaching:
@@ -203,6 +213,14 @@ def learn(
                 RunState(
                     net, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best)
                 ),
+            )
+        if bar is not None:
+            bar.set_postfix(
+                {
+                    k: round(metrics[k], 3)
+                    for k in ("loss", "arena_winrate")
+                    if k in metrics
+                }
             )
         if on_iter is not None:
             on_iter(i, metrics, net)

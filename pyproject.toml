@@ -30,6 +30,8 @@ dev = [
     "wandb>=0.27.2",
     "jraph>=0.0.6.dev0",
     "flashbax>=0.1.0",
+    "tqdm>=4.67",
+    "types-tqdm>=4.67",
 ]
 # GPU support can't be marker-detected (markers see the OS, not the hardware),
 # so it's a *default* group on Linux: a plain `uv sync` no longer prunes the

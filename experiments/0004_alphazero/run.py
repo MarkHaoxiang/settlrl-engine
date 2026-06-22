@@ -262,6 +262,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             checkpoint_every=cfg.checkpoint_every,
             resume_from=resume,
             on_iter=on_iter,
+            progress=True,
         )
     finally:
         wb.finish()
@@ -341,6 +342,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             checkpoint_every=cfg.checkpoint_every,
             resume_from=resume_from,
             on_iter=on_iter,
+            progress=True,
         )
     finally:
         wb.finish()
