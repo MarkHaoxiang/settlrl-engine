@@ -72,8 +72,8 @@ def test_player_relabel_leaves_features_and_gnn_invariant() -> None:
             other = board_sample(
                 layout, relabel_players(state, perm), jnp.int32(perm[p])
             )
-            # the featurization is exactly relabeling-invariant ...
-            for a, b in zip(base, other, strict=True):
+            # the graph featurization is exactly relabeling-invariant ...
+            for a, b in zip(base[:3], other[:3], strict=True):
                 assert np.allclose(np.asarray(a), np.asarray(b), atol=1e-5)
             # ... so the model is too.
             assert np.allclose(np.asarray(base_out), np.asarray(gnn(other)), atol=1e-4)

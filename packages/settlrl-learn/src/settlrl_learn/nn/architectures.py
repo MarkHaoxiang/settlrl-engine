@@ -62,11 +62,11 @@ class MLPModel(eqx.Module):
         self.engineered = engineered
 
     def __call__(self, s: Sample) -> Float[Array, "out"]:
-        x = (
-            s.engineered
-            if self.engineered
-            else jnp.concatenate([s.nodes.reshape(-1), s.glob])
-        )
+        if self.engineered:
+            assert s.extra is not None, "engineered MLP needs board_sample(features=...)"
+            x = s.extra
+        else:
+            x = jnp.concatenate([s.nodes.reshape(-1), s.glob])
         return self.net(x)
 
 

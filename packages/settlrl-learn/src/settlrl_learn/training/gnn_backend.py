@@ -26,7 +26,6 @@ from settlrl_search.expectimax import make_setup_search
 from settlrl_search.policy import BeliefPolicy, PolicyPrior
 from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
 
-from settlrl_learn.features import FEATURE_DIM
 from settlrl_learn.nn.board_gnn import BoardGNN, gnn_seams
 from settlrl_learn.nn.graph import (
     EDGE_DIM,
@@ -146,10 +145,8 @@ def gnn_loss(
 
 
 def _sample_of(item: GNNItem) -> Sample:
-    """A batched :class:`Sample` for the GNN forward (engineered head unused, fed
-    zeros)."""
-    n = item.nodes.shape[0]
-    return Sample(item.nodes, item.edges, item.glob, jnp.zeros((n, FEATURE_DIM)))
+    """A batched graph-only :class:`Sample` for the GNN forward (no extra)."""
+    return Sample(item.nodes, item.edges, item.glob, None)
 
 
 class GNNBackend:

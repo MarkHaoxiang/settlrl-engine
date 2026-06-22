@@ -16,8 +16,9 @@ be compared on a level field:
 
 - ``nodes`` / ``edges`` / ``glob`` -- the graph (GNN, DeepSet, flat-MLP all read
   this);
-- ``engineered`` -- the hand-tuned :mod:`settlrl_learn.features` vector, the
-  baseline a learned representation must beat.
+- ``extra`` -- an optional, caller-configured per-sample vector (a "form of
+  feature engineering", e.g. the hand-tuned :mod:`settlrl_learn.features`
+  baseline); ``None`` by default, so the graph-only consumers pay nothing.
 
 A training-side module (equinox/jraph consumers build on it): not imported by
 the package root.
@@ -25,6 +26,7 @@ the package root.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import NamedTuple
 
 import jax
@@ -51,8 +53,8 @@ from settlrl_engine.board.state import (
 )
 from settlrl_engine.mechanics.common import player_total_vp
 
-from settlrl_learn.features import FEATURE_DIM
-from settlrl_learn.features import features as engineered_features
+# A form of feature engineering: board -> an extra per-sample vector.
+FeatureFn = Callable[[BoardLayout, BoardState, IntScalar], Float[Array, "feat"]]
 
 # --- static topology (shared by every sample) ---
 
@@ -77,12 +79,13 @@ VERTEX_PORT = jnp.asarray(_pinc)
 
 class Sample(NamedTuple):
     """One featurized position. ``nodes``/``edges``/``glob`` are the graph;
-    ``engineered`` the hand-tuned baseline vector."""
+    ``extra`` is an optional caller-configured vector (``None`` is graph-only).
+    """
 
     nodes: Float[Array, f"v={N_VERTICES} node_f"]
     edges: Float[Array, f"e={N_DIR_EDGES} edge_f"]
     glob: Float[Array, "global_f"]
-    engineered: Float[Array, f"feat={FEATURE_DIM}"]
+    extra: Float[Array, "feat"] | None = None
 
 
 def _node_features(
@@ -171,13 +174,20 @@ def _global_features(
     return jnp.concatenate([bank, scalars, phase])
 
 
-def board_sample(layout: BoardLayout, state: BoardState, p: IntScalar) -> Sample:
-    """Featurize one position from ``p``'s perspective into a :class:`Sample`."""
+def board_sample(
+    layout: BoardLayout,
+    state: BoardState,
+    p: IntScalar,
+    features: FeatureFn | None = None,
+) -> Sample:
+    """Featurize one position from ``p``'s perspective into a :class:`Sample`.
+    ``features`` (when given) computes the optional ``extra`` vector; by default
+    no extra is computed (graph-only)."""
     return Sample(
         nodes=_node_features(layout, state, p),
         edges=_edge_features(state, p),
         glob=_global_features(layout, state, p),
-        engineered=engineered_features(layout, state, p),
+        extra=None if features is None else features(layout, state, p),
     )
 
 

@@ -31,11 +31,12 @@ import jax.numpy as jnp
 import numpy as np
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import _picker
-from settlrl_search.policy import StatefulSpec
 from settlrl_agents.value import heuristic_value
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from settlrl_engine.mechanics.longest_road import longest_road_length
+from settlrl_learn.features import features as engineered_features
 from settlrl_learn.nn.graph import Sample, board_sample
+from settlrl_search.policy import StatefulSpec
 
 _CACHE = Path(__file__).resolve().parents[2] / "runs" / "_cache" / "0003"
 
@@ -65,7 +66,13 @@ def _collect(cfg: dict) -> Dataset:
         n_players=players, track_beliefs=True,
     )  # fmt: skip
     pickers = [jax.jit(_picker(agent, players, i)) for i in range(players)]
-    feat = jax.jit(jax.vmap(lambda lo, st: board_sample(lo, st, jnp.int32(0))))
+    feat = jax.jit(
+        jax.vmap(
+            lambda lo, st: board_sample(
+                lo, st, jnp.int32(0), features=engineered_features
+            )
+        )
+    )
     heur = jax.jit(jax.vmap(lambda lo, st: heuristic_value(lo, st, jnp.int32(0))))
     road = jax.jit(
         jax.vmap(
@@ -135,16 +142,17 @@ def generate(cfg: dict) -> Dataset:
     path = _CACHE / f"{_key(cfg)}-v4.npz"  # -v4: richer per-opponent globals
     if path.exists():
         with np.load(path) as d:
-            samples = Sample(d["nodes"], d["edges"], d["glob"], d["engineered"])
+            samples = Sample(d["nodes"], d["edges"], d["glob"], d["engineered"])  # extra
             return Dataset(
                 samples, d["win"], d["heur"], d["road"], d["turns"], d["episode"]
             )
     ds = _collect(cfg)
+    assert ds.samples.extra is not None  # _collect computes the engineered vector
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         path,
         nodes=ds.samples.nodes, edges=ds.samples.edges, glob=ds.samples.glob,
-        engineered=ds.samples.engineered, win=ds.win, heur=ds.heur, road=ds.road,
+        engineered=ds.samples.extra, win=ds.win, heur=ds.heur, road=ds.road,
         turns=ds.turns, episode=ds.episode,
     )  # fmt: skip
     return ds

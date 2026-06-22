@@ -29,6 +29,7 @@ import optax
 from settlrl_engine.board import make_board
 from settlrl_engine.board.layout import EDGE_V, N_EDGES, N_VERTICES
 from settlrl_engine.mechanics.longest_road import longest_road_length
+from settlrl_learn.features import features as engineered_features
 from settlrl_learn.nn.graph import Sample, board_sample
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 
@@ -88,9 +89,13 @@ def _build(n: int, seed: int) -> tuple[Sample, np.ndarray, np.ndarray]:
     edge_road = jnp.asarray(np.stack([p[0] for p in pairs]))
     vertex_owner = jnp.asarray(np.stack([p[1] for p in pairs]))
     state = state._replace(edge_road=edge_road, vertex_owner=vertex_owner)
-    samples = jax.jit(jax.vmap(lambda lo, st: board_sample(lo, st, jnp.int32(0))))(
-        layout, state
-    )
+    samples = jax.jit(
+        jax.vmap(
+            lambda lo, st: board_sample(
+                lo, st, jnp.int32(0), features=engineered_features
+            )
+        )
+    )(layout, state)
     road = jax.jit(
         jax.vmap(
             lambda st: longest_road_length(st.edge_road, st.vertex_owner, jnp.int32(0))
@@ -114,7 +119,7 @@ def _standardize(tr: Sample, va: Sample) -> tuple[Sample, Sample]:
 
     a: dict[str, Any] = {}
     b: dict[str, Any] = {}
-    for fld in ("nodes", "edges", "glob", "engineered"):
+    for fld in ("nodes", "edges", "glob", "extra"):
         a[fld], b[fld] = f(fld)
     return Sample(**a), Sample(**b)
 
