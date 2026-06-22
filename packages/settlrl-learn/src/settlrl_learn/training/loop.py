@@ -24,7 +24,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from settlrl_agents.search import PolicyWeights, make_search_weights
+from settlrl_agents.search import (
+    PolicyWeights,
+    PolicyWeightsValue,
+    make_search_weights,
+    make_search_weights_value,
+)
 from settlrl_agents.value import ValueFunction
 
 from settlrl_learn.training.arena import arena
@@ -55,6 +60,8 @@ def learn(
     train_steps: int = 200,
     reuse: float = 0.0,
     eval_frac: float = 0.0,
+    value_blend_max: float = 0.0,
+    value_blend_ramp: int = 10,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
     arena_games: int = 0,
@@ -81,6 +88,13 @@ def learn(
     strong search over ``teacher_value`` (``teacher_sims`` simulations) instead of
     the cold net, so the heads learn from strong play before self-play takes over.
 
+    ``value_blend_max`` > 0 trains the value head on ``(1-a)*z + a*q`` (Canopy's
+    blend): the game outcome ``z`` blended with the searched root value ``q``, with
+    ``a`` ramped linearly 0 -> ``value_blend_max`` over ``value_blend_ramp``
+    iterations. Pure ``z`` is high-variance for a dice game; ``q`` averages over
+    sims once the value head is decent. Only the *training* slice is blended -- the
+    held-out eval slice keeps the raw outcome.
+
     The full :class:`RunState` is checkpointed to ``checkpoint_dir/runstate.eqx``
     every ``checkpoint_every`` iterations; ``resume_from`` continues it bit-exactly.
     ``on_iter(i, metrics, net)`` runs after each iteration. ``progress`` shows a
@@ -102,8 +116,10 @@ def learn(
 
     step = backend.make_step(optimizer)
     setup_fn = backend.setup_policy()
-    teacher_weights = (
-        make_search_weights(
+    blend = value_blend_max > 0
+    mk = make_search_weights_value if blend else make_search_weights
+    teacher_weights: PolicyWeights | PolicyWeightsValue | None = (
+        mk(
             teacher_value,
             num_simulations=teacher_sims,
             max_num_considered_actions=max_num_considered_actions,
@@ -124,11 +140,12 @@ def learn(
     for i in iters:
         t0 = time.perf_counter()
         teaching = teacher_weights is not None and i < teacher_iters
+        wfn: PolicyWeights | PolicyWeightsValue
         if teaching:
-            wfn = cast(PolicyWeights, teacher_weights)
+            wfn = cast("PolicyWeights | PolicyWeightsValue", teacher_weights)
         else:
             v_fn, p_fn = backend.seams(net)
-            wfn = make_search_weights(
+            wfn = mk(
                 v_fn, prior=p_fn, value_scale=2.0,
                 num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
@@ -136,6 +153,7 @@ def learn(
         fresh = self_play(
             wfn, backend.observe, n_samples=selfplay_samples, setup_fn=setup_fn,
             batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
+            record_value=blend,
         )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
         nf = fresh["value"].shape[0]
@@ -152,6 +170,13 @@ def learn(
             ev = fe if ev is None else concat(ev, fe, 8192)
         else:
             fr = fresh
+        # value-target blend (training slice only): (1-a)*z + a*(q in [0,1]).
+        alpha = (
+            value_blend_max * min(1.0, i / max(value_blend_ramp, 1)) if blend else 0.0
+        )
+        if blend:
+            q_prob = (fr["q"] + 1.0) / 2.0  # searcher frame [-1,1] -> P(win) [0,1]
+            fr["value"] = (1.0 - alpha) * fr["value"] + alpha * q_prob
         buf_state = buffer.add(buf_state, backend.to_item(fr))
         steps = (
             train_steps
@@ -167,6 +192,7 @@ def learn(
         metrics: dict[str, float] = {
             "samples": float(nf), "train_steps": float(steps),
             "lr": lr, "target_entropy": target_entropy,
+            "value_blend_alpha": alpha,
             "t_selfplay": t_selfplay, "teaching": float(teaching),
         }  # fmt: skip
 

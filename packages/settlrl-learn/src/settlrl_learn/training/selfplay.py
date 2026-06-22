@@ -25,7 +25,7 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
 from settlrl_agents.policy import BeliefPolicy
-from settlrl_agents.search import PolicyWeights
+from settlrl_agents.search import PolicyWeights, PolicyWeightsValue
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, GamePhase
@@ -47,7 +47,7 @@ def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -
 
 
 def self_play(
-    weights_fn: PolicyWeights,
+    weights_fn: PolicyWeights | PolicyWeightsValue,
     observe: ObserveFn,
     *,
     n_samples: int,
@@ -58,10 +58,15 @@ def self_play(
     seed: int = 0,
     max_steps: int = 100_000,
     max_game_len: int = 800,
+    record_value: bool = False,
 ) -> Samples:
     """Collect >= ``n_samples`` self-play positions, the moves and policy targets
     drawn from ``weights_fn``. Positions from finished games are credited with the
     acting seat's win (1) / loss (0); unfinished games are discarded.
+
+    ``record_value`` expects ``weights_fn`` to also return the searched root value
+    (a :data:`~settlrl_agents.search.PolicyWeightsValue`) and stores it under the
+    ``q`` key (searcher frame, [-1, 1]) -- the value-blend target's ``q`` term.
 
     ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's
     retained pending positions -- a cold/degenerate net can drag a game out
@@ -80,9 +85,9 @@ def self_play(
         batch_size=batch_size, seed=seed, reward="sparse",
         n_players=n_players, track_beliefs=True,
     )  # fmt: skip
-    pending: list[list[tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int]]] = [
-        [] for _ in range(batch_size)
-    ]
+    pending: list[
+        list[tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float]]
+    ] = [[] for _ in range(batch_size)]
     out: dict[str, list[np.ndarray]] = {}
     trailing: dict[str, tuple[int, ...]] = {}
     vals: list[float] = []
@@ -98,9 +103,13 @@ def self_play(
         mask = env.flat_mask()
         view = view_of(state, beliefs, sel)
         key, k_search, k_move, k_setup = jax.random.split(key, 4)
-        weights = search(
-            jax.random.split(k_search, batch_size), layout, view, sel, mask
-        )
+        result = search(jax.random.split(k_search, batch_size), layout, view, sel, mask)
+        q_np = np.zeros(batch_size, np.float32)  # overwritten when recording value
+        if record_value:
+            weights, qv = result
+            q_np = np.asarray(qv)
+        else:
+            weights = result
         move = _sample_moves(k_move, weights, mask, temperature)
         # Setup-phase lanes play (unrecorded) via the fixed setup policy.
         is_setup = (
@@ -119,6 +128,8 @@ def self_play(
         if not trailing:  # capture per-key trailing shapes once, for the empty case
             trailing = {k: v.shape[1:] for k, v in obs.items()}
             trailing["policy"], trailing["mask"] = w_np.shape[1:], m_np.shape[1:]
+            if record_value:
+                trailing["q"] = ()
             out = {k: [] for k in (*trailing,)}
         for lane in range(batch_size):
             if is_setup[lane]:  # the net does not train on setup positions
@@ -128,6 +139,7 @@ def self_play(
                 w_np[lane],
                 m_np[lane],
                 int(sel_np[lane]),
+                float(q_np[lane]),
             )
             pending[lane].append(row)
             if len(pending[lane]) > max_game_len:
@@ -136,11 +148,13 @@ def self_play(
         env.step(*flat_to_action(move))
         rewards = np.asarray(env.rewards)
         for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)).tolist():
-            for obs_l, pol_l, mask_l, seat in pending[lane]:
+            for obs_l, pol_l, mask_l, seat, q_l in pending[lane]:
                 for k, v in obs_l.items():
                     out[k].append(v)
                 out["policy"].append(pol_l)
                 out["mask"].append(mask_l)
+                if record_value:
+                    out["q"].append(np.asarray(q_l, np.float32))
                 vals.append(float(rewards[lane, seat] > 0))
             pending[lane] = []
 

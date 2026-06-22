@@ -168,7 +168,10 @@ simulation and descends the live engine, filtering legality per simulation — t
 half mctx's fixed action axis could not express (Cowling 2012; the Canopy custom
 tree). Selection is mctx's Gumbel-MuZero ported onto it (no `mctx` dependency).
 `make_search` argmaxes the improved policy; `make_search_weights` returns the
-distribution (the AlphaZero policy target — experiment 0004). Shared prior/dice
+distribution (the AlphaZero policy target — experiment 0004);
+`make_search_weights_value` returns `(distribution, root value)` — the searched
+root value (searcher frame, 2·P(win)−1) is the AZ value-blend `q` target, the
+visit-weighted mean of the root edges (`_run`). Shared prior/dice
 constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
 `__init__.py`, the tree in `ismcts.py`. It replaced a former
 `mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine

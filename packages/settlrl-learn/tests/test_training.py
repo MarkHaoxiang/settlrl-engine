@@ -98,6 +98,23 @@ def test_self_play_samples_shape_under_uniform_policy() -> None:
     assert samples["policy"].shape[1] == N_FLAT
 
 
+def _uniform_weights_value(
+    key: Array, layout: BoardLayout, view: Any, player: Array, mask: Array
+) -> tuple[Array, Array]:
+    """Uniform policy + a constant root value (a PolicyWeightsValue stand-in)."""
+    return mask.astype(jnp.float32), jnp.float32(0.3)
+
+
+def test_self_play_records_root_value_when_asked() -> None:
+    backend = MLPBackend((16,))
+    samples = self_play(
+        _uniform_weights_value, backend.observe,
+        n_samples=8, batch_size=4, seed=0, record_value=True,
+    )  # fmt: skip
+    assert "q" in samples and samples["q"].shape == samples["value"].shape
+    assert bool(np.all(np.abs(samples["q"] - 0.3) < 1e-5))  # the stand-in's q
+
+
 def test_runstate_serialise_roundtrip_is_bit_exact(tmp_path: Path) -> None:
     # The resume invariant at the serialization layer (no training): a fresh
     # RunState round-trips bit-exactly through eqx for both backends.

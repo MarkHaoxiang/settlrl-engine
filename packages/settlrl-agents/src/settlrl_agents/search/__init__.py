@@ -27,16 +27,24 @@ from settlrl_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
 from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
 from settlrl_agents.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
 from settlrl_agents.sample import sample_world
-from settlrl_agents.value import ValueFunction, heuristic_value
+from settlrl_agents.value import Value, ValueFunction, heuristic_value
 
-from ._common import _ILLEGAL, _NO_PROPOSE, PolicyWeights, _Weights
+from ._common import (
+    _ILLEGAL,
+    _NO_PROPOSE,
+    PolicyWeights,
+    PolicyWeightsValue,
+    _Weights,
+)
 from .ismcts import make_tree
 
 __all__ = [
     "PolicyWeights",
+    "PolicyWeightsValue",
     "lookahead_policy",
     "make_search",
     "make_search_weights",
+    "make_search_weights_value",
     "make_tree",
     "search_policy",
 ]
@@ -53,7 +61,7 @@ _ACCEPT = jnp.int32(ActionType.ACCEPT_TRADE)
 _NO_PARAMS = ActionParams(idx=jnp.int32(0), target=jnp.int32(0))
 
 
-def make_search_weights(
+def make_search_weights_value(
     value: ValueFunction,
     *,
     prior: PolicyPrior | None = None,
@@ -66,16 +74,19 @@ def make_search_weights(
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
     expected_rolls: bool = True,
-) -> PolicyWeights:
-    """Re-determinizing SO-ISMCTS, returning the improved-policy weights (the
-    AlphaZero policy target; :func:`make_search` argmaxes these).
+) -> PolicyWeightsValue:
+    """Re-determinizing SO-ISMCTS, returning ``(improved-policy weights, root
+    value)`` — the AlphaZero policy *and* value (``q``) targets. The root value is
+    the searched estimate in the searcher's frame (2·P(win)-1), averaged over the
+    ``num_trees`` trees alongside the weights.
 
     ``value`` drives the leaf and, when ``prior`` is None, the root one-step
     sweep; a ``prior`` replaces both the root and interior priors with learned
     logits. ``num_trees`` independent trees are averaged. ``num_simulations=0`` is
-    the *lookahead* special case (the bare root sweep). ``propose_rate`` > 0 lets
-    the root offer trades, scored by their accepted outcome under a partner model
-    minus ``trade_penalty``; offers are root-only.
+    the *lookahead* special case (the bare root sweep, root value = the best legal
+    successor value). ``propose_rate`` > 0 lets the root offer trades, scored by
+    their accepted outcome under a partner model minus ``trade_penalty``; offers
+    are root-only.
     """
     tree = make_tree(
         value,
@@ -128,8 +139,8 @@ def make_search_weights(
         view: BeliefView,
         player: Player,
         mask: FlatMask,
-    ) -> _Weights:
-        """Improved-policy weights from one re-determinizing ISMCTS tree."""
+    ) -> tuple[_Weights, Value]:
+        """Improved-policy weights + root value from one re-determinizing tree."""
         k_root, k_gate, k_search = jax.random.split(key, 3)
         # The root prior + value use one sampled world (the prior only orders the
         # first expansions; per-simulation resampling carries the rest).
@@ -145,13 +156,63 @@ def make_search_weights(
         view: BeliefView,
         player: Player,
         mask: FlatMask,
-    ) -> _Weights:
-        """The root one-step sweep over one sampled world (num_simulations=0)."""
+    ) -> tuple[_Weights, Value]:
+        """The root one-step sweep over one sampled world (num_simulations=0); the
+        root value is the best legal successor value mapped to [-1, 1]."""
         k_world, k_gate = jax.random.split(key)
         world = sample_world(k_world, view, player)
-        return jnp.where(
+        w = jnp.where(
             mask, root_logits(k_gate, layout, world, player, mask), _ILLEGAL
         )
+        best = jnp.max(jnp.where(mask, w, -jnp.inf))  # logit = value / prior_scale
+        return w, jnp.tanh(best * prior_scale / value_scale)
+
+    def weights(
+        key: KeyScalar,
+        layout: BoardLayout,
+        view: BeliefView,
+        player: Player,
+        mask: FlatMask,
+    ) -> tuple[_Weights, Value]:
+        leaf = lookahead if num_simulations == 0 else search_tree
+        w, v = jax.vmap(leaf, in_axes=(0, None, None, None, None))(
+            jax.random.split(key, num_trees), layout, view, player, mask
+        )
+        return w.mean(axis=0), v.mean(axis=0)
+
+    return weights
+
+
+def make_search_weights(
+    value: ValueFunction,
+    *,
+    prior: PolicyPrior | None = None,
+    num_trees: int = 1,
+    num_simulations: int = 32,
+    max_depth: int = 12,
+    max_num_considered_actions: int = 16,
+    value_scale: float = 20.0,
+    prior_scale: float = 1.0,
+    propose_rate: float = 0.0,
+    trade_penalty: float = 0.25,
+    expected_rolls: bool = True,
+) -> PolicyWeights:
+    """The improved-policy weights alone (the AlphaZero policy target;
+    :func:`make_search` argmaxes these) — :func:`make_search_weights_value` with
+    the root value dropped. Parameters are identical."""
+    wv = make_search_weights_value(
+        value,
+        prior=prior,
+        num_trees=num_trees,
+        num_simulations=num_simulations,
+        max_depth=max_depth,
+        max_num_considered_actions=max_num_considered_actions,
+        value_scale=value_scale,
+        prior_scale=prior_scale,
+        propose_rate=propose_rate,
+        trade_penalty=trade_penalty,
+        expected_rolls=expected_rolls,
+    )
 
     def weights(
         key: KeyScalar,
@@ -160,11 +221,7 @@ def make_search_weights(
         player: Player,
         mask: FlatMask,
     ) -> _Weights:
-        leaf = lookahead if num_simulations == 0 else search_tree
-        w = jax.vmap(leaf, in_axes=(0, None, None, None, None))(
-            jax.random.split(key, num_trees), layout, view, player, mask
-        )
-        return w.mean(axis=0)
+        return wv(key, layout, view, player, mask)[0]
 
     return weights
 

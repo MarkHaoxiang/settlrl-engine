@@ -76,10 +76,12 @@ _Node = IntScalar  # a node id in the _Tree (0 = root)
 _Action = IntScalar  # a flat action index
 
 TreeSearch = Callable[
-    [KeyScalar, BoardLayout, BeliefView, Player, _LegalMask, _PriorLogits], _Weights
+    [KeyScalar, BoardLayout, BeliefView, Player, _LegalMask, _PriorLogits],
+    tuple[_Weights, Value],
 ]
 """One ISMCTS search (what :func:`make_tree` returns): the searcher's legal set
-and root prior in, the improved-policy ``action_weights`` out."""
+and root prior in, the improved-policy ``action_weights`` and the searched root
+value (searcher frame) out."""
 
 
 # --- tree storage ---
@@ -422,7 +424,7 @@ def _run(
     player: Player,
     mask: _LegalMask,
     root_logits: _PriorLogits,
-) -> _Weights:
+) -> tuple[_Weights, Value]:
     player = player.astype(jnp.int32)
     key, k_gumbel = jax.random.split(key)
     keys = jax.random.split(key, cfg.num_simulations + 1)
@@ -472,7 +474,11 @@ def _run(
     tree = cast(_Tree, jax.lax.fori_loop(0, cfg.num_simulations, simulate, tree))
     # action_weights = softmax(root_logits + completed_Q) over the legal set.
     cq, legal_logits = _completed_q(tree, jnp.int32(0), root_legal, player)
-    return jax.nn.softmax(legal_logits + cq)
+    weights = jax.nn.softmax(legal_logits + cq)
+    # root value = visit-weighted mean of the root edges' backed-up values (the
+    # root mover is the searcher, so w[0] is already in the searcher's frame).
+    root_q = tree.w[0].sum() / jnp.maximum(tree.n[0].sum(), 1.0)
+    return weights, root_q
 
 
 # --- factory ---

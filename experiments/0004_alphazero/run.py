@@ -50,6 +50,10 @@ class AlphaZeroConfig(Config):
     train_steps: int = 200
     reuse: float = 0.0  # GNN: updates/iter = reuse*fresh/batch (0 -> fixed train_steps)
     eval_frac: float = 0.1  # GNN: held-out fraction for the val_* metrics
+    # value-target blend (1-a)z + a*q (Canopy): a ramps 0 -> q_weight_max over
+    # q_weight_ramp iters; q = the searched root value. 0 -> pure outcome z.
+    q_weight_max: float = 0.0
+    q_weight_ramp: int = 10
     batch_size: int = 256
     buffer_max: int = 50_000
     buffer_min: int = 512
@@ -146,6 +150,31 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_sims": 24,
         "checkpoint_every": 2,
     },
+    # gnn_warm + Canopy value-target blend: train value on (1-a)z + a*q, a ramping
+    # to 0.5 over 12 iters once past the warm-up -- the audit's #1 lever for the
+    # dice-variance-starved value head (the search now exposes its root q).
+    "gnn_warm_qblend": {
+        "net": "gnn",
+        "width": 96,
+        "layers": 4,
+        "n_iterations": 30,
+        "teacher": True,
+        "teacher_iters": 8,
+        "teacher_sims": 32,
+        "selfplay_samples": 4096,
+        "selfplay_batch": 256,
+        "num_simulations": 32,
+        "max_num_considered_actions": 16,
+        "reuse": 2.0,
+        "batch_size": 512,
+        "q_weight_max": 0.5,
+        "q_weight_ramp": 12,
+        "arena_games": 40,
+        "arena_every": 4,
+        "arena_batch": 64,
+        "arena_sims": 24,
+        "checkpoint_every": 2,
+    },
     "gnn_smoke": {
         "net": "gnn",
         "width": 16,
@@ -162,6 +191,8 @@ VARIANTS: dict[str, dict[str, object]] = {
         "selfplay_batch": 4,
         "train_steps": 2,
         "batch_size": 4,
+        "q_weight_max": 0.5,  # exercise the value-blend path in the smoke
+        "q_weight_ramp": 1,
         "arena_games": 4,
         "arena_every": 1,
         "wandb_mode": "disabled",
@@ -251,6 +282,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             train_steps=cfg.train_steps,
             reuse=cfg.reuse,
             eval_frac=cfg.eval_frac,
+            value_blend_max=cfg.q_weight_max,
+            value_blend_ramp=cfg.q_weight_ramp,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,
@@ -333,6 +366,8 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             buffer_min=cfg.buffer_min,
             batch_size=cfg.batch_size,
             train_steps=cfg.train_steps,
+            value_blend_max=cfg.q_weight_max,
+            value_blend_ramp=cfg.q_weight_ramp,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,

@@ -89,9 +89,11 @@ deps only because this subpackage uses them.
     backends). `reuse` caps updates/iter at the AZ sample-reuse factor (the
     value-overfit fix); a held-out `eval_frac` feeds the backend's `eval_metrics`
     (the `val_*` generalization metrics); `teacher_value`/`teacher_iters`
-    warm-start from a fixed strong search (the cold-start fix). Value target is
-    pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a search that
-    exposes root Q (see the Canopy reference below).
+    warm-start from a fixed strong search (the cold-start fix). `value_blend_max`
+    > 0 trains value on Canopy's `(1−α)z + α·q` (game outcome blended with the
+    searched root `q` from `make_search_weights_value`, α ramped 0→max over
+    `value_blend_ramp` iters) — the dice-variance fix; only the training slice is
+    blended, the eval slice keeps raw `z` (see the Canopy reference below).
   - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
     seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
     lower-bound sanity check); the play agent comes from `backend.play_agent`.
