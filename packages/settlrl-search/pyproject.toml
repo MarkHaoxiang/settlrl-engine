@@ -11,6 +11,7 @@ dependencies = [
     "settlrl-engine",
     "jax[cpu]>=0.4.0",
     "jaxtyping>=0.3.10",
+    "pydantic>=2.13.4",
 ]
 
 [build-system]

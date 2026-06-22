@@ -8,7 +8,12 @@ in settlrl-agents; this package is the *search* and its substrate.
 
 Module map:
 
-- `ismcts.py` — the custom fixed-capacity SO-ISMCTS tree (`make_tree`).
+- `ismcts/` — the custom fixed-capacity SO-ISMCTS tree (`make_tree`,
+  `SearchConfig`); split into `config.py` (the pydantic `SearchConfig`, the
+  jit-static `_Cfg`, the Sequential-Halving schedule, the tree dtype helpers),
+  `tree.py` (the `_Tree` store + select/expand/backup), `descent.py` (the
+  determinize/descend/evaluate walk + engine seam), and `loop.py` (`_run` +
+  `make_tree`).
 - `__init__.py` — the `make_search` wrapper assembling root prior / lookahead /
   `num_trees` over the tree, plus the trade machinery.
 - `_common.py` — shared prior/dice constants (`_TIER_LOGITS`, `_ROLL_P`,
@@ -76,11 +81,11 @@ Module map:
   row carries a +150 gate in greedy's bonus channel (not here), so priors are
   unchanged.
 
-## ismcts.py / __init__.py / _common.py
+## ismcts/ / __init__.py / _common.py
 
 `make_search` / `make_search_weights` (`__init__.py`) are the
 re-determinizing **Single-Observer ISMCTS**: a custom fixed-capacity tree
-(`ismcts.py`, `make_tree`) that determinizes a fresh `sample_world` per
+(`ismcts/`, `make_tree`) that determinizes a fresh `sample_world` per
 simulation and descends the live engine, filtering legality per simulation — the
 half mctx's fixed action axis could not express (Cowling 2012; the Canopy custom
 tree). Selection is mctx's Gumbel-MuZero ported onto it (no `mctx` dependency).
@@ -90,7 +95,7 @@ distribution (the AlphaZero policy target — experiment 0004);
 root value (searcher frame, 2·P(win)−1) is the AZ value-blend `q` target, the
 visit-weighted mean of the root edges (`_run`). Shared prior/dice
 constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
-`__init__.py`, the tree in `ismcts.py`. It replaced a former
+`__init__.py`, the tree in `ismcts/`. It replaced a former
 `mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine
 behind it (2026-06-19, 742b94b). ~5–6 ms/move (B=1 CPU; was 7.4 with mctx).
 

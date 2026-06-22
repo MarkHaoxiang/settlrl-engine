@@ -5,9 +5,11 @@ engine-only seam primitives the search and its callers share.
 
 ## Layout
 
-- `ismcts.py` — the search tree (`make_tree`): a custom fixed-capacity tree
-  that determinizes a fresh `sample_world` per simulation and descends the
-  live engine, filtering legality per simulation.
+- `ismcts/` — the search tree package (`make_tree`, `SearchConfig`): a custom
+  fixed-capacity tree that determinizes a fresh `sample_world` per simulation
+  and descends the live engine, filtering legality per simulation. `config.py`
+  holds the configuration, `tree.py` the node store, `descent.py` the walk, and
+  `loop.py` the orchestration and `make_tree` factory.
 - `__init__.py` — the public wrapper: `make_search` / `make_search_weights` /
   `make_search_weights_value` (the `BeliefPolicy`, the AlphaZero policy
   target, and the policy-plus-root-value target), the `num_simulations=0`
