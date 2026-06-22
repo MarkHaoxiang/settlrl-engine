@@ -16,11 +16,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
-from settlrl_agents.policy import PolicyPrior
 from settlrl_agents.value import Value, ValueFunction
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar, KeyScalar
 from settlrl_engine.env import N_FLAT
+from settlrl_search.policy import PolicyPrior
 
 from settlrl_learn.features import FEATURE_DIM, features
 

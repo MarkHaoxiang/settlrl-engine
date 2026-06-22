@@ -21,7 +21,6 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
-from settlrl_agents.internal.rows import ROW_IDX, ROW_TARGET, ROW_TYPE, flat_row
 from settlrl_engine.board.layout import (
     N_EDGES,
     N_PORTS,
@@ -38,6 +37,7 @@ from settlrl_engine.board.layout import (
 )
 from settlrl_engine.board.state import BoardState
 from settlrl_engine.env import N_FLAT, ActionType
+from settlrl_search.rows import ROW_IDX, ROW_TARGET, ROW_TYPE, flat_row
 
 Cube = tuple[int, int, int]
 _AxisOp = tuple[tuple[int, ...], int]  # (axis permutation, sign)

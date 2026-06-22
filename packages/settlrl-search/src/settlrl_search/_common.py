@@ -13,10 +13,10 @@ from settlrl_engine.board.state import IntScalar, KeyScalar
 from settlrl_engine.env import N_FLAT
 from settlrl_engine.mechanics.action import ActionType
 
-from settlrl_agents.greedy import TIER_SCORES
-from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
-from settlrl_agents.policy import FlatMask
-from settlrl_agents.value import Value
+from settlrl_search.policy import FlatMask
+from settlrl_search.priors import TIER_SCORES
+from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
+from settlrl_search.value import Value
 
 _ILLEGAL = -1e9  # prior logit for illegal moves
 

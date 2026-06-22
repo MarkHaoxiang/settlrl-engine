@@ -21,6 +21,12 @@ from settlrl_engine.board.resources import N_RESOURCES
 from settlrl_engine.board.state import GamePhase
 from settlrl_engine.env import ActionType
 from settlrl_engine.mechanics.trade import pack_trade_single
+from settlrl_search.policy import (
+    GameAgent,
+    HostFlatMask,
+    HostObservation,
+    StatefulPolicy,
+)
 
 from settlrl_agents.planner.goals import RES_WEIGHT, choose_plan, plan_candidates, wprod
 from settlrl_agents.planner.pov import (
@@ -39,12 +45,6 @@ from settlrl_agents.planner.pov import (
 )
 from settlrl_agents.planner.tactic import Tactic
 from settlrl_agents.planner.tree import Blackboard, Node, Selector
-from settlrl_agents.policy import (
-    GameAgent,
-    HostFlatMask,
-    HostObservation,
-    StatefulPolicy,
-)
 
 # Own turns a plan may sit with no step realized before it is abandoned
 # (covers goals starved by piece limits or an empty dev deck, which the

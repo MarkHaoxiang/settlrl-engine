@@ -28,11 +28,11 @@ from settlrl_engine.board.state import BoardState, GamePhase, KeyScalar
 from settlrl_engine.env import ActionType
 from settlrl_engine.mechanics.action import ActionParams, apply_action
 from settlrl_engine.mechanics.flat import flat_available_for
+from settlrl_search.policy import FlatMask
+from settlrl_search.rows import ROW_PARAMS as _ROW_PARAMS
+from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
 
-from settlrl_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
-from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
 from settlrl_agents.planner.pov import Pov
-from settlrl_agents.policy import FlatMask
 from settlrl_agents.value import heuristic_value
 
 _DEV_TOTAL = int(sum(DEV_CARD_COUNTS))

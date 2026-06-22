@@ -23,11 +23,11 @@ from settlrl_engine.mechanics.action import (
 )
 from settlrl_engine.mechanics.trade import _PARTNER_BITS
 
-from settlrl_agents.internal.rows import ROW_PARAMS as _ROW_PARAMS
-from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
-from settlrl_agents.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
-from settlrl_agents.sample import sample_world
-from settlrl_agents.value import Value, ValueFunction, heuristic_value
+from settlrl_search.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
+from settlrl_search.rows import ROW_PARAMS as _ROW_PARAMS
+from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
+from settlrl_search.sample import sample_world
+from settlrl_search.value import Value, ValueFunction
 
 from ._common import (
     _ILLEGAL,
@@ -41,12 +41,10 @@ from .ismcts import make_tree
 __all__ = [
     "PolicyWeights",
     "PolicyWeightsValue",
-    "lookahead_policy",
     "make_search",
     "make_search_weights",
     "make_search_weights_value",
     "make_tree",
-    "search_policy",
 ]
 
 # Trade-proposal rows and their partners (the low bits of the packed target —
@@ -104,6 +102,17 @@ def make_search_weights_value(
         ordered=ordered,
     )
 
+    def value_sweep(
+        layout: BoardLayout, world: BoardState, player: Player, mask: FlatMask
+    ) -> tuple[_Weights, BoardState]:
+        """Per-row successor values (and the successors) over one concrete
+        world: the one-step value sweep."""
+        successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
+            layout, world, _ROW_TYPE, _ROW_PARAMS, mask
+        )
+        values = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+        return values, successors
+
     def root_logits(
         key: KeyScalar,
         layout: BoardLayout,
@@ -115,10 +124,7 @@ def make_search_weights_value(
         (proposals excluded), optionally with trade offers priced in."""
         if prior is not None:
             return prior(layout, world, player)
-        successors, _ = jax.vmap(apply_action, in_axes=(None, None, 0, 0, 0))(
-            layout, world, _ROW_TYPE, _ROW_PARAMS, mask
-        )
-        values = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+        values, successors = value_sweep(layout, world, player, mask)
         logits = values / prior_scale + _NO_PROPOSE
         if propose_rate <= 0.0:
             return logits
@@ -168,8 +174,15 @@ def make_search_weights_value(
         k_world, k_gate = jax.random.split(key)
         world = sample_world(k_world, view, player)
         w = jnp.where(mask, root_logits(k_gate, layout, world, player, mask), _ILLEGAL)
-        best = jnp.max(jnp.where(mask, w, -jnp.inf))  # logit = value / prior_scale
-        return w, jnp.tanh(best * prior_scale / value_scale)
+        if prior is None:
+            # w is value/prior_scale on the non-proposal rows; recover the value.
+            best = jnp.max(jnp.where(mask, w, -jnp.inf)) * prior_scale
+        else:
+            # A learned prior's logits are not values, so value the successors
+            # directly (proposals excluded, as in the prior-less sweep).
+            values, _ = value_sweep(layout, world, player, mask)
+            best = jnp.max(jnp.where(mask, values + _NO_PROPOSE, -jnp.inf))
+        return w, jnp.tanh(best / value_scale)
 
     def weights(
         key: KeyScalar,
@@ -296,10 +309,3 @@ def _accepted_outcome(layout: BoardLayout, succ: BoardState) -> BoardState:
     avail = action_available(layout, succ, _ACCEPT, _NO_PARAMS)
     accepted, _ = apply_action(layout, succ, _ACCEPT, _NO_PARAMS, avail)
     return accepted
-
-
-search_policy = make_search(heuristic_value)
-"""The shipped search: re-determinizing SO-ISMCTS over :func:`heuristic_value`."""
-
-lookahead_policy = make_search(heuristic_value, num_simulations=0, propose_rate=0.5)
-"""One-step lookahead — the ``num_simulations=0`` special case of the search."""

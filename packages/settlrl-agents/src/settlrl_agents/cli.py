@@ -8,10 +8,10 @@ import math
 from typing import Annotated, NamedTuple
 
 import typer
+from settlrl_search.policy import BeliefSpec, ObservationSpec, StatefulSpec
 
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import evaluate
-from settlrl_agents.policy import BeliefSpec, ObservationSpec, StatefulSpec
 from settlrl_agents.value import make_heuristic, tuned_value
 
 

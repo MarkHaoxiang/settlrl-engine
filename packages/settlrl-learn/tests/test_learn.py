@@ -5,7 +5,6 @@ import pathlib
 import jax
 import jax.numpy as jnp
 import numpy as np
-from settlrl_agents.search import make_search
 from settlrl_engine.board import Board, make_board
 from settlrl_engine.env import BatchedSettlrlEnv
 from settlrl_learn import (
@@ -20,6 +19,7 @@ from settlrl_learn import (
     save_params,
     value_loss,
 )
+from settlrl_search import make_search
 
 
 def _single(n_players: int, seed: int = 0) -> Board:

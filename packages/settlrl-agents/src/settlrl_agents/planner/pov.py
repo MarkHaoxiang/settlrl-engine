@@ -1,7 +1,7 @@
 """Plain-numpy point of view: one observation unpacked for host-side logic.
 
 ``Pov`` unpacks one seat's host-fetched observation (see
-:data:`~settlrl_agents.policy.HostObservation`) plus its legality mask,
+:data:`~settlrl_search.policy.HostObservation`) plus its legality mask,
 and the module-level tables
 restate the static board graph (vertex adjacency, incident tiles, the flat
 action table) in host-side form. Everything here is read-only convenience for
@@ -30,20 +30,19 @@ from settlrl_engine.board.resources import (
 )
 from settlrl_engine.board.state import CITY, GamePhase
 from settlrl_engine.env import ActionType
-
-from settlrl_agents.internal.rows import (
+from settlrl_search.policy import HostFlatMask, HostObservation
+from settlrl_search.rows import (
     ROW_IDX as ROW_IDX,
 )
-from settlrl_agents.internal.rows import (
+from settlrl_search.rows import (
     ROW_TARGET as ROW_TARGET,
 )
-from settlrl_agents.internal.rows import (
+from settlrl_search.rows import (
     ROWS_OF_TYPE as ROWS_OF_TYPE,
 )
-from settlrl_agents.internal.rows import (
+from settlrl_search.rows import (
     flat_row as flat_row,
 )
-from settlrl_agents.policy import HostFlatMask, HostObservation
 
 # -- Static board graph, host-side ------------------------------------------
 
@@ -73,7 +72,7 @@ VERTEX_TILES: tuple[tuple[int, ...], ...] = tuple(
 """Tiles cornered by each vertex."""
 
 # The flat-action table's host decode (ROW_IDX / ROW_TARGET / ROWS_OF_TYPE /
-# flat_row) is re-exported above from ``settlrl_agents.internal.rows``.
+# flat_row) is re-exported above from ``settlrl_search.rows``.
 
 # Build costs in resource order [sheep, wheat, wood, brick, ore].
 COST_ROAD: np.ndarray = np.asarray(ROAD_COST, dtype=np.int64)

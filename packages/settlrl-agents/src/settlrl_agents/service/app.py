@@ -47,19 +47,55 @@ class _Resync(Exception):
 
 class _Tracker:
     """One replayed :class:`GameSession` per ``game_id``, at its applied move
-    count, so a request only applies moves beyond what's tracked. Bounded LRU;
-    thread-safe (replay is offloaded to a worker thread)."""
+    count, so a request only applies moves beyond what's tracked. Bounded LRU.
+
+    The whole ``act`` critical section (advance + the bot reading the session) is
+    serialized per ``game_id``, so a concurrent same-game request can't mutate the
+    session while the bot is reading it; distinct games still run concurrently.
+    The structure mutations (``_games`` / ``_locks``) take the short global lock."""
 
     def __init__(self, bot: Bot, cap: int = _CACHE_CAP) -> None:
         self._bot = bot
         self._cap = cap
         self._games: OrderedDict[str, GameSession] = OrderedDict()
         self._lock = threading.Lock()
+        self._locks: dict[str, threading.Lock] = {}
 
-    def view_for(self, req: ActRequest) -> GameView:
-        """Advance ``game_id`` by the request's moves and return the seat's view.
+    def _game_lock(self, game_id: str) -> threading.Lock:
+        with self._lock:
+            return self._locks.setdefault(game_id, threading.Lock())
 
-        Raises :class:`_Resync` when the tracked game is not at ``req.base``."""
+    def act(self, req: ActRequest) -> ActResponse:
+        """Apply the request's moves, then ask the bot for the seat's move —
+        the whole section serialized per ``game_id``.
+
+        Raises :class:`_Resync` when the tracked game is not at ``req.base``, and
+        ``HTTPException`` when the seat isn't acting or the bot returns an illegal
+        move."""
+        with self._game_lock(req.game_id):
+            view = self._advance(req)
+            if view.session.terminal() or view.session.acting_seat() != req.seat:
+                raise HTTPException(
+                    status_code=409, detail="requested seat is not acting"
+                )
+            legal = set(view.session.legal_flat())
+            if not legal:  # the acting seat always has a move; guard a NaN-prone mask
+                raise HTTPException(
+                    status_code=409, detail="no legal move for that seat"
+                )
+            move = self._bot.act(view)
+            try:
+                if flat_for_move(move) not in legal:
+                    raise ValueError("move is not legal in this position")
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"bot returned an illegal move: {exc}"
+                ) from exc
+            return ActResponse(move=move)
+
+    def _advance(self, req: ActRequest) -> GameView:
+        """(holding the per-game lock) advance ``game_id`` by the request's moves
+        and return the seat's view."""
         with self._lock:
             session = self._games.get(req.game_id)
             if session is None:
@@ -78,6 +114,7 @@ class _Tracker:
             self._games.move_to_end(req.game_id)
             while len(self._games) > self._cap:
                 dropped, _ = self._games.popitem(last=False)
+                self._locks.pop(dropped, None)
                 self._bot.end_game(dropped)
             return GameView(req.game_id, req.seat, session)
 
@@ -93,7 +130,7 @@ def create_app(bot: Bot) -> FastAPI:
     @app.post("/act")
     async def act(req: ActRequest) -> ActResponse:
         try:
-            view = await anyio.to_thread.run_sync(tracker.view_for, req)
+            return await anyio.to_thread.run_sync(tracker.act, req)
         except _Resync as resync:
             raise HTTPException(
                 status_code=409, detail={"resync": True, "have": resync.have}
@@ -102,20 +139,6 @@ def create_app(bot: Bot) -> FastAPI:
             raise HTTPException(
                 status_code=422, detail=f"cannot apply moves: {exc}"
             ) from exc
-        if view.session.terminal() or view.session.acting_seat() != req.seat:
-            raise HTTPException(status_code=409, detail="requested seat is not acting")
-        legal = set(view.session.legal_flat())
-        if not legal:  # the acting seat always has a move; guard a NaN-prone mask
-            raise HTTPException(status_code=409, detail="no legal move for that seat")
-        move = await anyio.to_thread.run_sync(bot.act, view)
-        try:
-            if flat_for_move(move) not in legal:
-                raise ValueError("move is not legal in this position")
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422, detail=f"bot returned an illegal move: {exc}"
-            ) from exc
-        return ActResponse(move=move)
 
     return app
 

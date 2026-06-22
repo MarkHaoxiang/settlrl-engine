@@ -1,5 +1,6 @@
 """Tests for the vectorized BuyDevelopmentCard action."""
 
+import jax
 import numpy as np
 from expecttest import assert_expected_inline
 from settlrl_engine.board import Board
@@ -22,7 +23,7 @@ def test_success(buy_board: Board) -> None:
         ),
         """\
 result=OK
-card=4
+card=0
 hand_total=1
 resources_total=0
 deck_total=24""",
@@ -65,3 +66,22 @@ def test_forced_out_of_stock_is_invalid(buy_board: Board) -> None:
     state, result = buy_development_card_step((layout, st), 2)
     assert int(result[0]) == ActionResult.INVALID.value
     assert np.array_equal(np.asarray(state.dev_hand), np.asarray(st.dev_hand))
+
+
+def test_forced_dev_card_key_invariant_across_outcomes(buy_board: Board) -> None:
+    """The chance-node seam invariant (mirror of the dice case): from one
+    post-roll MAIN state with a multi-type deck, forcing any in-stock card
+    type advances ``state.key`` to the SAME bytes -- the draw key stream is
+    independent of which card the search node enumerated."""
+    before = np.asarray(jax.random.key_data(buy_board[1].key))
+    keys: list[np.ndarray] = []
+    # params=t+1 forces type t; types 0/2/4 are all in stock (counts 14/2/5).
+    for t, param in ((0, 1), (2, 3), (4, 5)):
+        state, result = buy_development_card_step(buy_board, param)
+        assert int(result[0]) == ActionResult.SUCCESS.value
+        assert int(state.dev_hand[0, 0, t]) == 1  # the forced type was drawn
+        keys.append(np.asarray(jax.random.key_data(state.key)))
+
+    for other in keys[1:]:
+        assert np.array_equal(keys[0], other)  # identical across forced outcomes
+    assert not np.array_equal(keys[0], before)  # key actually advanced

@@ -15,6 +15,7 @@ members = [
     "settlrl-engine",
     "settlrl-game",
     "settlrl-learn",
+    "settlrl-search",
 ]
 
 [manifest.dependency-groups]
@@ -42,6 +43,7 @@ dev = [
     { name = "settlrl-agents", editable = "packages/settlrl-agents" },
     { name = "settlrl-game", editable = "packages/settlrl-game" },
     { name = "settlrl-learn", editable = "packages/settlrl-learn" },
+    { name = "settlrl-search", editable = "packages/settlrl-search" },
     { name = "tabulate", specifier = ">=0.9.0" },
     { name = "tqdm", specifier = ">=4.67" },
     { name = "types-tabulate", specifier = ">=0.9.0" },
@@ -2866,6 +2868,7 @@ dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
     { name = "settlrl-engine" },
+    { name = "settlrl-search" },
     { name = "typer" },
 ]
 
@@ -2882,6 +2885,7 @@ requires-dist = [
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
     { name = "settlrl-game", marker = "extra == 'service'", editable = "packages/settlrl-game" },
+    { name = "settlrl-search", editable = "packages/settlrl-search" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
 provides-extras = ["service"]
@@ -2978,6 +2982,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "settlrl-agents" },
     { name = "settlrl-engine" },
+    { name = "settlrl-search" },
 ]
 
 [package.metadata]
@@ -2988,6 +2993,27 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.1" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "settlrl-agents", editable = "packages/settlrl-agents" },
+    { name = "settlrl-engine", editable = "packages/settlrl-engine" },
+    { name = "settlrl-search", editable = "packages/settlrl-search" },
+]
+
+[package.metadata.requires-dev]
+cuda = []
+
+[[package]]
+name = "settlrl-search"
+version = "0.1.0"
+source = { editable = "packages/settlrl-search" }
+dependencies = [
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "settlrl-engine" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jax", extras = ["cpu"], specifier = ">=0.4.0" },
+    { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "settlrl-engine", editable = "packages/settlrl-engine" },
 ]
 

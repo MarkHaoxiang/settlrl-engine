@@ -37,9 +37,9 @@ def make_board(
     variable set-up token spiral); ``n_players`` (2..4) to
     :func:`make_board_state`.
     """
-    key = jax.random.key(seed)
-    layout = make_layout(batch_size, key=key, number_placement=number_placement)
-    state = make_board_state(batch_size, key=key, n_players=n_players)
+    k_layout, k_state = jax.random.split(jax.random.key(seed))
+    layout = make_layout(batch_size, key=k_layout, number_placement=number_placement)
+    state = make_board_state(batch_size, key=k_state, n_players=n_players)
     state = state._replace(robber=desert_tile(layout.tile_resource))
     return layout, state
 

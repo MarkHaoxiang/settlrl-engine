@@ -24,13 +24,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from settlrl_agents.search import (
+from settlrl_agents.value import ValueFunction
+from settlrl_search import (
     PolicyWeights,
     PolicyWeightsValue,
     make_search_weights,
     make_search_weights_value,
 )
-from settlrl_agents.value import ValueFunction
 
 from settlrl_learn.training.arena import arena
 from settlrl_learn.training.backend import (

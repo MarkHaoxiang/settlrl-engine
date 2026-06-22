@@ -1,4 +1,4 @@
-"""Turn the policy modules' jaxtyping annotations into enforced runtime checks
+"""Turn the search modules' jaxtyping annotations into enforced runtime checks
 (same pattern as settlrl-engine's top-level conftest: the hook must be installed
 before the target modules are first imported)."""
 
@@ -10,16 +10,15 @@ from jaxtyping import install_import_hook
 
 install_import_hook(
     [
-        "settlrl_agents.internal.feature_engineering",
-        "settlrl_agents.value",
-        "settlrl_agents.baselines",
-        "settlrl_agents.greedy",
-        "settlrl_agents.evaluate",
-        "settlrl_agents.planner.pov",
-        "settlrl_agents.planner.tree",
-        "settlrl_agents.planner.goals",
-        "settlrl_agents.planner.tactic",
-        "settlrl_agents.planner.agent",
+        "settlrl_search.rows",
+        "settlrl_search.policy",
+        "settlrl_search.value",
+        "settlrl_search.priors",
+        "settlrl_search.sample",
+        "settlrl_search._common",
+        "settlrl_search.ismcts",
+        "settlrl_search.expectimax",
+        "settlrl_search",
     ],
     "beartype.beartype",
 )

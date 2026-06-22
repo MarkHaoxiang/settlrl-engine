@@ -108,7 +108,8 @@ deps only because this subpackage uses them.
     `make_net_agent` composes setup + the net's search; `gnn_loss` is the masked
     loss (its finiteness is contract-tested).
 
-The gates (June 11 plan, evidence in settlrl-agents/CLAUDE.md): Stage 1 ships a
+The gates (June 11 plan; value-tuning evidence in settlrl-agents/CLAUDE.md,
+search/leaf evidence in settlrl-search/CLAUDE.md): Stage 1 ships a
 value only if `lookahead(net)` beats `lookahead(heuristic)` at ≥2σ, n≥400
 (`settlrl-agents bench`); Stage 2 reruns the sims ladder — depth pays nowhere
 with the stationary heuristic leaf, and that falsification is the reason this
@@ -122,7 +123,7 @@ ours). It is the point past our leaf-is-the-ceiling gate: learned policy + WDL
 value head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
 root (800 sims), explicit chance nodes for dice and dev draws, and Single-Observer
 ISMCTS that filters per-simulation legality in a custom tree (our search now does
-this too — `settlrl_agents.search.ismcts`, which retired the mctx engine). It is
+this too — `settlrl_search.ismcts`, which retired the mctx engine). It is
 1v1 only, so it never meets the 3-4p
 paranoid-frame / opponent-model problem, and it *disables determinization during
 self-play* (the net learns the Bayesian-average-over-hands policy; determinize
@@ -134,7 +135,7 @@ Techniques aimed at Catan's dice variance (the variance-starved-depth problem):
   root q) — **done**: `learn`'s `value_blend_max`, q from
   `make_search_weights_value`.
 - **Explicit chance nodes** for dice + dev draws — **done** (opt-in
-  `chance_nodes`/`dev_chance`; details in settlrl-agents/CLAUDE.md). Canopy also
+  `chance_nodes`/`dev_chance`; details in settlrl-search/CLAUDE.md). Canopy also
   forces a canonical **action ordering** to cut transpositions — **done** (opt-in
   `ordered`, `settlrl_engine.ordering`).
 - **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]`), trained on

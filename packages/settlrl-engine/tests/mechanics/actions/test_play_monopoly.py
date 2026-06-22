@@ -49,41 +49,41 @@ player0_monopoly=0""",
 
 
 
-          ORE             3:1
+          BRK             SHP
                /o\     /o\     /o\
               /   \   /   \   /   \
             o/     \o/     \o/     \o
-            |  SHP  |  ORE  |  BRK  |
-            |   5   |   6   |  10   |
+            |  WOD  |  WHT  |  ORE  |
+            |   8   |   6   |   8   |
             |       |       |       |
            /o\     /o\     /o\     /o\   3:1
           /   \   /   \   /   \   /   \
         o/     \o/     \o/     \o/     \o
-  WOD   |  WHT  |  WOD  |  WOD  |  SHP  |
-        |   9   |   2   |  10   |  11   |
+  ORE   |  WHT  |  BRK  |  SHP  |  SHP  |
+        |  10   |   5   |  12   |   4   |
         |       |       |       |       |
        /o\     /o\     /o\     /o\     /o\
       /   \   /   \   /   \   /   \   /   \
     o/     \o/     \o/     \o/     \o/     \o
-    |  ORE  |  SHP  |  WOD  |  DST  |  WHT  |
-    |   8   |   4   |   3   |       |  12   |   3
-    |       |       |       |  <R>  |       |
+    |  WHT  |  ORE  |  SHP  |  SHP  |  WOD  |
+    |   5   |   3   |   9   |   6   |  11   |   3
+    |       |       |       |       |       |
     o\     /o\     /o\     /o\     /o\     /o
       \   /   \   /   \   /   \   /   \   /
        \o/     \o/     \o/     \o/     \o/
-        |  SHP  |  ORE  |  BRK  |  BRK  |
-        |   8   |   3   |  11   |   6   |
+        |  BRK  |  WOD  |  WHT  |  WOD  |
+        |   3   |   2   |   4   |  10   |
   3:1   |       |       |       |       |
         o\     /o\     /o\     /o\     /o
           \   /   \   /   \   /   \   /
-           \o/     \o/     \o/     \o/   BRK
-            |  WHT  |  WHT  |  WOD  |
-            |   4   |   9   |   5   |
-            |       |       |       |
+           \o/     \o/     \o/     \o/   3:1
+            |  DST  |  ORE  |  BRK  |
+            |       |   9   |  11   |
+            |  <R>  |       |       |
             o\     /o\     /o\     /o
               \   /   \   /   \   /
                \o/     \o/     \o/
-          SHP             WHT
+          WHT             WOD
 
 
 
@@ -116,7 +116,7 @@ Bank
 |      13 |      19 |     19 |      19 |    19 |
 +---------+---------+--------+---------+-------+
 
-Robber: tile 8 (DST, desert)
+Robber: tile 18 (DST, desert)
 """,
     )
 

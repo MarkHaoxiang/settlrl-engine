@@ -24,12 +24,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
-from settlrl_agents.policy import BeliefPolicy
-from settlrl_agents.search import PolicyWeights, PolicyWeightsValue
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, GamePhase
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
+from settlrl_search import PolicyWeights, PolicyWeightsValue
+from settlrl_search.policy import BeliefPolicy
 
 ObserveFn = Callable[[BoardLayout, BoardState, Array], dict[str, Array]]
 Samples = dict[str, np.ndarray]
@@ -66,7 +66,7 @@ def self_play(
     acting seat's win (1) / loss (0); unfinished games are discarded.
 
     ``record_value`` expects ``weights_fn`` to also return the searched root value
-    (a :data:`~settlrl_agents.search.PolicyWeightsValue`) and stores it under the
+    (a :data:`~settlrl_search.PolicyWeightsValue`) and stores it under the
     ``q`` key (searcher frame, [-1, 1]) -- the value-blend target's ``q`` term.
 
     ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's

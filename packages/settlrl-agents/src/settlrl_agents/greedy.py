@@ -13,11 +13,13 @@ from settlrl_engine.board.layout import N_TILES, N_VERTICES
 from settlrl_engine.board.resources import N_RESOURCES
 from settlrl_engine.board.state import KeyScalar
 from settlrl_engine.env import (
-    N_ACTION_TYPES,
     N_FLAT,
     ActionType,
     Observation,
 )
+from settlrl_search.policy import FlatAction, FlatMask
+from settlrl_search.priors import TIER_SCORES
+from settlrl_search.rows import ROW_PARAMS, ROW_TYPE
 
 from settlrl_agents.internal.feature_engineering import (
     maritime_ratio,
@@ -25,44 +27,9 @@ from settlrl_agents.internal.feature_engineering import (
     tile_pips,
     vertex_pips,
 )
-from settlrl_agents.internal.rows import ROW_PARAMS, ROW_TYPE
-from settlrl_agents.policy import FlatAction, FlatMask
 
 _ROW_IDX = ROW_PARAMS.idx
 _ROW_TARGET = ROW_PARAMS.target
-
-# Priority tier per action type. Tiers are spaced so no per-target bonus
-# (|bonus| < 50) can cross between them; types sharing a tier are never both
-# the argmax (disjoint phases, or strict domination). The one exception is
-# deliberate: a *productive* MARITIME_TRADE row carries a +150 gate that lifts
-# it over END_TURN (see ``greedy_policy``); unproductive conversions stay
-# below, and the greedy player never offers a domestic trade. ACCEPT_TRADE /
-# REJECT_TRADE share a tier on purpose: their trade bonus decides the
-# response.
-_TIER: dict[ActionType, float] = {
-    ActionType.BUILD_CITY: 900.0,
-    ActionType.BUILD_SETTLEMENT: 800.0,
-    ActionType.SETUP_SETTLEMENT: 800.0,
-    ActionType.BUY_DEVELOPMENT_CARD: 600.0,
-    ActionType.BUILD_ROAD: 500.0,
-    ActionType.PLAY_KNIGHT: 400.0,
-    ActionType.PLAY_ROAD_BUILDING: 400.0,
-    ActionType.PLAY_YEAR_OF_PLENTY: 400.0,
-    ActionType.PLAY_MONOPOLY: 400.0,
-    ActionType.ROLL_DICE: 200.0,
-    ActionType.SETUP_ROAD: 200.0,
-    ActionType.DISCARD: 200.0,
-    ActionType.MOVE_ROBBER: 200.0,
-    ActionType.REJECT_TRADE: 200.0,
-    ActionType.ACCEPT_TRADE: 200.0,
-    ActionType.END_TURN: 100.0,
-    ActionType.MARITIME_TRADE: 0.0,
-    ActionType.PROPOSE_TRADE: 0.0,
-}
-TIER_SCORES = jnp.asarray([_TIER[ActionType(t)] for t in range(N_ACTION_TYPES)])[
-    ROW_TYPE
-]
-"""Per-row tier score — also mcts's root-prior table (scaled there)."""
 
 # Row groups whose bonus is target-dependent.
 _VERTEX_BUILD = (

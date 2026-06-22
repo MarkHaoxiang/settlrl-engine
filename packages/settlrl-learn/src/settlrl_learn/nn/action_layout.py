@@ -28,9 +28,9 @@ tile victims): ``[ vertex | edge | tile | other ]``.
 from __future__ import annotations
 
 import numpy as np
-from settlrl_agents.internal.rows import ROW_IDX, ROW_TARGET, ROW_TYPE
 from settlrl_engine.board.layout import N_EDGES, N_TILES, N_VERTICES
 from settlrl_engine.env import N_FLAT, ActionType
+from settlrl_search.rows import ROW_IDX, ROW_TARGET, ROW_TYPE
 
 _VCLASS = {
     int(ActionType.SETUP_SETTLEMENT): 0,

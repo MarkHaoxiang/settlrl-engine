@@ -16,9 +16,9 @@ import jax.numpy as jnp
 from settlrl_engine.env import Observation
 from settlrl_game.actions import move_for_flat
 from settlrl_game.botproto import MoveModel
+from settlrl_search.policy import BeliefPolicy, Policy
 
 from settlrl_agents import POLICIES, BeliefSpec, ObservationSpec
-from settlrl_agents.policy import BeliefPolicy, Policy
 from settlrl_agents.service.bridge import engine_env, game_flat
 from settlrl_agents.service.sdk import Bot, GameView
 

@@ -1,8 +1,8 @@
 """Learned value and policy functions for settlrl-agents.
 
 Networks plug into the agents through their existing seams — a value model is
-a :class:`~settlrl_agents.policy.ValueFunction` and a policy model a
-:class:`~settlrl_agents.policy.PolicyPrior` — so every search agent
+a :class:`~settlrl_search.value.ValueFunction` and a policy model a
+:class:`~settlrl_search.policy.PolicyPrior` — so every search agent
 consumes them unchanged.
 """
 

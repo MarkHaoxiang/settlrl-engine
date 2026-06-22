@@ -20,8 +20,7 @@ from settlrl_engine.env import (
 )
 from settlrl_engine.env.batched import Actor, AgentSelectionArray
 from settlrl_engine.mechanics.flat import FlatMaskArray
-
-from settlrl_agents.policy import (
+from settlrl_search.policy import (
     AgentSpec,
     BeliefSpec,
     GameAgent,

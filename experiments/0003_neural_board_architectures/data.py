@@ -31,7 +31,7 @@ import jax.numpy as jnp
 import numpy as np
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import _picker
-from settlrl_agents.policy import StatefulSpec
+from settlrl_search.policy import StatefulSpec
 from settlrl_agents.value import heuristic_value
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from settlrl_engine.mechanics.longest_road import longest_road_length

@@ -14,12 +14,12 @@ import jax
 import jax.numpy as jnp
 import optax
 from jaxtyping import Array, Float
-from settlrl_agents.policy import BeliefPolicy, PolicyPrior
-from settlrl_agents.search import make_search
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT
+from settlrl_search import make_search
+from settlrl_search.policy import BeliefPolicy, PolicyPrior
 
 from settlrl_learn.features import FEATURE_DIM, features
 from settlrl_learn.nn.mlp import AZParams, az_forward, init_az_params, make_az

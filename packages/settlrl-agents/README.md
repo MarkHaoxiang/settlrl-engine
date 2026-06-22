@@ -62,7 +62,7 @@ experiment gates consume (see `experiments/README.md` at the repo root).
 
 ## Layout
 
-- Top level — the API: the seat protocols (`policy`), value functions (`value`), world sampling (`sample`), `evaluate`, and the scripted agents (`baselines`, `greedy`).
-- `settlrl_agents.internal` — the helpers behind them: the flat-table decode and the hand-engineered, weight-free board features (every agent's weights live with the agent).
-- `settlrl_agents.search` — the model-based agents (`lookahead`, `mcts`).
+- Top level — the API: value functions (`value`), `evaluate`, and the scripted agents (`baselines`, `greedy`). The model-based agents (`lookahead`, `mcts`) are built here from the search in [settlrl-search](../settlrl-search).
+- `settlrl_agents.internal` — the hand-engineered, weight-free board features (every agent's weights live with the agent).
 - `settlrl_agents.planner` — the stateful decision-tree toolkit (nodes, plans, the numpy point of view) and the `planner` agent built on it.
+- [settlrl-search](../settlrl-search) — the dependency holding the search itself plus the shared seam primitives: seat protocols, world sampling (`sample_world`), the flat-table decode, and the value/prior seam types.

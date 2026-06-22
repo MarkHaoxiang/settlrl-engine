@@ -22,8 +22,8 @@ import numpy as np
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import _picker, evaluate
 from settlrl_agents.internal.feature_engineering import BoardFeatures, board_features
-from settlrl_agents.policy import BeliefSpec, ObservationSpec, StatefulSpec
-from settlrl_agents.search import make_search
+from settlrl_search.policy import BeliefSpec, ObservationSpec, StatefulSpec
+from settlrl_search import make_search
 from settlrl_agents.value import make_linear
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from settlrl_learn.experiment import Run

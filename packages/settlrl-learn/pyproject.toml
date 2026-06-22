@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "settlrl-agents",
+    "settlrl-search",
     "settlrl-engine",
     "jax[cpu]>=0.4.0",
     "jaxtyping>=0.3.10",
@@ -26,6 +27,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 settlrl-agents = { workspace = true }
+settlrl-search = { workspace = true }
 settlrl-engine = { workspace = true }
 
 [tool.pytest.ini_options]

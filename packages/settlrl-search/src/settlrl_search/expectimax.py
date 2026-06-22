@@ -37,10 +37,10 @@ from settlrl_engine.board.state import BoardState, KeyScalar, Player
 from settlrl_engine.mechanics.action import ActionType, action_available, apply_action
 from settlrl_engine.mechanics.common import agent_selection_single
 
-from settlrl_agents.internal.rows import ROW_PARAMS, ROW_TYPE
-from settlrl_agents.policy import BeliefPolicy, FlatAction, FlatMask
-from settlrl_agents.sample import sample_world
-from settlrl_agents.value import ValueFunction
+from settlrl_search.policy import BeliefPolicy, FlatAction, FlatMask
+from settlrl_search.rows import ROW_PARAMS, ROW_TYPE
+from settlrl_search.sample import sample_world
+from settlrl_search.value import ValueFunction
 
 __all__ = ["make_setup_search"]
 

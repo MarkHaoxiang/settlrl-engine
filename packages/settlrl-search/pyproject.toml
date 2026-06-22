@@ -1,7 +1,7 @@
 [project]
-name = "settlrl-agents"
+name = "settlrl-search"
 version = "0.1.0"
-description = "Settlrl-playing agents (pure-JAX policies) for settlrl-engine"
+description = "Re-determinizing SO-ISMCTS search over settlrl-engine"
 readme = "README.md"
 authors = [
     { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
@@ -9,25 +9,9 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "settlrl-engine",
-    "settlrl-search",
     "jax[cpu]>=0.4.0",
     "jaxtyping>=0.3.10",
-    # The CLIs (settlrl-agents, settlrl-bot-service): typed commands + env-var
-    # option fallbacks, instead of hand-rolled argparse.
-    "typer>=0.12.0",
 ]
-
-# The bot service (settlrl_agents.service): a FastAPI app serving moves over the
-# shared bot wire protocol. Kept an extra so the base policies stay web-free.
-[project.optional-dependencies]
-service = [
-    "settlrl-game",
-    "fastapi[standard]>=0.115.0",
-]
-
-[project.scripts]
-settlrl-agents = "settlrl_agents.cli:main"
-settlrl-bot-service = "settlrl_agents.service.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -35,8 +19,6 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 settlrl-engine = { workspace = true }
-settlrl-search = { workspace = true }
-settlrl-game = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

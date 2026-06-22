@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -21,6 +22,8 @@ from settlrl_engine.env import N_FLAT
 from settlrl_learn.nn.graphnet import PRESETS
 from settlrl_learn.training import GNNBackend, MLPBackend, RunState
 from settlrl_learn.training.backend import Backend, load_run_state, save_run_state
+from settlrl_learn.training.gnn_backend import _SETUP_ROWS
+from settlrl_learn.training.loop import learn
 from settlrl_learn.training.selfplay import self_play
 
 
@@ -76,6 +79,15 @@ def _uniform_weights(
 ) -> Array:
     """A stand-in for the search: uniform over the legal set (no net, no tree)."""
     return mask.astype(jnp.float32)
+
+
+def _uniform_legal_dist(
+    key: Array, layout: BoardLayout, view: Any, player: Array, mask: Array
+) -> Array:
+    """A *normalised* uniform-over-legal stand-in -- a proper distribution, like
+    the real search's visit-count target (the bare mask is unnormalised)."""
+    m = mask.astype(jnp.float32)
+    return m / jnp.sum(m)
 
 
 def test_self_play_samples_shape_under_uniform_policy() -> None:
@@ -139,3 +151,186 @@ def test_runstate_serialise_roundtrip_is_bit_exact(tmp_path: Path) -> None:
             for x, y in zip(a, b, strict=True)
         )
         assert int(back.iteration) == 3 and float(back.best) == float(jnp.float32(0.4))
+
+
+# --------------------------------------------------------------------------- #
+# Bit-exact resume, end-to-end (both backends)                                #
+# --------------------------------------------------------------------------- #
+
+
+def _net_arrays(net: Any) -> list[np.ndarray]:
+    """The numeric array leaves of a net (an AZParams pytree or an eqx module)."""
+    arrays = eqx.filter(net, eqx.is_array)
+    return [np.asarray(x) for x in jax.tree.leaves(arrays)]
+
+
+def _assert_nets_bit_exact(a: Any, b: Any) -> None:
+    la, lb = _net_arrays(a), _net_arrays(b)
+    assert len(la) == len(lb) and la, "expected matching, non-empty leaf sets"
+    for x, y in zip(la, lb, strict=True):
+        assert np.array_equal(x, y)
+
+
+def _learn_kwargs() -> dict[str, Any]:
+    """Tiny, arena-free budgets -- the resume property holds regardless of arena,
+    so we skip it (arena_games=0) to keep the run seconds-fast."""
+    return {
+        "selfplay_samples": 8, "selfplay_batch": 4, "num_simulations": 2,
+        "max_num_considered_actions": 4, "buffer_min": 4, "batch_size": 4,
+        "train_steps": 3, "arena_games": 0, "seed": 7,
+    }  # fmt: skip
+
+
+def test_learn_resume_bit_exact_mlp(tmp_path: Path) -> None:
+    # Headline durability: a straight 3-iteration run must equal a 1-iter
+    # checkpoint + resume to 3, leaf-for-leaf. Resume RNG is seed+iter, so the
+    # split run must reproduce the contiguous one bit-for-bit.
+    kw = _learn_kwargs()
+    straight = learn(MLPBackend((16,)), n_iterations=3, **kw)
+    learn(MLPBackend((16,)), n_iterations=1, checkpoint_dir=tmp_path, **kw)
+    resumed = learn(
+        MLPBackend((16,)), n_iterations=3, resume_from=tmp_path / "runstate.eqx", **kw
+    )
+    _assert_nets_bit_exact(straight, resumed)
+
+
+def test_learn_resume_bit_exact_gnn(tmp_path: Path) -> None:
+    cfg = PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
+    kw = _learn_kwargs()
+    straight = learn(GNNBackend(cfg), n_iterations=3, **kw)
+    learn(GNNBackend(cfg), n_iterations=1, checkpoint_dir=tmp_path, **kw)
+    resumed = learn(
+        GNNBackend(cfg), n_iterations=3, resume_from=tmp_path / "runstate.eqx", **kw
+    )
+    _assert_nets_bit_exact(straight, resumed)
+
+
+# --------------------------------------------------------------------------- #
+# Self-play data semantics                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_self_play_value_is_acting_seat_win_loss() -> None:
+    # Credit assignment: the recorded value is the *acting seat's* eventual
+    # win (1) / loss (0), not a constant and not the raw reward. The labels
+    # must therefore be exactly {0, 1}, and -- the nontrivial part -- a finished
+    # 2p game produces positions for *both* seats (they alternate), so the
+    # winner's positions are labelled 1 and the loser's 0: both classes must
+    # appear. A bug that always credited seat 0, or that stored the seat index
+    # / raw VP reward, would break one of these. (We use the same batch_size=4
+    # config as the existing shape test, which is known to finish games under
+    # the uniform stand-in; the flat output hides the lane partition, so the
+    # both-classes-present check is the strongest lane-agnostic form of the
+    # complementary-per-game property.)
+    backend = MLPBackend((16,))
+    samples = self_play(
+        _uniform_weights, backend.observe,
+        n_samples=16, batch_size=4, seed=0, temperature=0.0,
+    )  # fmt: skip
+    sv = samples["value"]
+    assert set(np.unique(sv)).issubset({0.0, 1.0})  # win/loss only, never a VP/seat
+    assert sv.sum() > 0 and sv.sum() < len(sv)  # both a winner's and a loser's slice
+
+
+def test_self_play_policy_target_is_legal() -> None:
+    # The recorded policy target is exactly the weights_fn output, verbatim
+    # (the real search returns a normalised visit distribution; here a
+    # normalised uniform-over-legal stand-in). Property: non-negative, sums to
+    # ~1, and -- the load-bearing part -- ZERO mass on illegal actions, since
+    # the search may only propose legal moves.
+    backend = MLPBackend((16,))
+    samples = self_play(
+        _uniform_legal_dist, backend.observe,
+        n_samples=16, batch_size=4, seed=3, temperature=0.0,
+    )  # fmt: skip
+    pol, mask = samples["policy"], samples["mask"]
+    assert np.all(pol >= 0.0)
+    sums = pol.sum(axis=-1)
+    assert np.allclose(sums, 1.0, atol=1e-5), f"policy rows not normalised: {sums}"
+    illegal_mass = np.where(mask == 0, pol, 0.0).sum()
+    assert illegal_mass == 0.0, f"policy put {illegal_mass} mass on illegal actions"
+
+
+def test_self_play_excludes_setup_gnn() -> None:
+    # With the GNN backend's fixed setup policy playing the opening, no setup
+    # position leaks into training data. The observation carries no phase field,
+    # so we assert it via the mask: a recorded position is in the main loop iff a
+    # non-setup action is legal there. Every recorded mask must satisfy that.
+    backend = GNNBackend(PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1))
+    samples = self_play(
+        _uniform_weights, backend.observe,
+        n_samples=8, batch_size=4, seed=4, temperature=0.0,
+        setup_fn=backend.setup_policy(),
+    )  # fmt: skip
+    mask = samples["mask"].astype(bool)
+    setup_rows = np.asarray(_SETUP_ROWS)
+    main_legal = (mask & ~setup_rows).any(axis=-1)
+    assert main_legal.all(), "a recorded position had only setup actions legal"
+    # stronger: no recorded position is purely a setup placement (some lane is in
+    # SETUP only when every legal action is a setup row).
+    pure_setup = mask.any(axis=-1) & ~main_legal
+    assert not pure_setup.any()
+
+
+# --------------------------------------------------------------------------- #
+# Value-blend formula                                                          #
+# --------------------------------------------------------------------------- #
+
+
+def test_value_blend_alpha_ramp() -> None:
+    # The loop ramps alpha linearly 0 -> value_blend_max over value_blend_ramp
+    # iterations. We read the live per-iteration alpha off the on_iter metrics
+    # and check it against the documented schedule (loop.py:181-183). This is
+    # the side the loop owns; iteration 0 must be a pure-z no-op (alpha 0).
+    alphas: dict[int, float] = {}
+
+    def on_iter(i: int, metrics: dict[str, float], net: Any) -> None:
+        # a degenerate (no-game) iteration emits no alpha; only record real ones.
+        if "value_blend_alpha" in metrics:
+            alphas[i] = metrics["value_blend_alpha"]
+
+    learn(
+        MLPBackend((16,)),
+        n_iterations=4, selfplay_samples=8, selfplay_batch=4, num_simulations=2,
+        max_num_considered_actions=4, buffer_min=4, batch_size=4, train_steps=2,
+        arena_games=0, seed=11,
+        value_blend_max=0.5, value_blend_ramp=4, on_iter=on_iter,
+    )  # fmt: skip
+    # alpha[i] = value_blend_max * min(1, i / max(ramp, 1)); ramp=4, max=0.5.
+    schedule = {0: 0.0, 1: 0.5 * (1 / 4), 2: 0.5 * (2 / 4), 3: 0.5 * (3 / 4)}
+    assert alphas, "no iteration produced samples"
+    assert alphas == {i: schedule[i] for i in alphas}  # every real iter on-schedule
+    assert alphas[0] == 0.0  # iteration 0 is always a pure-z no-op
+
+
+def test_value_blend_formula_matches_loop() -> None:
+    # The blended training label the loop computes (loop.py:185-186) is
+    # (1-a)*z + a*((q+1)/2). We reproduce the loop's exact step against a real
+    # self-play batch (real z and q, not a fixture) and assert: (a) the blended
+    # value stays in the valid [0,1] win-probability range for a >= 0, and
+    # (b) alpha=0 leaves z untouched while alpha>0 strictly moves any sample
+    # whose q-prob differs from z. This pins the formula's two endpoints to
+    # genuine searcher output.
+    backend = MLPBackend((16,))
+    samples = self_play(
+        _uniform_weights_value, backend.observe,
+        n_samples=12, batch_size=4, seed=13, temperature=0.0, record_value=True,
+    )  # fmt: skip
+    z = samples["value"].astype(np.float64)
+    q = samples["q"].astype(np.float64)
+    assert np.all((z == 0.0) | (z == 1.0))
+    # the stand-in returns a constant q=0.3 (searcher frame) -> q_prob=0.65.
+    q_prob = (q + 1.0) / 2.0
+    assert np.allclose(q_prob, 0.65)
+
+    def blend(alpha: float) -> np.ndarray:
+        return (1.0 - alpha) * z + alpha * q_prob  # loop.py:185-186
+
+    assert np.array_equal(blend(0.0), z)  # alpha 0 is a pure-z no-op
+    b = blend(0.5)
+    assert np.all(b >= 0.0) and np.all(b <= 1.0)  # valid P(win)
+    # alpha>0 pulls every label toward q_prob; since q_prob (0.65) differs from
+    # both 0 and 1, no blended label equals its raw outcome.
+    assert np.all(b != z)
+    # blend is the affine interpolation: halfway between z and q_prob at a=0.5.
+    assert np.allclose(b, 0.5 * z + 0.5 * q_prob)

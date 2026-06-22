@@ -7,6 +7,7 @@ dev = [
     # Workspace members in the root env, so `uv run python experiments/...`
     # imports the whole stack without --package indirection.
     "settlrl-agents",
+    "settlrl-search",
     "settlrl-learn",
     "settlrl-game",
     "expecttest>=0.2.1",
@@ -57,12 +58,14 @@ default-groups = ["dev", "cuda"]
 
 [tool.uv.sources]
 settlrl-agents = { workspace = true }
+settlrl-search = { workspace = true }
 settlrl-learn = { workspace = true }
 settlrl-game = { workspace = true }
 
 [tool.mypy]
 mypy_path = [
     "packages/settlrl-agents/src",
+    "packages/settlrl-search/src",
     "packages/settlrl-engine/src",
     "packages/settlrl-app/src",
     "packages/settlrl-game/src",
@@ -100,6 +103,8 @@ extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 "packages/settlrl-engine/src/settlrl_engine/board/state.py" = ["F722", "F821"]
 "packages/settlrl-engine/src/settlrl_engine/env/batched.py" = ["F722", "F821"]
 "packages/settlrl-engine/src/settlrl_engine/mechanics/flat.py" = ["F722", "F821"]
-"packages/settlrl-agents/src/settlrl_agents/search/__init__.py" = ["F722", "F821"]
+"packages/settlrl-search/src/settlrl_search/__init__.py" = ["F722", "F821"]
+"packages/settlrl-search/src/settlrl_search/ismcts.py" = ["F722", "F821"]
+"packages/settlrl-search/src/settlrl_search/_common.py" = ["F722", "F821"]
 "packages/settlrl-learn/src/**" = ["F722", "F821"]
 "packages/settlrl-agents/src/settlrl_agents/evaluate.py" = ["F722", "F821"]

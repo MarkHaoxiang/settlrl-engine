@@ -16,15 +16,15 @@ import jax
 import jax.numpy as jnp
 import optax
 from jaxtyping import Array, Float
-from settlrl_agents.internal.rows import ROW_TYPE as _ROW_TYPE
-from settlrl_agents.policy import BeliefPolicy, PolicyPrior
-from settlrl_agents.search import make_search
-from settlrl_agents.search.expectimax import make_setup_search
 from settlrl_agents.value import ValueFunction, heuristic_value
 from settlrl_engine.board.layout import N_VERTICES, BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT
 from settlrl_engine.mechanics.action import ActionType
+from settlrl_search import make_search
+from settlrl_search.expectimax import make_setup_search
+from settlrl_search.policy import BeliefPolicy, PolicyPrior
+from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
 
 from settlrl_learn.features import FEATURE_DIM
 from settlrl_learn.nn.board_gnn import BoardGNN, gnn_seams

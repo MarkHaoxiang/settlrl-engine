@@ -25,10 +25,10 @@ import equinox as eqx
 import numpy as np
 import optax
 from jaxtyping import Array, Float, Int
-from settlrl_agents.policy import BeliefPolicy, PolicyPrior
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
+from settlrl_search.policy import BeliefPolicy, PolicyPrior
 
 Metrics = dict[str, Float[Array, ""]]
 StepFn = Callable[[Any, optax.OptState, Any], tuple[Any, optax.OptState, Metrics]]

@@ -22,7 +22,6 @@ from _symmetry import (
     board_symmetries,
     relabel_players,
 )
-from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_engine.board import Board
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
 from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
@@ -30,6 +29,7 @@ from settlrl_learn.nn.board_gnn import BoardGNN
 from settlrl_learn.nn.graph import board_sample
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 from settlrl_learn.training.gnn_backend import gnn_loss
+from settlrl_search.rows import ROW_TYPE
 
 _OUT, _W = 4, 8
 

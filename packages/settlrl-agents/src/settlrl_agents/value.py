@@ -1,7 +1,7 @@
 """State value functions: how good is this board for a given player?
 
 A :class:`ValueFunction` scores a concrete board. The search agents only ever
-hand it *sampled* worlds (see ``settlrl_agents.sample``), so the "hidden" fields
+hand it *sampled* worlds (see ``settlrl_search.sample``), so the "hidden" fields
 it reads there are belief-consistent samples; it still treats opponents' dev
 cards as counts (their composition is a distribution over the known deck) and
 the player's own as exact.
@@ -14,31 +14,24 @@ just takes their dot product with its weight kwargs.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol, runtime_checkable
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, BoolScalar, Player
+from settlrl_search.value import Value, ValueFunction
 
 from settlrl_agents.internal.feature_engineering import BoardFeatures, board_features
 
-Value = Float[Array, ""]
-"""A scalar state score for one player: higher is better, arbitrary scale."""
-
-
-@runtime_checkable
-class ValueFunction(Protocol):
-    """A single-game state evaluation, pure and ``jit`` / ``vmap`` compatible.
-
-    ``layout`` / ``state`` are one game's board (no batch axis); returns the
-    state's value from ``player``'s point of view.
-    """
-
-    def __call__(
-        self, layout: BoardLayout, state: BoardState, player: Player
-    ) -> Value: ...
+__all__ = [
+    "TUNED_WEIGHTS",
+    "Value",
+    "ValueFunction",
+    "heuristic_value",
+    "make_heuristic",
+    "make_linear",
+    "tuned_value",
+]
 
 
 def make_heuristic(

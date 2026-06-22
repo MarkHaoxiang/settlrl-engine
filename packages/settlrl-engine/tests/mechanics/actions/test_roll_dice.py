@@ -6,7 +6,7 @@ from expecttest import assert_expected_inline
 from settlrl_engine.board import Board, give, make_board, to_main
 from settlrl_engine.board.state import BoardState, GamePhase
 from settlrl_engine.mechanics.action import ActionResult
-from settlrl_engine.mechanics.dice import roll_step
+from settlrl_engine.mechanics.dice import roll_dice, roll_step
 
 from tests.mechanics.actions.fixtures import fmt
 
@@ -22,7 +22,7 @@ def test_success(roll_board: Board) -> None:
         ),
         """\
 result=OK
-dice=4
+dice=8
 phase=MAIN
 has_rolled=1""",
     )
@@ -66,8 +66,8 @@ def test_invalid_already_rolled(roll_board: Board) -> None:
 def test_forced_outcome(roll_board: Board) -> None:
     """params=r (2..12) forces the roll; the payout matches the sampled path
     for the same number and the key advances identically."""
-    sampled, _ = roll_step(roll_board, None)  # seed's natural roll is 4
-    forced, result = roll_step(roll_board, 4)
+    sampled, _ = roll_step(roll_board, None)  # seed's natural roll is 8
+    forced, result = roll_step(roll_board, 8)
     assert int(result[0]) == ActionResult.SUCCESS.value
 
     def raw(st: BoardState) -> BoardState:
@@ -82,3 +82,33 @@ def test_forced_seven_routes_to_robber(roll_board: Board) -> None:
     assert int(result[0]) == ActionResult.SUCCESS.value
     assert int(state.dice_roll[0]) == 7
     assert int(state.phase[0]) == GamePhase.MOVE_ROBBER  # no hand over 7 cards
+
+
+def test_forced_roll_key_invariant_across_outcomes(roll_board: Board) -> None:
+    """The chance-node seam invariant: from one pre-roll state, forcing any
+    total advances ``state.key`` to the SAME bytes -- the key stream is
+    independent of which outcome the search node picked. (Resources/board
+    differ per total; only the key must match.)"""
+    before = np.asarray(jax.random.key_data(roll_board[1].key))
+    keys: list[np.ndarray] = []
+    for k in (2, 6, 9, 12):
+        state, result = roll_step(roll_board, k)
+        assert int(result[0]) == ActionResult.SUCCESS.value
+        assert int(state.dice_roll[0]) == k
+        keys.append(np.asarray(jax.random.key_data(state.key)))
+
+    for other in keys[1:]:
+        assert np.array_equal(keys[0], other)  # identical across forced outcomes
+    assert not np.array_equal(keys[0], before)  # key actually advanced
+
+
+def test_forced_roll_then_steal_is_outcome_independent(roll_board: Board) -> None:
+    """Downstream-equivalence form: after forcing two different non-7 totals,
+    the next stochastic draw off the advanced key is identical -- so a
+    subsequent steal/draw is invariant to which roll the search forced."""
+    state_a, _ = roll_step(roll_board, 5)
+    state_b, _ = roll_step(roll_board, 9)
+
+    _, draw_a = roll_dice(state_a.key[0])
+    _, draw_b = roll_dice(state_b.key[0])
+    assert int(draw_a) == int(draw_b)

@@ -2,12 +2,8 @@
 policies plus stateful plain-Python planners."""
 
 from settlrl_engine.board.resources import N_PLAYERS
-
-from settlrl_agents.baselines import random_policy
-from settlrl_agents.evaluate import EvalResult, evaluate
-from settlrl_agents.greedy import greedy_policy
-from settlrl_agents.planner import make_planner
-from settlrl_agents.policy import (
+from settlrl_search import make_search
+from settlrl_search.policy import (
     AgentSpec,
     BeliefPolicy,
     BeliefSpec,
@@ -20,12 +16,12 @@ from settlrl_agents.policy import (
     StatefulPolicy,
     StatefulSpec,
 )
-from settlrl_agents.sample import sample_world
-from settlrl_agents.search import (
-    lookahead_policy,
-    make_search,
-    search_policy,
-)
+from settlrl_search.sample import sample_world
+
+from settlrl_agents.baselines import random_policy
+from settlrl_agents.evaluate import EvalResult, evaluate
+from settlrl_agents.greedy import greedy_policy
+from settlrl_agents.planner import make_planner
 from settlrl_agents.value import (
     TUNED_WEIGHTS,
     Value,
@@ -35,6 +31,12 @@ from settlrl_agents.value import (
     make_linear,
     tuned_value,
 )
+
+search_policy = make_search(heuristic_value)
+"""The shipped search: re-determinizing SO-ISMCTS over :func:`heuristic_value`."""
+
+lookahead_policy = make_search(heuristic_value, num_simulations=0, propose_rate=0.5)
+"""One-step lookahead — the ``num_simulations=0`` special case of the search."""
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 

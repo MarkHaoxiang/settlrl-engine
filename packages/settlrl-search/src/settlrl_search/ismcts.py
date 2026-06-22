@@ -54,10 +54,10 @@ from settlrl_engine.mechanics.dice import distribute_resources
 from settlrl_engine.mechanics.flat import flat_available_for
 from settlrl_engine.ordering import next_category, ordering_mask
 
-from settlrl_agents.internal.rows import ROW_TYPE
-from settlrl_agents.policy import PolicyPrior
-from settlrl_agents.sample import sample_world
-from settlrl_agents.value import Value, ValueFunction
+from settlrl_search.policy import PolicyPrior
+from settlrl_search.rows import ROW_TYPE
+from settlrl_search.sample import sample_world
+from settlrl_search.value import Value, ValueFunction
 
 from ._common import _ILLEGAL, _ROLL_P, _ROLLS, _TIER_LOGITS, _Weights
 

@@ -2,7 +2,10 @@
 
 Settlrl agents over `settlrl-engine`'s public flat-action seam: pure-JAX
 policies plus stateful plain-Python planners
-(`planner/`).
+(`planner/`). The search subsystem and its substrate (seat protocols, world
+sampling, flat decode, value/prior seams) live in the `settlrl-search` package
+(layering `settlrl-engine -> settlrl-search -> settlrl-agents`); agents depends
+on it.
 
 **No agent assumes full observability.** Model-based agents consume the
 engine's honest `BeliefView` (see the engine's `belief.py` notes); hidden
@@ -14,11 +17,13 @@ agents run at 2–4 players with beliefs of varying sharpness.
 
 ## Layout
 
-The API layer is the top-level modules — `policy.py` (protocols/specs),
-`value.py` (the value protocol and the heuristic's *weights*), `evaluate.py`,
-`sample.py`, the registry in `__init__.py`, `cli.py` — plus the agents
-(`baselines.py`, `greedy.py`, `search/`, `planner/`). `internal/` holds the
-helpers behind them: `rows.py` (the flat-table decode) and
+The API layer is the top-level modules — `value.py` (the heuristic's *weights*,
+re-exporting the `Value`/`ValueFunction` types from `settlrl_search.value`),
+`evaluate.py`, the registry in `__init__.py` (which defines `search_policy` /
+`lookahead_policy` locally over `make_search` imported from `settlrl_search`),
+`cli.py` — plus the agents (`baselines.py`, `greedy.py`, `planner/`). The seat
+protocols (`policy.py`), world sampling (`sample.py`), and the flat-table decode
+(was `internal/rows.py`) now live in `settlrl-search`. `internal/` holds only
 `feature_engineering.py` (the weight-free hand-engineered features —
 `board_features` for the value terms, `target_build` / `maritime_ratio` for
 greedy's trade sense). Weights always live with an agent or in `value.py`;
@@ -51,43 +56,9 @@ hook — render's conftest never checked engine types, so an int32 slipped by).
 
 ## API layer and agents
 
-- `rows.py` — the flat action table decoded once (device `ROW_TYPE` /
-  `ROW_PARAMS` for the vmapped sweeps; host `ROW_IDX` / `ROW_TARGET` /
-  `ROWS_OF_TYPE` / `flat_row` for the planner). Every agent imports from
-  here — there used to be one decode per module, and they can silently
-  diverge.
-- `policy.py` — the seat protocols and `AgentSpec`: a policy *family*
-  (`make` + `defaults`, with `policy` the cached shipped build) plus optional
-  `for_testing` parameter overrides — `spec.for_tests` is the cheap family
-  member the protocol tests run (the tested properties are
-  parameter-independent). `AgentSpec` is generic over its protocol and the
-  subclass is the tag (`ObservationSpec` / `BeliefSpec` / `StatefulSpec`), so
-  consumers dispatch with `isinstance` and `spec.policy` is precisely typed —
-  no casts. A `StatefulSpec`'s `policy` is a *factory* (`seed -> GameAgent`):
-  the agent object holds per-game state, so drivers build one per (game,
-  seat) and replace it when the lane auto-resets. `GameAgent.act` takes
-  *host* data (`HostObservation` / `HostFlatMask`, numpy): handing device
-  arrays to host-side logic cost ~10 ms per decision in thirty per-field
-  syncs; one `jax.device_get` of the batched observation costs ~0.1 ms/lane.
-  The generic cannot type `defaults` itself: `make(**mapping)` is uncheckable
-  (ParamSpec doesn't apply to dynamic unpacking). `PolicyPrior` is the
-  learned-policy-head seam: `make_search` takes one in place of its built-in
-  priors (root sweep + tier table), applying legality masking itself. Policies are masked-argmax style: with no legal
-  move the returned index is arbitrary and the engine rejects it as
-  `INVALID` (the lane stalls until auto-reset), matching
-  `BatchedSettlrlEnv.random_actions`.
-- `sample.py` — `sample_world` fills every hidden field with a posterior
-  sample. Guaranteed (tested in `tests/test_sample.py`): public fields
-  untouched; hand sizes, dev counts, per-type totals, and the observer's own
-  rows all match the public record. The resource deal's
-  proportional-headroom weighting is a *surrogate* for the exact posterior,
-  not the posterior (`hi` is relaxed if jointly infeasible). The deal's
-  `while_loop` stops at the owed count rather than the worst-case 95: same
-  sampling law (each draw is a fresh key), 13x on `sample_world`, 7x on a
-  lookahead move at B=1 (RTX 5090; the sequential chain was launch-bound).
-  The closing
-  `BoardState(...)` is built by explicit keyword on purpose: a new
-  `BoardState` field fails to compile here until classified public or hidden.
+The flat-table decode, the seat protocols (`AgentSpec` / `PolicyPrior` / …),
+and `sample_world` moved to `settlrl-search` (see its CLAUDE.md).
+
 - `value.py` — heuristic strength function; value = own strength − best
   opponent's. On a *sampled* world the "hidden" fields it reads are
   belief-consistent samples, so it stays honest. Tuning evidence (2p
@@ -139,9 +110,10 @@ hook — render's conftest never checked engine types, so an int32 slipped by).
   and (a need advances or it consolidates toward scarcity). The discard
   prefers surplus before most-held. Still deliberately simple: never offers
   a trade (an obs-only policy has no rejected-offer memory), ignores whose
-  production the robber blocks. `TIER_SCORES` is also the search's interior
-  prior (`_TIER_LOGITS`) — the maritime gate lives in the bonus channel, so
-  priors are unchanged.
+  production the robber blocks. Greedy's tier table is `TIER_SCORES`, which now
+  lives in `settlrl_search.priors` (greedy imports it) and is also the search's
+  interior prior (`_TIER_LOGITS`) — the maritime gate lives in the bonus
+  channel, so priors are unchanged.
 - `evaluate.py` — fused driver over the engine's `rollout(actor=...)` seam:
   every seat's vmapped agent picks in every lane each step inside the scan and
   the acting seat's pick is kept — n_seats policy evals per step, fine for
@@ -161,94 +133,12 @@ hook — render's conftest never checked engine types, so an int32 slipped by).
 
 ## search/
 
-`make_search` / `make_search_weights` (`search/__init__.py`) are the
-re-determinizing **Single-Observer ISMCTS**: a custom fixed-capacity tree
-(`search/ismcts.py`, `make_tree`) that determinizes a fresh `sample_world` per
-simulation and descends the live engine, filtering legality per simulation — the
-half mctx's fixed action axis could not express (Cowling 2012; the Canopy custom
-tree). Selection is mctx's Gumbel-MuZero ported onto it (no `mctx` dependency).
-`make_search` argmaxes the improved policy; `make_search_weights` returns the
-distribution (the AlphaZero policy target — experiment 0004);
-`make_search_weights_value` returns `(distribution, root value)` — the searched
-root value (searcher frame, 2·P(win)−1) is the AZ value-blend `q` target, the
-visit-weighted mean of the root edges (`_run`). Shared prior/dice
-constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
-`__init__.py`, the tree in `ismcts.py`. It replaced a former
-`mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine
-behind it (2026-06-19, 742b94b). ~5–6 ms/move (B=1 CPU; was 7.4 with mctx).
-
-**The leaf is the ceiling.** The binding constraint is the stationary heuristic
-leaf, not search machinery: win rate vs lookahead does *not* climb with sims (64
-*loses*), so the lever is the leaf (experiment 0003 / settlrl-learn) and prior
-agents all tied at ~parity — the cleanest one won. The merges, each a falsified
-strength lever:
-- `smcts`'s explicit dice/dev chance nodes (49.3% h2h, ~2× wall-clock; dev node
-  50.5% n=210; 64→128 sims 53.3%→49.5%). Roll-EV leaves + per-simulation
-  resampling subsume them — *with the stationary heuristic leaf*. **Re-added as
-  an opt-in flag 2026-06-22** (`chance_nodes`, `dev_chance` in `make_tree` /
-  `make_search[_weights[_value]]`): the descent is now a decision/chance state
-  machine — a stochastic action (roll always; dev-buy under `dev_chance`) defers
-  to a chance node (afterstate) that samples nature at its true probability
-  (`_ROLL_P` / deck composition) and applies the engine's forced-outcome seam
-  (`apply_action` with a forced `idx`), so the search plans *past* a roll. It
-  supersedes `expected_rolls` (mutually exclusive). Default OFF (flag-off is
-  bit-identical, the 13 baseline contracts hold; 4 chance contracts added). The
-  bet: a *learned* value (settlrl-learn q-blend, exp 0004) may convert what the
-  stationary leaf couldn't — pending a gated arena A/B.
-- **Action-ordering lock-out** (opt-in `ordered` flag, 2026-06-22): the descent
-  ANDs `settlrl_engine.ordering.ordering_mask` into the in-tree legal set and
-  threads the per-turn `category` (reset on turn change), so the search explores
-  only the canonical order of a turn's builds/buys/trades (transposition cut). The
-  engine owns the rule; the search consumes it. Root mask comes from the env
-  (`track_ordering`); the search continues the lock-out deeper from category 0
-  (max-so-far keeps it consistent with the env category). Default OFF; 3 ordered
-  contracts added. Also a gated A/B lever.
-- `mcts` (frozen-world): per-simulation determinization is its principled
-  superset, *parity not a win* at 3p (0.352 ± 0.031, n=244; 64 worlds 0.307 —
-  more doesn't help; ~ties at 2p where the belief is ~exact).
-- the **mctx engine**: its fixed action axis no-oped illegal path-actions; the
-  custom tree reaches the same strength with true per-sim legality and faster.
-
-**Strength: ~0.55–0.58 vs lookahead** (2p seat-swapped, n≥220 GPU; h2h vs old
-mctx 0.49–0.52 across 16/32/64 sims). Contracts in `tests/test_ismcts.py`.
-
-Design choices, each fixing a measured ply-2 bias:
-- **Root prior = the raw one-step value sweep** (`values / prior_scale`, ±20
-  spread), not a tanh+tier compression (which flattened it to near-uniform,
-  0.184 vs lookahead — the decisive port bug, 928f370 / 742b94b; uniform made
-  Gumbel's candidates a random subset, 6%). Interior prior = greedy's tier table
-  (uniform + deterministic argmax expanded the lowest-index action); a learned
-  `prior` replaces both.
-- **Two-sided paranoid frame** (searcher vs the table): every node holds the
-  searcher's value signed into the mover's side — the true max^n reduction. At 2p
-  provably identical to flipping on every mover change (632/640 same picks); the
-  every-mover-flip rule negates the searcher's own next turn and went below chance
-  at 4p (20% vs 3× lookahead; the side frame took the same seeds to 32.3%, n=161,
-  chance 25%; 62.2% vs 2× lookahead n=90).
-- **Chance**: per-simulation resampling, plus the immediate roll's exact 11-roll
-  expectation (`ROLL_DICE` leaves).
-- completed-Q does **not** min-max rescale (it amplified any Q ranking to ~8 nats
-  regardless of noise).
-
-The "search subtracts value" bug (34–43% vs lookahead, flat across
-sims/candidates/scale): at ~32 sims trees are ~2 plies and full-depth selection
-flipped ~9% of decisions, 92% losing 1-ply value (END_TURN → BUY_DEV/TRADE, the
-optimizer's curse over noisy follow-ups). The fixes above took flips 12% → 7%
-and the search 37% → **57%** vs lookahead (n=200). Defaults are the local
-optimum (sims 64 loses, considered peaks at 16, prior_scale 5 loses, value_scale
-12/38 tie-or-lose to 20). Diagnose decision-level, not by ~20-game matches (SE
-±11%); 4p evals need matched seeds or n ≥ 240.
-
-`num_simulations=0` is the **lookahead** special case: no tree, the masked argmax
-of the root one-step sweep over `num_trees` sampled worlds. It is also the *only*
-configuration that offers trades — `propose_rate` > 0 (default 0 for the search,
-0.5 for the `lookahead` registry entry) scores proposals by their *accepted*
-outcome under a partner model (the partner's seat must prefer accepting) minus
-`trade_penalty` (0.25), gated so a mispredicted partner can't re-offer forever.
-Offers are root-only: under the paranoid frame the in-tree responder prices every
-offer as rejected, so proposals are dropped from the in-tree prior (`_NO_PROPOSE`)
-and the search *answers* trades but never offers one. Lookahead offering measured
-37.8% pooled (n=373) at 3p.
+The re-determinizing SO-ISMCTS search (`make_search` / `make_search_weights` /
+`make_search_weights_value`, the tree, the lookahead `num_simulations=0` case,
+the chance-node and action-ordering flags, the trade machinery) lives in the
+`settlrl-search` package now — see its CLAUDE.md. `__init__.py` here imports
+`make_search` from it and defines the `search_policy` / `lookahead_policy`
+registry families locally.
 
 ## planner/
 
@@ -259,7 +149,7 @@ value-free before). `pov.py` is the host-side toolkit — one `Pov` per
 decision wrapping the host-fetched observation, the static board graph
 re-stated as numpy/python tables (`VERTEX_*`, `EDGE_ENDPOINTS`,
 `TILE_CORNERS`), and the flat table's host decode (`flat_row`,
-`ROWS_OF_TYPE`, re-exported from `internal.rows`). `tree.py` is the framework
+`ROWS_OF_TYPE`, re-exported from `settlrl_search.rows`). `tree.py` is the framework
 (`Node` / `Selector` / `Plan` / `Blackboard`); `goals.py` the goal economics
 (`plan_candidates` / `choose_plan` and their scoring weights); `tactic.py`
 the lookahead seam; `agent.py` the tree's nodes and the shipped `planner`
