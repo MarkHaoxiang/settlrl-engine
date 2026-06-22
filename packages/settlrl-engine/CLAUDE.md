@@ -141,7 +141,8 @@ the standalone API stays fully resolved.
   recomputes avail for the action it applies.
 
 **Testing.** Per-action tests live in `tests/mechanics/actions/`. The trusted
-differential oracle is the plain-Python `settlrl-reference` package, bridged by
+differential oracle is the plain-Python reference rules in `settlrl-game`
+(`settlrl_game.reference`), bridged by
 `tests/conversion.py`; `tests/test_reference_equivalence.py` drives both
 engines with the same action stream and asserts full-state agreement — plus,
 each step, `conversion.assert_legality_match` compares the engine's flat mask

@@ -10,7 +10,7 @@ search ladder is stuck against (the settlrl-learn Stage-1 gate).
 
 ## Setup
 
-`run.py [default|smoke]`. The loop lives in `settlrl_learn.alphazero`
+`run.py [default|smoke]`. The loop lives in `settlrl_learn.training`
 (composable); `run.py` only composes it with a config, per-iteration logging,
 and the gate verdict. Each iteration:
 

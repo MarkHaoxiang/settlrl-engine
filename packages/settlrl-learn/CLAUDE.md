@@ -24,46 +24,41 @@ deps only because this subpackage uses them.
   targets line up with the June 11 calibration finding (P(win) =
   σ(0.053·v_heuristic)). The AZ net's logit maps in with `value_scale=2`
   (`tanh(logit/2) = 2P−1`).
-- **Network definitions live under `nn/`**; **the training loop under `training/`**.
-  `nn/__init__` is import-light (no equinox/jraph) so the shipped plain-JAX path —
-  `features` + `nn/mlp.py`, reached by the package root — pulls no training deps.
-  A guard test (`tests/test_import_light.py`, run in a subprocess) asserts
-  `import settlrl_learn` pulls no equinox/flashbax/optax/orbax/jraph.
-- `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts it
-  onto the search's `value`/`prior` seams). Plain-JAX, so the package root
-  imports it without pulling training deps.
-- `nn/graph.py` / `nn/architectures.py` — the board-as-graph featurization
-  (`board_sample` → a `Sample` of per-node/-edge/global features + the
-  engineered vector, fixed topology as module constants) and the equinox
-  architectures over it (`mlp_engineered` / `mlp_flat` / `deepset` / `gnn`,
-  via `make_model`). Training-side (equinox/jraph), *not* imported by the
-  package root; experiment 0003 composes them. `deepset`/`gnn` are invariant
-  under the board's symmetry group and the player relabeling (readout pools
-  over nodes / ownership is read relatively); `mlp_flat` is not, by design.
-  These invariances are enforced in `tests/test_architectures.py` against the
-  symmetry generators in `tests/_symmetry.py` — the board's automorphism group
-  is order 6 (D3), not the bare graph's D6, because the harbors are only 3-fold
-  symmetric (the port-preserving subgroup).
-- **Net definitions** (training-side, *not* imported by the package root —
-  experiment 0004 and the loop compose them):
+- **Networks live under `nn/`** (training-side, *not* imported by the package
+  root — a subprocess guard test, `tests/test_import_light.py`, asserts
+  `import settlrl_learn` pulls no equinox/jraph/flashbax/optax/orbax). The
+  shipped MLP is the exception, reached by the root via an equinox-free
+  `nn/__init__`:
+  - `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts
+    it onto the search's `value`/`prior` seams). Plain-JAX, root-importable.
+  - `nn/graph.py` — the board-as-graph featurization (`board_sample` → a
+    `Sample` of per-node/-edge/global features + the engineered vector, fixed
+    topology as module constants).
+  - `nn/architectures.py` — the equinox architectures over it (`mlp_engineered`
+    / `mlp_flat` / `deepset` / `gnn`, via `make_model`); experiment 0003
+    composes them. `deepset`/`gnn` are invariant under the board's symmetry
+    group and player relabeling (readout pools over nodes; ownership is read
+    relatively); `mlp_flat` is not, by design. Enforced in
+    `tests/test_architectures.py` against the generators in `tests/_symmetry.py`
+    — the automorphism group is order 6 (D3), not the bare graph's D6, because
+    the harbors are only 3-fold symmetric.
   - `nn/graphnet.py::GraphTrunk` — the shared message-passing trunk (encoders +
     layers → per-node embeddings + global + pooled readout); `GraphNet` (single
-    head) and `nn/board_gnn.py::BoardGNN` both build their heads on it.
+    head) and `BoardGNN` build their heads on it.
   - `nn/action_layout.py` — the static map from the flat 662 action space to its
-    board structure (which actions are per-vertex / -edge / -tile vs. dense
-    "other"), and `SCATTER` to place a structure-factored head's compact logits
-    back into the flat vector. The robber/knight *victim* collapses to
-    no-steal/steal (the opponent-relative features can't individuate victims, so
-    a per-victim logit could not be player-relabel invariant).
+    board structure (per-vertex / -edge / -tile vs. dense "other") + `SCATTER` to
+    place a factored head's compact logits back into the flat vector. The
+    robber/knight *victim* collapses to no-steal/steal (opponent-relative
+    features can't individuate victims, so a per-victim logit could not be
+    relabel-invariant).
   - `nn/board_gnn.py::BoardGNN` — the value+policy net (`GraphTrunk` over
-    `nn/graph.py::board_sample`; the `gnn_seams` adapter lives here too). Value
-    and policy heads **split right after the trunk** (no shared head MLP). The
-    policy is **structure-factored**: a shared per-vertex / per-edge (symmetric
-    endpoints) / per-tile (corner-vertex mean) head emits spatial-action logits,
-    a dense head the rest, plus a per-type bias (class balance). Tests in
-    `tests/test_architectures.py` enforce: value invariant, policy *equivariant*
-    under board symmetry (an action at v maps to the action at σv —
-    `action_permutation`), both invariant under player relabeling.
+    `board_sample`; the `gnn_seams` search adapter lives here). Value and policy
+    heads **split right after the trunk**; the policy is **structure-factored**
+    (a shared per-vertex / per-edge / per-tile head for spatial actions, a dense
+    head for the rest, plus a per-type class-balance bias).
+    `tests/test_architectures.py` enforces value invariance, policy
+    *equivariance* under board symmetry (action at v ↦ action at σv,
+    `action_permutation`), and player-relabel invariance.
 
 - **The training loop** (`training/`, training-side, *not* imported by the
   package root): one net-agnostic self-play → replay → train → arena loop behind
@@ -133,16 +128,18 @@ paranoid-frame / opponent-model problem, and it *disables determinization during
 self-play* (the net learns the Bayesian-average-over-hands policy; determinize
 only at play time).
 
-Techniques worth lifting into our Stage 1 training, both aimed at Catan's dice
-variance (the variance-starved-depth problem):
+Techniques aimed at Catan's dice variance (the variance-starved-depth problem):
 
-- **Value-target blending** `target = (1−α)·z + α·q` (game outcome `z` blended
-  with MCTS root Q), α ramped linearly 0 → max over early iters. Pure `z` is too
-  noisy for a dice game; Q averages over sims once the value head is decent.
-- **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]` for ~90-move
-  games), trained on `ema = α·Q[t] + (1−α)·ema`, sharing the trunk.
+- **Value-target blending** `(1−α)·z + α·q` (outcome blended with the searched
+  root q) — **done**: `learn`'s `value_blend_max`, q from
+  `make_search_weights_value`.
+- **Explicit chance nodes** for dice + dev draws — **done** (opt-in
+  `chance_nodes`/`dev_chance`; details in settlrl-agents/CLAUDE.md). Canopy also
+  forces a canonical **action ordering** to cut transpositions — **done** (opt-in
+  `ordered`, `settlrl_engine.ordering`).
+- **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]`), trained on
+  `ema = α·Q[t] + (1−α)·ema`, sharing the trunk — *not yet*.
 - **Playout-cap randomization** (KataGo): most moves a small search, a fraction
-  the full budget; only full-search positions contribute policy targets, all
-  contribute value targets.
+  the full budget; only full-search positions contribute policy targets — *not yet*.
 
 Repo + METHODS.md + examples/catan/OPTIMIZATIONS.md; see [[canopy-reference]].

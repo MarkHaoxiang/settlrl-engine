@@ -86,7 +86,7 @@ value) the global readout currently discards.
 
 ## GraphNet lever ablation (2026-06-18)
 
-A configurable `GraphNet` (`settlrl_learn.graphnet`) turns the major design
+A configurable `GraphNet` (`settlrl_learn.nn.graphnet`) turns the major design
 choices into config knobs; `ablate_{heuristic,win,road}` sweep one preset per
 lever (`gn_*`) against the engineered baseline. Added a third, *structural*
 target — `road`, seat 0's true longest-road trail length — which the engineered
