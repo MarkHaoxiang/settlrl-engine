@@ -59,6 +59,7 @@ def self_play(
     max_steps: int = 100_000,
     max_game_len: int = 800,
     record_value: bool = False,
+    track_ordering: bool = False,
 ) -> Samples:
     """Collect >= ``n_samples`` self-play positions, the moves and policy targets
     drawn from ``weights_fn``. Positions from finished games are credited with the
@@ -83,7 +84,7 @@ def self_play(
 
     env = BatchedSettlrlEnv(
         batch_size=batch_size, seed=seed, reward="sparse",
-        n_players=n_players, track_beliefs=True,
+        n_players=n_players, track_beliefs=True, track_ordering=track_ordering,
     )  # fmt: skip
     pending: list[
         list[tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float]]

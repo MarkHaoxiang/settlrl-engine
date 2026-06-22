@@ -64,6 +64,7 @@ def learn(
     value_blend_ramp: int = 10,
     chance_nodes: bool = False,
     dev_chance: bool = True,
+    ordered: bool = False,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
     arena_games: int = 0,
@@ -127,6 +128,7 @@ def learn(
             max_num_considered_actions=max_num_considered_actions,
             chance_nodes=chance_nodes,
             dev_chance=dev_chance,
+            ordered=ordered,
         )
         if teacher_value is not None
         else None
@@ -153,12 +155,12 @@ def learn(
                 v_fn, prior=p_fn, value_scale=2.0,
                 num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
-                chance_nodes=chance_nodes, dev_chance=dev_chance,
+                chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
             )  # fmt: skip
         fresh = self_play(
             wfn, backend.observe, n_samples=selfplay_samples, setup_fn=setup_fn,
             batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
-            record_value=blend,
+            record_value=blend, track_ordering=ordered,
         )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
         nf = fresh["value"].shape[0]

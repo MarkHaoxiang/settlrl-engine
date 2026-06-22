@@ -52,6 +52,7 @@ from settlrl_engine.mechanics.awards import current_player_won
 from settlrl_engine.mechanics.common import agent_selection_single
 from settlrl_engine.mechanics.dice import distribute_resources
 from settlrl_engine.mechanics.flat import flat_available_for
+from settlrl_engine.ordering import next_category, ordering_mask
 
 from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_agents.policy import PolicyPrior
@@ -144,6 +145,7 @@ class _Descent(NamedTuple):
     exp_parent: _Node
     exp_act: _Action
     exp_kind: _Node  # kind of the leaf node being expanded (chance_nodes)
+    category: IntScalar  # action-ordering category reached this turn (ordered)
 
 
 # --- Sequential Halving: the considered-visits schedule (static, baked) ---
@@ -297,6 +299,7 @@ class _Cfg(NamedTuple):
     expected_rolls: bool  # roll leaf = exact 11-roll expectation; else 1 sampled roll
     chance_nodes: bool  # explicit dice (+dev) chance nodes in the tree
     dev_chance: bool  # also make BUY_DEVELOPMENT_CARD a chance node (chance_nodes)
+    ordered: bool  # apply the action-ordering lock-out to the in-tree legal set
     n_nodes: int  # num_simulations + 1
     table: _Table  # the Sequential-Halving considered-visits schedule
 
@@ -424,6 +427,7 @@ def _determinize(
         exp_parent=jnp.int32(-1),
         exp_act=jnp.int32(0),
         exp_kind=_DECISION,
+        category=jnp.int32(0),  # reset at the root; the env supplies the root mask
     )
 
 
@@ -447,12 +451,23 @@ def _descend(
         # `tree` is read-only here; the current node is non-terminal with a legal
         # action.
         legal = _legal_mask(layout, walk.state)
+        if cfg.ordered:
+            legal = jnp.where(ordering_mask(walk.state, walk.category), legal, 0.0)
         at_root = (walk.cur == 0) & (walk.depth == 0)
         action = jnp.where(
             at_root, a_root, _interior_select(tree, walk.cur, legal, player)
         )
         next_state = _step(layout, walk.state, action)
         is_leaf = tree.children[walk.cur, action] < 0  # unexpanded edge -> stop here
+        category = (
+            next_category(
+                walk.category,
+                ROW_TYPE[action],
+                walk.state.current_player != next_state.current_player,
+            )
+            if cfg.ordered
+            else walk.category
+        )
         return _Descent(
             state=next_state,
             prev_state=walk.state if cfg.expected_rolls else None,
@@ -465,6 +480,7 @@ def _descend(
             exp_parent=jnp.where(is_leaf, walk.cur, jnp.int32(-1)),
             exp_act=jnp.where(is_leaf, action, jnp.int32(0)),
             exp_kind=_DECISION,
+            category=category,
         )
 
     def body_chance(walk: _Descent) -> _Descent:
@@ -477,6 +493,8 @@ def _descend(
         key, k_out = jax.random.split(walk.key)
         is_chance = tree.kind[walk.cur] == _CHANCE
         legal = _legal_mask(layout, walk.state)
+        if cfg.ordered:  # decision-node selection only (chance samples by outcome)
+            legal = jnp.where(ordering_mask(walk.state, walk.category), legal, 0.0)
         at_root = (walk.cur == 0) & (walk.depth == 0)
         action = jnp.where(
             at_root, a_root, _interior_select(tree, walk.cur, legal, player)
@@ -495,6 +513,14 @@ def _descend(
             is_chance, _DECISION, jnp.where(stoch, _CHANCE, _DECISION)
         )
         is_leaf = tree.children[walk.cur, edge] < 0
+        # Only a decision-node action raises the ordering category; a chance
+        # resolution (nature's outcome) is uncategorised.
+        if cfg.ordered:
+            turn_changed = walk.state.current_player != next_state.current_player
+            act_type = jnp.where(is_chance, jnp.int32(ActionType.END_TURN), ROW_TYPE[action])
+            category = next_category(walk.category, act_type, turn_changed)
+        else:
+            category = walk.category
         return _Descent(
             state=next_state,
             prev_state=None,
@@ -507,6 +533,7 @@ def _descend(
             exp_parent=jnp.where(is_leaf, walk.cur, jnp.int32(-1)),
             exp_act=jnp.where(is_leaf, edge, jnp.int32(0)),
             exp_kind=next_kind,
+            category=category,
         )
 
     return jax.lax.while_loop(cond, body_chance if cfg.chance_nodes else body, walk)
@@ -621,6 +648,7 @@ def make_tree(
     expected_rolls: bool = True,
     chance_nodes: bool = False,
     dev_chance: bool = True,
+    ordered: bool = False,
 ) -> TreeSearch:
     """Build one SO-ISMCTS tree (a :data:`TreeSearch` over :func:`_run`).
     ``prior`` (when given) is the *interior* node prior — a learned policy head;
@@ -647,6 +675,7 @@ def make_tree(
         expected_rolls=expected_rolls and not chance_nodes,
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
+        ordered=ordered,
         n_nodes=num_simulations + 1,
         table=jnp.asarray(_considered_table(max_considered, num_simulations)),
     )

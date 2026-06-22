@@ -96,7 +96,10 @@ deps only because this subpackage uses them.
     blended, the eval slice keeps raw `z` (see the Canopy reference below).
     `chance_nodes`/`dev_chance` thread the search's explicit chance-node mode
     through both self-play and the arena (the backends carry it for `play_agent`),
-    so the search plans past rolls at train and play time.
+    so the search plans past rolls at train and play time. `ordered` turns on the
+    action-ordering lock-out (`settlrl_engine.ordering`): self-play's env runs
+    `track_ordering` (constrains the real move set across a turn) and the search
+    threads the lock-out deeper; the backends carry it for the arena agent too.
   - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
     seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
     lower-bound sanity check); the play agent comes from `backend.play_agent`.

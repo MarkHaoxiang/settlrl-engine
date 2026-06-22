@@ -58,6 +58,10 @@ class AlphaZeroConfig(Config):
     # dev_chance) — nature's move resolved in-tree, both in self-play and the arena.
     chance_nodes: bool = False
     dev_chance: bool = True
+    # action-ordering lock-out (canonical order over a turn's builds/buys/trades)
+    # to cut search-space transpositions; applied in self-play (env + search) and
+    # the arena agent.
+    ordered: bool = False
     batch_size: int = 256
     buffer_max: int = 50_000
     buffer_min: int = 512
@@ -225,6 +229,7 @@ VARIANTS: dict[str, dict[str, object]] = {
         "q_weight_max": 0.5,  # exercise the value-blend path in the smoke
         "q_weight_ramp": 1,
         "chance_nodes": True,  # exercise the dice+dev chance-node path in the smoke
+        "ordered": True,  # exercise the action-ordering lock-out in the smoke
         "arena_games": 4,
         "arena_every": 1,
         "wandb_mode": "disabled",
@@ -262,7 +267,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     backend = GNNBackend(
         netcfg, setup_depth=cfg.setup_depth,
         setup_temperature=cfg.setup_temperature, setup_beam=cfg.setup_beam,
-        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance,
+        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance, ordered=cfg.ordered,
     )  # fmt: skip
     resume = None
     if cfg.resume_from:
@@ -319,6 +324,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             value_blend_ramp=cfg.q_weight_ramp,
             chance_nodes=cfg.chance_nodes,
             dev_chance=cfg.dev_chance,
+            ordered=cfg.ordered,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,
@@ -353,7 +359,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         return
     backend = MLPBackend(
         (cfg.width,) * cfg.depth, value_weight=cfg.value_weight,
-        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance,
+        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance, ordered=cfg.ordered,
     )  # fmt: skip
 
     # Resume: restore the prior run's RunState and continue its wandb run so the
@@ -408,6 +414,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             value_blend_ramp=cfg.q_weight_ramp,
             chance_nodes=cfg.chance_nodes,
             dev_chance=cfg.dev_chance,
+            ordered=cfg.ordered,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,

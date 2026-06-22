@@ -59,11 +59,13 @@ class MLPBackend:
         value_weight: float = 1.0,
         chance_nodes: bool = False,
         dev_chance: bool = True,
+        ordered: bool = False,
     ) -> None:
         self.hidden = tuple(hidden)
         self.value_weight = value_weight
         self.chance_nodes = chance_nodes
         self.dev_chance = dev_chance
+        self.ordered = ordered
 
     def init(self, key: Array) -> AZParams:
         return init_az_params(key, self.hidden)
@@ -83,6 +85,7 @@ class MLPBackend:
             num_simulations=num_simulations,
             max_num_considered_actions=max_num_considered_actions,
             chance_nodes=self.chance_nodes, dev_chance=self.dev_chance,
+            ordered=self.ordered,
         )  # fmt: skip
 
     def observe(

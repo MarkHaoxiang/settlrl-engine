@@ -76,6 +76,7 @@ def make_search_weights_value(
     expected_rolls: bool = True,
     chance_nodes: bool = False,
     dev_chance: bool = True,
+    ordered: bool = False,
 ) -> PolicyWeightsValue:
     """Re-determinizing SO-ISMCTS, returning ``(improved-policy weights, root
     value)`` — the AlphaZero policy *and* value (``q``) targets. The root value is
@@ -100,6 +101,7 @@ def make_search_weights_value(
         expected_rolls=expected_rolls,
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
+        ordered=ordered,
     )
 
     def root_logits(
@@ -200,6 +202,7 @@ def make_search_weights(
     expected_rolls: bool = True,
     chance_nodes: bool = False,
     dev_chance: bool = True,
+    ordered: bool = False,
 ) -> PolicyWeights:
     """The improved-policy weights alone (the AlphaZero policy target;
     :func:`make_search` argmaxes these) — :func:`make_search_weights_value` with
@@ -218,6 +221,7 @@ def make_search_weights(
         expected_rolls=expected_rolls,
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
+        ordered=ordered,
     )
 
     def weights(
@@ -247,6 +251,7 @@ def make_search(
     expected_rolls: bool = True,
     chance_nodes: bool = False,
     dev_chance: bool = True,
+    ordered: bool = False,
 ) -> BeliefPolicy:
     """Re-determinizing search as a :class:`BeliefPolicy`: the masked argmax of
     the improved policy. Parameters are :func:`make_search_weights`'; tiny noise
@@ -265,6 +270,7 @@ def make_search(
         expected_rolls=expected_rolls,
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
+        ordered=ordered,
     )
 
     def policy(

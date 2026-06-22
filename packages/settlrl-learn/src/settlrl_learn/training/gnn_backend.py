@@ -81,6 +81,7 @@ def make_net_agent(
     setup_beam: int = 4,
     chance_nodes: bool = False,
     dev_chance: bool = True,
+    ordered: bool = False,
 ) -> BeliefPolicy:
     """The net at play: the setup phase from :func:`setup_policy`, the main loop
     from the net's search. The phase is read off the mask (setup ⇔ the only legal
@@ -89,7 +90,7 @@ def make_net_agent(
         value_fn, prior=prior_fn, value_scale=2.0,
         num_simulations=num_simulations,
         max_num_considered_actions=max_num_considered_actions,
-        chance_nodes=chance_nodes, dev_chance=dev_chance,
+        chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
     )  # fmt: skip
     setup = setup_policy(
         n_players, setup_depth=setup_depth,
@@ -166,6 +167,7 @@ class GNNBackend:
         setup_beam: int = 4,
         chance_nodes: bool = False,
         dev_chance: bool = True,
+        ordered: bool = False,
     ) -> None:
         self.cfg = cfg
         self.setup_depth = setup_depth
@@ -173,6 +175,7 @@ class GNNBackend:
         self.setup_beam = setup_beam
         self.chance_nodes = chance_nodes
         self.dev_chance = dev_chance
+        self.ordered = ordered
 
     def init(self, key: Array) -> BoardGNN:
         return BoardGNN(key, self.cfg)
@@ -197,6 +200,7 @@ class GNNBackend:
             setup_depth=self.setup_depth,
             setup_temperature=self.setup_temperature, setup_beam=self.setup_beam,
             chance_nodes=self.chance_nodes, dev_chance=self.dev_chance,
+            ordered=self.ordered,
         )  # fmt: skip
 
     def observe(

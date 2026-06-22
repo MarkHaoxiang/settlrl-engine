@@ -195,6 +195,14 @@ strength lever:
   bit-identical, the 13 baseline contracts hold; 4 chance contracts added). The
   bet: a *learned* value (settlrl-learn q-blend, exp 0004) may convert what the
   stationary leaf couldn't — pending a gated arena A/B.
+- **Action-ordering lock-out** (opt-in `ordered` flag, 2026-06-22): the descent
+  ANDs `settlrl_engine.ordering.ordering_mask` into the in-tree legal set and
+  threads the per-turn `category` (reset on turn change), so the search explores
+  only the canonical order of a turn's builds/buys/trades (transposition cut). The
+  engine owns the rule; the search consumes it. Root mask comes from the env
+  (`track_ordering`); the search continues the lock-out deeper from category 0
+  (max-so-far keeps it consistent with the env category). Default OFF; 3 ordered
+  contracts added. Also a gated A/B lever.
 - `mcts` (frozen-world): per-simulation determinization is its principled
   superset, *parity not a win* at 3p (0.352 ± 0.031, n=244; 64 worlds 0.307 —
   more doesn't help; ~ties at 2p where the belief is ~exact).

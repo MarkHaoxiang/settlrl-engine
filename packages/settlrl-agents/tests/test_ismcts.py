@@ -145,6 +145,29 @@ def test_chance_nodes_reproducible_from_key() -> None:
     assert np.array_equal(np.asarray(w1), np.asarray(w2)) and float(q1) == float(q2)
 
 
+@functools.cache
+def _ordered_fn(num_simulations: int) -> Any:
+    """A search with the action-ordering lock-out applied in-tree."""
+    return jax.jit(
+        make_search_weights(heuristic_value, num_simulations=num_simulations, ordered=True)
+    )
+
+
+@pytest.mark.parametrize("seed", [0, 3, 6])
+def test_ordered_weights_are_a_legal_distribution(seed: int) -> None:
+    # The ordering lock-out applied in the descent still yields a legal
+    # improved-policy distribution over the (env-supplied) root mask -- the
+    # contract that threading `category` never leaks an illegal action.
+    layout, view, p, mask = _position(seed, steps=120 + seed * 10)
+    if mask.sum() == 0:
+        pytest.skip("no legal move (stalled lane)")
+    w = np.asarray(
+        _ordered_fn(16)(jax.random.key(seed), layout, view, jnp.int32(p), jnp.asarray(mask))
+    )
+    assert np.all(w >= 0.0) and abs(float(w.sum()) - 1.0) < 1e-6
+    assert float(w[mask == 0].sum()) == 0.0  # support is exactly the legal set
+
+
 def test_visits_concentrate_above_uniform() -> None:
     # A healthy search is neither degenerate (all mass on one action) nor a
     # round-robin: the top action takes clearly more than a uniform share of the
