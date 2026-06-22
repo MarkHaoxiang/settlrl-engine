@@ -25,10 +25,11 @@ from _symmetry import (
 from settlrl_agents.internal.rows import ROW_TYPE
 from settlrl_engine.board import Board
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
-from settlrl_learn.azgnn import BoardGNN, az_gnn_loss
 from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
+from settlrl_learn.nn.board_gnn import BoardGNN
 from settlrl_learn.nn.graph import board_sample
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
+from settlrl_learn.training.gnn_backend import gnn_loss
 
 _OUT, _W = 4, 8
 
@@ -184,7 +185,7 @@ def test_aznet_runs_on_random_play_boards() -> None:
         assert bool(jnp.isfinite(v).all()) and bool(jnp.isfinite(pol).all())
 
 
-def test_az_gnn_loss_masked_is_finite() -> None:
+def test_gnn_loss_masked_is_finite() -> None:
     # The masked policy CE must stay finite (no 0 * -inf on illegal slots) for a
     # legal-supported target -- checked on real random-play boards + their masks.
     net = _aznet()
@@ -197,6 +198,6 @@ def test_az_gnn_loss_masked_is_finite() -> None:
     mask = jnp.asarray(env.flat_mask(), jnp.float32)  # (4, N_FLAT)
     samples = jax.vmap(board_sample)(lo, st, env.agent_selection)
     target = mask / jnp.clip(mask.sum(-1, keepdims=True), 1.0)  # uniform over legal
-    loss, aux = az_gnn_loss(net, samples, target, jnp.zeros(4), mask)
+    loss, aux = gnn_loss(net, samples, target, jnp.zeros(4), mask)
     assert bool(jnp.isfinite(loss))
     assert all(bool(jnp.isfinite(v)) for v in aux.values())

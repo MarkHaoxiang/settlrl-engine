@@ -2,7 +2,7 @@
 
 Hypothesis: a value+policy net trained by AlphaZero self-play (the search as its
 own teacher) beats ``lookahead(heuristic)`` at 2p — the settlrl-learn Stage-1
-gate. The loop itself lives in ``settlrl_learn.alphazero``; this only composes it
+gate. The loop itself lives in ``settlrl_learn.training``; this only composes it
 with a config, per-iteration logging, and the gate verdict.
 
     uv run python experiments/0004_alphazero/run.py [variant] [key=value ...]
@@ -14,10 +14,9 @@ from typing import Literal
 
 import jax
 import wandb
-from settlrl_learn import init_az_params, save_az_params
-from settlrl_learn.alphazero import arena, learn
+from settlrl_learn import save_az_params
 from settlrl_learn.experiment import Config, Run, start_run
-from settlrl_learn.train_state import TrainState
+from settlrl_learn.training import GNNBackend, MLPBackend, arena, learn
 
 
 class AlphaZeroConfig(Config):
@@ -67,7 +66,7 @@ class AlphaZeroConfig(Config):
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str = "settlrl-0004-alphazero"
     checkpoint_every: int = 5  # iterations between full-state checkpoints
-    resume_from: str = ""  # prior run dir to continue bit-exactly (its trainstate)
+    resume_from: str = ""  # prior run dir to continue bit-exactly (its runstate.eqx)
 
 
 VARIANTS: dict[str, dict[str, object]] = {
@@ -187,20 +186,23 @@ VARIANTS: dict[str, dict[str, object]] = {
 
 
 def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
-    """The board-GNN value+policy net (experiment 0003's recommendation) in a
-    small AlphaZero loop (in-memory replay; the flat-MLP path keeps the bit-exact
-    flashbax/orbax infra)."""
+    """The board-GNN value+policy net (experiment 0003's recommendation) in the
+    training loop, with the setup phase delegated to a fixed policy."""
     import equinox as eqx
     import numpy as np
     from settlrl_agents.value import heuristic_value
-    from settlrl_learn import azgnn
+    from settlrl_learn.nn.board_gnn import BoardGNN
     from settlrl_learn.nn.graphnet import PRESETS
 
     base = PRESETS.get(cfg.gnn_preset, PRESETS["gn_global"])
     netcfg = base._replace(width=cfg.width, layers=cfg.layers, head_depth=cfg.depth)
+    backend = GNNBackend(
+        netcfg, setup_depth=cfg.setup_depth,
+        setup_temperature=cfg.setup_temperature, setup_beam=cfg.setup_beam,
+    )  # fmt: skip
     resume = None
     if cfg.resume_from:
-        prior = Path(cfg.resume_from) / "gnnstate.eqx"
+        prior = Path(cfg.resume_from) / "runstate.eqx"
         resume = prior if prior.exists() else None
     wb = wandb.init(
         project=cfg.wandb_project, mode=cfg.wandb_mode, config=cfg.dump(),
@@ -208,7 +210,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     )  # fmt: skip
     best = -1.0
 
-    def on_iter(i: int, metrics: dict[str, float], model: azgnn.BoardGNN) -> None:
+    def on_iter(i: int, metrics: dict[str, float], model: BoardGNN) -> None:
         nonlocal best
         run.log(iteration=i, **metrics)  # scalars -> metrics.jsonl
         log: dict[str, object] = {"iteration": i, **metrics}
@@ -232,8 +234,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             eqx.tree_serialise_leaves(run.dir / "best.eqx", model)
 
     try:
-        model = azgnn.learn(
-            cfg=netcfg,
+        model = learn(
+            backend,
             n_iterations=cfg.n_iterations,
             selfplay_samples=cfg.selfplay_samples,
             selfplay_batch=cfg.selfplay_batch,
@@ -243,10 +245,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             teacher_value=heuristic_value if cfg.teacher else None,
             teacher_iters=cfg.teacher_iters,
             teacher_sims=cfg.teacher_sims,
-            setup_depth=cfg.setup_depth,
-            setup_temperature=cfg.setup_temperature,
-            setup_beam=cfg.setup_beam,
             buffer_max=cfg.buffer_max,
+            buffer_min=cfg.batch_size,
             batch_size=cfg.batch_size,
             train_steps=cfg.train_steps,
             reuse=cfg.reuse,
@@ -266,12 +266,11 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     finally:
         wb.finish()
 
-    winrate = azgnn.arena(
-        model, n_games=cfg.arena_games, num_simulations=cfg.arena_sims,
+    winrate = arena(
+        backend, model, n_games=cfg.arena_games, num_simulations=cfg.arena_sims,
         batch_size=cfg.arena_batch,
         max_num_considered_actions=cfg.max_num_considered_actions,
-        setup_depth=cfg.setup_depth, setup_temperature=cfg.setup_temperature,
-        setup_beam=cfg.setup_beam, seed=cfg.seed + 99,
+        seed=cfg.seed + 99,
     )  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
     run.finish(
@@ -283,16 +282,16 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     if cfg.net == "gnn":
         run_gnn_experiment(run, cfg)
         return
-    params = init_az_params(jax.random.key(cfg.seed), (cfg.width,) * cfg.depth)
+    backend = MLPBackend((cfg.width,) * cfg.depth, value_weight=cfg.value_weight)
 
-    # Resume: restore the prior run's TrainState and continue its wandb run so
-    # the dashboard is one unbroken curve.
+    # Resume: restore the prior run's RunState and continue its wandb run so the
+    # dashboard is one unbroken curve.
     resume_dir = Path(cfg.resume_from) if cfg.resume_from else None
     resume_from = None
     wandb_id = None
     if resume_dir is not None:
-        trainstate = resume_dir / "trainstate"
-        resume_from = trainstate if trainstate.exists() else None
+        runstate = resume_dir / "runstate.eqx"
+        resume_from = runstate if runstate.exists() else None
         id_file = resume_dir / "wandb_id.txt"
         wandb_id = id_file.read_text().strip() if id_file.exists() else None
 
@@ -309,20 +308,20 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
     best = -1.0  # best arena win rate seen -> best.npz (the shippable net)
 
-    def on_iter(i: int, metrics: dict[str, float], state: TrainState) -> None:
+    def on_iter(i: int, metrics: dict[str, float], net: object) -> None:
         nonlocal best
         run.log(iteration=i, **metrics)
         wb.log({"iteration": i, **metrics}, step=i)  # explicit step: resume-safe
         winrate = metrics.get("arena_winrate")
         if winrate is not None and winrate > best:
             best = winrate
-            save_az_params(run.dir / "best.npz", state.params)  # strongest net so far
+            save_az_params(run.dir / "best.npz", net)  # type: ignore[arg-type]
 
     try:
-        # learn writes the full-state checkpoint (run.dir/trainstate) for
+        # learn writes the full-state checkpoint (run.dir/runstate.eqx) for
         # bit-exact resume; resume_from continues a prior run's checkpoint.
         final = learn(
-            params,
+            backend,
             n_iterations=cfg.n_iterations,
             selfplay_samples=cfg.selfplay_samples,
             selfplay_batch=cfg.selfplay_batch,
@@ -335,7 +334,6 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             train_steps=cfg.train_steps,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
-            value_weight=cfg.value_weight,
             arena_games=cfg.arena_games,
             arena_every=cfg.arena_every,
             seed=cfg.seed,
@@ -347,9 +345,10 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     finally:
         wb.finish()
 
-    save_az_params(run.dir / "params.npz", final.params)  # final net
+    save_az_params(run.dir / "params.npz", final)  # final net
     winrate = arena(
-        final.params,
+        backend,
+        final,
         n_games=cfg.arena_games,
         num_simulations=cfg.num_simulations,
         max_num_considered_actions=cfg.max_num_considered_actions,

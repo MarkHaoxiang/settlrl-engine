@@ -80,9 +80,9 @@ Supervised benchmark for *which net learns the board best*, the seam toward a
 learned value (settlrl-learn Stage 1). `data.py` rolls out greedy self-play and
 caches seat-0 positions (true board) under `runs/_cache`, labelled with both the
 hand-tuned `heuristic_value` and the eventual win. The featurization
-(`settlrl_learn.graph`: board → a fixed-topology graph, 54 vertices / 72 edges
+(`settlrl_learn.nn.graph`: board → a fixed-topology graph, 54 vertices / 72 edges
 with senders/receivers as module constants, plus the engineered vector) and the
-architectures (`settlrl_learn.architectures`: `mlp_engineered` baseline,
+architectures (`settlrl_learn.nn.architectures`: `mlp_engineered` baseline,
 `mlp_flat` structure-blind, `deepset` set, `gnn` jraph `GraphNetwork` + readout)
 live in settlrl-learn now (their symmetry contracts are tested there); this
 framework only composes them. `train.py` is optax adamw + wandb (`mode`
@@ -99,7 +99,7 @@ board features usable. Not yet promoted to a shipped value; close the win gap,
 then gate `lookahead(gnn)` through `settlrl-agents bench`.
 
 The `road` target (seat-0 longest-road trail length) and the `ablate_*`
-variants drive the GraphNet lever ablation over `settlrl_learn.graphnet.PRESETS`
+variants drive the GraphNet lever ablation over `settlrl_learn.nn.graphnet.PRESETS`
 (report.md): GNNs ≫ engineered on the structural target (R² 0.99 vs 0.83),
 attention is the wrong bias for counting tasks, and `gn_global` (sum-MPNN +
 global node + multi readout + LayerNorm) is the recommended net.

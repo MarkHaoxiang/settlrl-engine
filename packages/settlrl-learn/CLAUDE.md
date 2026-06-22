@@ -24,9 +24,11 @@ deps only because this subpackage uses them.
   targets line up with the June 11 calibration finding (P(win) =
   σ(0.053·v_heuristic)). The AZ net's logit maps in with `value_scale=2`
   (`tanh(logit/2) = 2P−1`).
-- **Network definitions live under `nn/`** (reorg in progress). `nn/__init__` is
-  import-light (no equinox/jraph) so the shipped plain-JAX path — `features` +
-  `nn/mlp.py`, reached by the package root — pulls no training deps.
+- **Network definitions live under `nn/`**; **the training loop under `training/`**.
+  `nn/__init__` is import-light (no equinox/jraph) so the shipped plain-JAX path —
+  `features` + `nn/mlp.py`, reached by the package root — pulls no training deps.
+  A guard test (`tests/test_import_light.py`, run in a subprocess) asserts
+  `import settlrl_learn` pulls no equinox/flashbax/optax/orbax/jraph.
 - `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts it
   onto the search's `value`/`prior` seams). Plain-JAX, so the package root
   imports it without pulling training deps.
@@ -42,17 +44,8 @@ deps only because this subpackage uses them.
   symmetry generators in `tests/_symmetry.py` — the board's automorphism group
   is order 6 (D3), not the bare graph's D6, because the harbors are only 3-fold
   symmetric (the port-preserving subgroup).
-- **AlphaZero loop** (training-side, *not* imported by the package root — keeps
-  the shipped-model path lean; experiment 0004 composes them):
-  - `selfplay.py::self_play` — batched n-player self-play, the net guiding the
-    re-determinizing search (`make_search_weights` for the improved policy as
-    target); features are on the *true* board (net learns the belief-averaged
-    value), values are the eventual win/loss of the acting seat.
-  - `alphazero.py` — the flashbax item-buffer wrapper, the policy-CE +
-    value-logistic loss + optax adamw `make_train_step`, `arena` (seat-swapped
-    vs `lookahead(heuristic)`, the Stage-1 gate), and the `learn` loop. Value
-    target is pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a
-    search that exposes root Q (see the Canopy reference below).
+- **Net definitions** (training-side, *not* imported by the package root —
+  experiment 0004 and the loop compose them):
   - `nn/graphnet.py::GraphTrunk` — the shared message-passing trunk (encoders +
     layers → per-node embeddings + global + pooled readout); `GraphNet` (single
     head) and `nn/board_gnn.py::BoardGNN` both build their heads on it.
@@ -62,32 +55,55 @@ deps only because this subpackage uses them.
     back into the flat vector. The robber/knight *victim* collapses to
     no-steal/steal (the opponent-relative features can't individuate victims, so
     a per-victim logit could not be player-relabel invariant).
-  - `azgnn.py` — the AlphaZero loop with a **GNN trunk** (`nn/board_gnn.py::BoardGNN`
-    over `nn/graph.py::board_sample`; the net + `gnn_seams` adapter live in
-    `nn/board_gnn.py`). The value and policy heads **split right after the
-    trunk** (no shared head MLP). The policy is **structure-factored**: a shared
-    per-vertex / per-edge (symmetric endpoints) / per-tile (corner-vertex mean)
-    head emits spatial-action logits, a dense head the rest, plus a per-type bias
-    (class balance). Tests in `tests/test_architectures.py` enforce: value
-    invariant, policy *equivariant* under board symmetry (an action at v maps to
-    the action at σv — `action_permutation`), both invariant under player
-    relabeling. Mirrors `selfplay`/`alphazero`
-    for an equinox model: `make_az_gnn` adapts onto the search seams, `self_play`
-    records the board graph, and `learn` runs the loop over a flashbax on-device
-    replay. The whole `GNNState` is **eqx-serialised** every iteration for
-    bit-exact resume (eqx's native serialiser fits the equinox model where
-    orbax's pure-array assumption does not; the per-iteration RNG is a pure
-    function of `seed` and the iteration index). `reuse` caps updates/iter at the
-    AZ sample-reuse factor (the value-overfit fix), and a held-out `eval_frac`
-    gives the `val_value_acc` generalization metric. Experiment 0004's `net=gnn`
-    variant composes it.
-  - `train_state.py::TrainState` — the whole mutable run state (params,
-    optimiser moments, replay buffer, iteration, best), orbax-serialised for
-    **bit-exact resume**: `learn` rebuilds the static optimiser/buffer from
-    hyperparameters, restores the state into them, and continues — the
-    per-iteration RNG is a pure function of `seed` and the iteration index, so a
-    resumed run is bit-identical to one that never stopped (tested:
-    params/opt/buffer all exact).
+  - `nn/board_gnn.py::BoardGNN` — the value+policy net (`GraphTrunk` over
+    `nn/graph.py::board_sample`; the `gnn_seams` adapter lives here too). Value
+    and policy heads **split right after the trunk** (no shared head MLP). The
+    policy is **structure-factored**: a shared per-vertex / per-edge (symmetric
+    endpoints) / per-tile (corner-vertex mean) head emits spatial-action logits,
+    a dense head the rest, plus a per-type bias (class balance). Tests in
+    `tests/test_architectures.py` enforce: value invariant, policy *equivariant*
+    under board symmetry (an action at v maps to the action at σv —
+    `action_permutation`), both invariant under player relabeling.
+
+- **The training loop** (`training/`, training-side, *not* imported by the
+  package root): one net-agnostic self-play → replay → train → arena loop behind
+  a `Backend` seam, so the flat-MLP and board-GNN paths share it. Experiment
+  0004 composes it (`net=mlp|gnn`).
+  - `training/backend.py` — the `Backend` protocol (the net-specific surface:
+    `init` / `seams` / `play_agent` / `setup_policy` / `observe` / `to_item` /
+    `empty_item` / `init_opt` / `make_step` / `eval_metrics`) and `RunState`
+    (net + optimiser moments + replay buffer + iteration + best). `RunState` is
+    **eqx-serialised** (`save_run_state`) — eqx's leaf serialiser fits both an
+    equinox module and a plain-JAX pytree, so it replaced orbax for *both*
+    backends.
+  - `training/selfplay.py::self_play` — batched n-player self-play, the search
+    (net's or a fixed teacher's) guiding the re-determinizing moves and improved
+    policy. The backend's `observe` records the *true* board (net learns the
+    belief-averaged value); values are the acting seat's eventual win/loss.
+    `setup_fn` (when given) plays the setup phase with a fixed policy and those
+    positions are *not* recorded (the GNN path; the MLP path passes `None` and
+    the net plays setup too).
+  - `training/loop.py::learn` — the loop: per-iteration RNG is a pure function of
+    `seed` and the iteration index, so `resume_from` (a `runstate.eqx`) continues
+    bit-identically (tested in `tests/`-adjacent resume checks for both
+    backends). `reuse` caps updates/iter at the AZ sample-reuse factor (the
+    value-overfit fix); a held-out `eval_frac` feeds the backend's `eval_metrics`
+    (the `val_*` generalization metrics); `teacher_value`/`teacher_iters`
+    warm-start from a fixed strong search (the cold-start fix). Value target is
+    pure outcome `z` for now; Canopy's `(1−α)z + α·q` blend awaits a search that
+    exposes root Q (see the Canopy reference below).
+  - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
+    seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
+    lower-bound sanity check); the play agent comes from `backend.play_agent`.
+  - `training/mlp_backend.py::MLPBackend` — the `AZParams` net over the
+    engineered feature vector; **unmasked** policy CE + value-logistic loss,
+    optax adamw, the net plays setup itself.
+  - `training/gnn_backend.py::GNNBackend` — the `BoardGNN` net over the board
+    graph; **masked** policy CE (softmax over the legal set only) + value loss,
+    eqx-filtered optax step. `setup_policy` (a fixed `lookahead`/expectimax
+    opener) plays the setup phase in both self-play and the arena;
+    `make_net_agent` composes setup + the net's search; `gnn_loss` is the masked
+    loss (its finiteness is contract-tested).
 
 The gates (June 11 plan, evidence in settlrl-agents/CLAUDE.md): Stage 1 ships a
 value only if `lookahead(net)` beats `lookahead(heuristic)` at ≥2σ, n≥400
