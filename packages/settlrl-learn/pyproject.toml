@@ -32,7 +32,9 @@ settlrl-engine = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n auto"
+# Fixed worker count, not `-n auto`: caps peak memory (one JAX process/core
+# under `auto`). See settlrl-engine's pyproject for the measured rationale.
+addopts = "-n 8"
 
 [tool.mypy]
 strict = true

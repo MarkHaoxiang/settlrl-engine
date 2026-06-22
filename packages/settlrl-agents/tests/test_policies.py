@@ -179,9 +179,13 @@ def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
 def test_self_play_rollouts_complete_games(spec: Spec) -> None:
-    # The episode budget stops as soon as two games finish (instead of a fixed
+    # The episode budget stops as soon as a game finishes (instead of a fixed
     # step count), which is what bounds the expensive search agents' runtime.
     # Three seats so domestic trade is live: a proposer stuck re-offering a
-    # trade its partner keeps rejecting would stall the games and fail here.
-    result = evaluate([spec, spec, spec], n_episodes=2, batch_size=BATCH, seed=0)
-    assert result.episodes >= 2
+    # trade its partner keeps rejecting would stall the game and fail here (a
+    # stall never reaches one completion, so the test hangs/fails as intended).
+    # One completion at batch_size=2 is the cheapest form of the guard: cost is
+    # ~game_length x lanes-until-first-finish, far below running games to a
+    # two-finish budget at the full batch.
+    result = evaluate([spec, spec, spec], n_episodes=1, batch_size=2, seed=0)
+    assert result.episodes >= 1

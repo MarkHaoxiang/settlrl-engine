@@ -43,7 +43,9 @@ testpaths = ["tests"]
 # Deselect the agent benchmarks by default (they dominate wall-clock and
 # aren't correctness tests). Run them with `-m benchmark` or via the
 # repo-root run_benchmarks.sh wrapper.
-addopts = "-n auto -m 'not benchmark'"
+# Fixed worker count, not `-n auto`: critical-path-bound (~90s at 8 or 32
+# workers — measured), so `auto` (one process/core) only multiplies peak memory.
+addopts = "-n 8 -m 'not benchmark'"
 markers = [
     "benchmark: throughput benchmark, deselected by default (run with -m benchmark)",
     "slow: long-running (e.g. a full ISMCTS self-play game); CI, not pre-commit",

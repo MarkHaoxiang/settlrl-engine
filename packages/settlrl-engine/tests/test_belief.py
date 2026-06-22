@@ -51,7 +51,9 @@ def _rollout(env: BatchedSettlrlEnv, n_steps: int, seed: int = 42) -> None:
         env.step(*env.random_actions(k))
 
 
-@pytest.mark.parametrize("n_players", [2, 3, 4])
+# 2p (exact-belief regime) and 4p (third-party-steal slack) are the boundaries;
+# 3p is interior — the diff logic branches on "third party / not", not the count.
+@pytest.mark.parametrize("n_players", [2, 4])
 def test_bounds_bracket_the_truth(n_players: int) -> None:
     env = BatchedSettlrlEnv(
         batch_size=4, seed=0, n_players=n_players, track_beliefs=True
@@ -71,7 +73,7 @@ def test_bounds_bracket_the_truth(n_players: int) -> None:
         assert bool(jnp.all(hi[:, o, o] == true))
 
 
-@pytest.mark.parametrize("n_players", [2, 3, 4])
+@pytest.mark.parametrize("n_players", [2, 4])
 def test_dev_pool_conservation(n_players: int) -> None:
     env = BatchedSettlrlEnv(
         batch_size=4, seed=1, n_players=n_players, track_beliefs=True
