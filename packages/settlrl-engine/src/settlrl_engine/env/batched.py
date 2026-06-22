@@ -82,6 +82,7 @@ from settlrl_engine.mechanics.flat import (
     type_mask_from_flat,
 )
 from settlrl_engine.mechanics.trade import _propose_trade_avail
+from settlrl_engine.ordering import next_category, ordering_mask
 
 __all__ = [
     "N_ACTION_TYPES",
@@ -222,6 +223,11 @@ _agent_selection_b: Callable[[BoardState], AgentSelectionArray] = jax.jit(
     _agent_selection_v
 )
 
+# Batched action-ordering helpers (opt-in `track_ordering`): advance the per-turn
+# category and build the legality overlay across the batch.
+_next_category_b = jax.jit(jax.vmap(next_category, in_axes=(0, 0, 0)))
+_ordering_mask_b = jax.jit(jax.vmap(ordering_mask, in_axes=(0, 0)))
+
 
 def _fresh_board(
     k_layout: KeyScalar,
@@ -327,6 +333,7 @@ class BatchedSettlrlEnv:
         n_players: int = N_PLAYERS,
         victory_points_to_win: int = VICTORY_POINTS_TO_WIN,
         track_beliefs: bool = False,
+        track_ordering: bool = False,
     ) -> None:
         if reward not in ("sparse", "vp_delta"):
             raise ValueError(f"reward must be 'sparse' or 'vp_delta', got {reward!r}")
@@ -348,6 +355,7 @@ class BatchedSettlrlEnv:
         self.n_players = n_players
         self.victory_points_to_win = victory_points_to_win
         self.track_beliefs = track_beliefs
+        self.track_ordering = track_ordering
         self.possible_agents = [f"player_{i}" for i in range(n_players)]
         self.agents = list(self.possible_agents)
         self.num_agents = n_players
@@ -382,6 +390,11 @@ class BatchedSettlrlEnv:
         self._belief: BeliefState | None = (
             make_belief(self.batch_size, self.n_players) if self.track_beliefs else None
         )
+        # Per-turn action-ordering category (the lock-out's one int of state); the
+        # SETUP start is non-MAIN so the overlay is a no-op until the first turn.
+        self._category = jnp.zeros((B,), jnp.int32) if self.track_ordering else None
+        if self.track_ordering:
+            self._avail = self._avail & _ordering_mask_b(self._state, self._category)
         self.agents = list(self.possible_agents)
 
     def step(self, action_type: ActionTypeArray, params: ActionParams) -> None:
@@ -394,6 +407,10 @@ class BatchedSettlrlEnv:
         owed count reaches zero, then the phase advances to MOVE_ROBBER.
         """
         at = jnp.asarray(action_type, dtype=jnp.int32)
+        if self.track_ordering:
+            pre_player = self._state.current_player
+            pre_main = self._state.phase == int(GamePhase.MAIN)
+            legal = flat_legality(self._avail, at, params.idx, params.target)
         out = _env_step_core(
             self._layout,
             self._state,
@@ -415,6 +432,15 @@ class BatchedSettlrlEnv:
         self._result, self._vps = out.result, out.vps
         self._avail, self._agent_sel, self._key = out.avail, out.agent_sel, out.key
         self._belief = out.belief
+        if self.track_ordering:
+            assert self._category is not None
+            # Reset the category on a turn change (current player moved, or the
+            # lane auto-reset); else raise it by a *legal, main-phase* action's
+            # category (an illegal / sub-phase action counts as uncategorised).
+            turn_changed = (pre_player != self._state.current_player) | out.terminations.any(-1)
+            safe_at = jnp.where(legal & pre_main, at, jnp.int32(ActionType.END_TURN))
+            self._category = _next_category_b(self._category, safe_at, turn_changed)
+            self._avail = self._avail & _ordering_mask_b(self._state, self._category)
 
     def last(
         self,

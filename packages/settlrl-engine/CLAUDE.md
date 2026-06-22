@@ -239,3 +239,16 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
   semantics haven't drifted under recorded games. `record_game` drives
   `BatchedSettlrlEnv` directly (not `SettlrlAECEnv`) so the `rl` extra isn't
   needed.
+- `ordering.py` — **optional** action-ordering lock-out (after cullback/canopy):
+  a canonical order over a turn's MAIN-phase free actions
+  (play-dev → trade → buy → city → road → settlement; END_TURN and non-main
+  actions uncategorised) to cut search-space transpositions. `ordering_mask` is a
+  legality *overlay* (AND into the real flat legality), advanced by one int of
+  per-turn state (`next_category`: reset on a turn change, else running max). Pure
+  + opt-in, beside `belief.py`: `flat.py`'s true legality is untouched, so records
+  / the reference oracle are unaffected. The env applies it only under
+  `track_ordering` (a Python-level post-step AND into `self._avail`, mirroring
+  `track_beliefs`; `_env_step_core` untouched). Transposition-safe except two rare
+  accepted losses (single-category scheme): same-turn settlement→city upgrade, and
+  trading at a same-turn-built port's rate. settlrl-agents' search consumes it
+  (`ordered` flag) for the AlphaZero search-space reduction.
