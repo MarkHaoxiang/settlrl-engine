@@ -54,6 +54,10 @@ class AlphaZeroConfig(Config):
     # q_weight_ramp iters; q = the searched root value. 0 -> pure outcome z.
     q_weight_max: float = 0.0
     q_weight_ramp: int = 10
+    # explicit chance nodes in the search (dice always; dev-card buys when
+    # dev_chance) — nature's move resolved in-tree, both in self-play and the arena.
+    chance_nodes: bool = False
+    dev_chance: bool = True
     batch_size: int = 256
     buffer_max: int = 50_000
     buffer_min: int = 512
@@ -175,6 +179,33 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_sims": 24,
         "checkpoint_every": 2,
     },
+    # The full stack: warm-up + q-blend + explicit dice/dev chance nodes (search
+    # plans past rolls, both in self-play and the arena). The combined bet that
+    # the learned value finally converts what the stationary heuristic couldn't.
+    "gnn_warm_qblend_chance": {
+        "net": "gnn",
+        "width": 96,
+        "layers": 4,
+        "n_iterations": 30,
+        "teacher": True,
+        "teacher_iters": 8,
+        "teacher_sims": 32,
+        "selfplay_samples": 4096,
+        "selfplay_batch": 256,
+        "num_simulations": 32,
+        "max_num_considered_actions": 16,
+        "reuse": 2.0,
+        "batch_size": 512,
+        "q_weight_max": 0.5,
+        "q_weight_ramp": 12,
+        "chance_nodes": True,
+        "dev_chance": True,
+        "arena_games": 40,
+        "arena_every": 4,
+        "arena_batch": 64,
+        "arena_sims": 24,
+        "checkpoint_every": 2,
+    },
     "gnn_smoke": {
         "net": "gnn",
         "width": 16,
@@ -193,6 +224,7 @@ VARIANTS: dict[str, dict[str, object]] = {
         "batch_size": 4,
         "q_weight_max": 0.5,  # exercise the value-blend path in the smoke
         "q_weight_ramp": 1,
+        "chance_nodes": True,  # exercise the dice+dev chance-node path in the smoke
         "arena_games": 4,
         "arena_every": 1,
         "wandb_mode": "disabled",
@@ -230,6 +262,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     backend = GNNBackend(
         netcfg, setup_depth=cfg.setup_depth,
         setup_temperature=cfg.setup_temperature, setup_beam=cfg.setup_beam,
+        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance,
     )  # fmt: skip
     resume = None
     if cfg.resume_from:
@@ -284,6 +317,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             eval_frac=cfg.eval_frac,
             value_blend_max=cfg.q_weight_max,
             value_blend_ramp=cfg.q_weight_ramp,
+            chance_nodes=cfg.chance_nodes,
+            dev_chance=cfg.dev_chance,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,
@@ -316,7 +351,10 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     if cfg.net == "gnn":
         run_gnn_experiment(run, cfg)
         return
-    backend = MLPBackend((cfg.width,) * cfg.depth, value_weight=cfg.value_weight)
+    backend = MLPBackend(
+        (cfg.width,) * cfg.depth, value_weight=cfg.value_weight,
+        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance,
+    )  # fmt: skip
 
     # Resume: restore the prior run's RunState and continue its wandb run so the
     # dashboard is one unbroken curve.
@@ -368,6 +406,8 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             train_steps=cfg.train_steps,
             value_blend_max=cfg.q_weight_max,
             value_blend_ramp=cfg.q_weight_ramp,
+            chance_nodes=cfg.chance_nodes,
+            dev_chance=cfg.dev_chance,
             lr=cfg.lr,
             weight_decay=cfg.weight_decay,
             arena_games=cfg.arena_games,

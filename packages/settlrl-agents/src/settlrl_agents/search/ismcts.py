@@ -32,6 +32,7 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int
 from settlrl_engine.belief import BeliefView
+from settlrl_engine.board.dev_cards import N_DEV_CARD_TYPES
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import (
     BoardState,
@@ -41,7 +42,12 @@ from settlrl_engine.board.state import (
     Player,
 )
 from settlrl_engine.env import N_FLAT, flat_to_action
-from settlrl_engine.mechanics.action import ActionType, action_available, apply_action
+from settlrl_engine.mechanics.action import (
+    ActionParams,
+    ActionType,
+    action_available,
+    apply_action,
+)
 from settlrl_engine.mechanics.awards import current_player_won
 from settlrl_engine.mechanics.common import agent_selection_single
 from settlrl_engine.mechanics.dice import distribute_resources
@@ -52,9 +58,21 @@ from settlrl_agents.policy import PolicyPrior
 from settlrl_agents.sample import sample_world
 from settlrl_agents.value import Value, ValueFunction
 
-from ._common import _ROLL_P, _ROLLS, _TIER_LOGITS, _Weights
+from ._common import _ILLEGAL, _ROLL_P, _ROLLS, _TIER_LOGITS, _Weights
 
 _ROLL_T = jnp.int32(ActionType.ROLL_DICE)
+_BUY_T = jnp.int32(ActionType.BUY_DEVELOPMENT_CARD)
+
+# Explicit chance nodes: a decision node's stochastic action (a dice roll, or a
+# dev-card buy when `dev_chance`) leads to a *chance* node whose children are the
+# real outcomes, sampled at their true probability and applied via the engine's
+# forced-outcome seam. `_N_OUTCOMES` bounds the per-chance-node child axis: 11
+# dice outcomes (2..12) or `N_DEV_CARD_TYPES` card types.
+_DECISION = jnp.int32(0)
+_CHANCE = jnp.int32(1)
+_N_DICE = 11
+_N_OUTCOMES = max(_N_DICE, N_DEV_CARD_TYPES)
+_ROLL_LOGITS = jnp.log(_ROLL_P)  # the true two-dice outcome distribution
 
 # completed-Q scale: (_MAXVISIT_INIT + max_visits) * _MIX_SCALE, added to the
 # prior logits (absolute, not min-max normalized).
@@ -103,6 +121,7 @@ class _Tree(NamedTuple):
     w: _EdgeF  # edge value sums (searcher frame)
     prior: _EdgeF  # raw prior logits (root logits at node 0, interior prior elsewhere)
     raw: _NodeF  # searcher-frame node value
+    kind: _NodeI  # _DECISION or _CHANCE (chance nodes index children by outcome)
     size: IntScalar  # nodes in use
 
 
@@ -116,6 +135,7 @@ class _Descent(NamedTuple):
 
     state: BoardState
     prev_state: BoardState | None  # step's parent for _roll_ev; None if single-sample
+    key: KeyScalar  # descent RNG, for sampling chance outcomes (chance_nodes)
     cur: _Node
     depth: IntScalar  # edges taken so far
     path_node: _PathI
@@ -123,6 +143,7 @@ class _Descent(NamedTuple):
     done: BoolScalar
     exp_parent: _Node
     exp_act: _Action
+    exp_kind: _Node  # kind of the leaf node being expanded (chance_nodes)
 
 
 # --- Sequential Halving: the considered-visits schedule (static, baked) ---
@@ -238,6 +259,7 @@ def _expand(
         mover=tree.mover.at[new_id].set(jnp.where(grew, mover, tree.mover[new_id])),
         prior=tree.prior.at[new_id].set(jnp.where(grew, leaf_prior, tree.prior[new_id])),
         raw=tree.raw.at[new_id].set(jnp.where(grew, value, tree.raw[new_id])),
+        kind=tree.kind.at[new_id].set(jnp.where(grew, walk.exp_kind, tree.kind[new_id])),
         children=tree.children.at[safe_parent, walk.exp_act].set(
             jnp.where(grew, new_id, tree.children[safe_parent, walk.exp_act])
         ),
@@ -273,6 +295,8 @@ class _Cfg(NamedTuple):
     max_considered: int
     value_scale: float
     expected_rolls: bool  # roll leaf = exact 11-roll expectation; else 1 sampled roll
+    chance_nodes: bool  # explicit dice (+dev) chance nodes in the tree
+    dev_chance: bool  # also make BUY_DEVELOPMENT_CARD a chance node (chance_nodes)
     n_nodes: int  # num_simulations + 1
     table: _Table  # the Sequential-Halving considered-visits schedule
 
@@ -324,6 +348,60 @@ def _roll_ev(
     return _ROLL_P @ vals
 
 
+# --- explicit chance nodes: stochastic actions resolve through nature nodes ---
+
+
+def _select_state(pred: BoolScalar, a: BoardState, b: BoardState) -> BoardState:
+    """``a`` where ``pred`` else ``b`` (a state pytree ``where``)."""
+    return cast(BoardState, jax.tree.map(lambda x, y: jnp.where(pred, x, y), a, b))
+
+
+def _is_stochastic(cfg: _Cfg, action: _Action) -> BoolScalar:
+    """Whether taking ``action`` lands in a chance node: a dice roll always, a
+    dev-card buy when ``dev_chance``."""
+    atype = ROW_TYPE[action]
+    return cast(BoolScalar, (atype == _ROLL_T) | (cfg.dev_chance & (atype == _BUY_T)))
+
+
+def _sample_outcome(
+    cfg: _Cfg, key: KeyScalar, pending: _Action, state: BoardState
+) -> IntScalar:
+    """Sample a chance outcome index for the ``pending`` stochastic action: a dice
+    outcome ``0..10`` (roll-2) at the true probabilities, or a dev-card type at the
+    deck's current composition."""
+    is_buy = cfg.dev_chance & (ROW_TYPE[pending] == _BUY_T)
+    deck = state.dev_deck.astype(jnp.float32)
+    deck_logits = jnp.where(
+        deck > 0, jnp.log(deck / jnp.maximum(deck.sum(), 1.0)), _ILLEGAL
+    )
+    buy_logits = jnp.concatenate(
+        [deck_logits, jnp.full((_N_OUTCOMES - N_DEV_CARD_TYPES,), _ILLEGAL)]
+    )
+    roll_logits = jnp.concatenate(
+        [_ROLL_LOGITS, jnp.full((_N_OUTCOMES - _N_DICE,), _ILLEGAL)]
+    )
+    logits = jnp.where(is_buy, buy_logits, roll_logits)
+    return jax.random.categorical(key, logits).astype(jnp.int32)
+
+
+def _resolve_chance(
+    cfg: _Cfg,
+    layout: BoardLayout,
+    state: BoardState,
+    pending: _Action,
+    outcome: IntScalar,
+) -> BoardState:
+    """Apply the ``pending`` stochastic action with its sampled ``outcome`` forced
+    through the engine seam (roll ``outcome+2``, or dev-card type ``outcome``)."""
+    atype, _ = flat_to_action(pending)
+    is_buy = cfg.dev_chance & (ROW_TYPE[pending] == _BUY_T)
+    forced = jnp.where(is_buy, outcome + 1, outcome + 2).astype(jnp.int32)
+    params = ActionParams(idx=forced, target=jnp.int32(0))
+    avail = action_available(layout, state, atype, params)
+    next_state, _ = apply_action(layout, state, atype, params, avail)
+    return next_state
+
+
 # --- the simulation phases: determinize, then select (descend) ---
 
 
@@ -332,10 +410,12 @@ def _determinize(
 ) -> _Descent:
     # DETERMINIZE: sample a world consistent with the belief, and seed the walk
     # over it at the root (depth 0, node 0, nothing expanded yet).
-    state = sample_world(key, view, player)
+    k_world, k_desc = jax.random.split(key)
+    state = sample_world(k_world, view, player)
     return _Descent(
         state=state,
         prev_state=state if cfg.expected_rolls else None,
+        key=k_desc,
         cur=jnp.int32(0),
         depth=jnp.int32(0),
         path_node=jnp.zeros((cfg.max_depth,), jnp.int32),
@@ -343,6 +423,7 @@ def _determinize(
         done=current_player_won(state),
         exp_parent=jnp.int32(-1),
         exp_act=jnp.int32(0),
+        exp_kind=_DECISION,
     )
 
 
@@ -375,6 +456,7 @@ def _descend(
         return _Descent(
             state=next_state,
             prev_state=walk.state if cfg.expected_rolls else None,
+            key=walk.key,
             cur=jnp.where(is_leaf, walk.cur, tree.children[walk.cur, action]),
             depth=walk.depth + 1,
             path_node=walk.path_node.at[walk.depth].set(walk.cur),
@@ -382,9 +464,52 @@ def _descend(
             done=is_leaf | current_player_won(next_state),
             exp_parent=jnp.where(is_leaf, walk.cur, jnp.int32(-1)),
             exp_act=jnp.where(is_leaf, action, jnp.int32(0)),
+            exp_kind=_DECISION,
         )
 
-    return jax.lax.while_loop(cond, body, walk)
+    def body_chance(walk: _Descent) -> _Descent:
+        # Decision/chance state machine. A decision node selects an action (root by
+        # Sequential Halving, else the improved-policy rule); a *stochastic* action
+        # (roll, or dev-buy under dev_chance) defers to a chance node (the
+        # afterstate, action unapplied). A chance node samples its outcome at the
+        # true probability and applies the forced transition. Both branches are
+        # computed every step (vmap runs both) and `where`-selected by node kind.
+        key, k_out = jax.random.split(walk.key)
+        is_chance = tree.kind[walk.cur] == _CHANCE
+        legal = _legal_mask(layout, walk.state)
+        at_root = (walk.cur == 0) & (walk.depth == 0)
+        action = jnp.where(
+            at_root, a_root, _interior_select(tree, walk.cur, legal, player)
+        )
+        stoch = _is_stochastic(cfg, action)
+        pending = walk.path_act[walk.depth - 1]  # the action that created this node
+        outcome = _sample_outcome(cfg, k_out, pending, walk.state)
+
+        # decision step: defer a stochastic action (afterstate = current state),
+        # else apply it. chance step: resolve the pending action's forced outcome.
+        dec_state = _select_state(stoch, walk.state, _step(layout, walk.state, action))
+        chance_state = _resolve_chance(cfg, layout, walk.state, pending, outcome)
+        next_state = _select_state(is_chance, chance_state, dec_state)
+        edge = jnp.where(is_chance, outcome, action)
+        next_kind = jnp.where(
+            is_chance, _DECISION, jnp.where(stoch, _CHANCE, _DECISION)
+        )
+        is_leaf = tree.children[walk.cur, edge] < 0
+        return _Descent(
+            state=next_state,
+            prev_state=None,
+            key=key,
+            cur=jnp.where(is_leaf, walk.cur, tree.children[walk.cur, edge]),
+            depth=walk.depth + 1,
+            path_node=walk.path_node.at[walk.depth].set(walk.cur),
+            path_act=walk.path_act.at[walk.depth].set(edge),
+            done=is_leaf | current_player_won(next_state),
+            exp_parent=jnp.where(is_leaf, walk.cur, jnp.int32(-1)),
+            exp_act=jnp.where(is_leaf, edge, jnp.int32(0)),
+            exp_kind=next_kind,
+        )
+
+    return jax.lax.while_loop(cond, body_chance if cfg.chance_nodes else body, walk)
 
 
 def _evaluate(
@@ -444,6 +569,7 @@ def _run(
         w=jnp.zeros((cfg.n_nodes, N_FLAT), jnp.float32),
         prior=jnp.zeros((cfg.n_nodes, N_FLAT), jnp.float32).at[0].set(root_logits),
         raw=jnp.zeros((cfg.n_nodes,), jnp.float32).at[0].set(root_value),
+        kind=jnp.zeros((cfg.n_nodes,), jnp.int32),  # root + all nodes default DECISION
         size=jnp.int32(1),
     )
 
@@ -493,6 +619,8 @@ def make_tree(
     max_considered: int,
     value_scale: float,
     expected_rolls: bool = True,
+    chance_nodes: bool = False,
+    dev_chance: bool = True,
 ) -> TreeSearch:
     """Build one SO-ISMCTS tree (a :data:`TreeSearch` over :func:`_run`).
     ``prior`` (when given) is the *interior* node prior — a learned policy head;
@@ -502,7 +630,13 @@ def make_tree(
 
     ``expected_rolls`` scores a dice-edge leaf by the exact 11-roll expectation
     (variance reduction at 11x the value-fn calls); False uses the single sampled
-    post-roll state already produced by the step (much cheaper, noisier leaf)."""
+    post-roll state already produced by the step (much cheaper, noisier leaf).
+
+    ``chance_nodes`` resolves stochastic transitions through explicit chance nodes
+    in the tree (dice always, dev-card buys when ``dev_chance``) — nature's move
+    sampled at its true probability and applied via the engine's forced-outcome
+    seam, so the search can plan *past* a roll. It supersedes ``expected_rolls``
+    (a leaf-only roll EV), so the two are mutually exclusive."""
     cfg = _Cfg(
         value=value,
         prior=prior,
@@ -510,7 +644,9 @@ def make_tree(
         max_depth=max_depth,
         max_considered=max_considered,
         value_scale=value_scale,
-        expected_rolls=expected_rolls,
+        expected_rolls=expected_rolls and not chance_nodes,
+        chance_nodes=chance_nodes,
+        dev_chance=dev_chance,
         n_nodes=num_simulations + 1,
         table=jnp.asarray(_considered_table(max_considered, num_simulations)),
     )

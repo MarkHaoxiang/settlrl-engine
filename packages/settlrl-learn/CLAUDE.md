@@ -94,6 +94,9 @@ deps only because this subpackage uses them.
     searched root `q` from `make_search_weights_value`, α ramped 0→max over
     `value_blend_ramp` iters) — the dice-variance fix; only the training slice is
     blended, the eval slice keeps raw `z` (see the Canopy reference below).
+    `chance_nodes`/`dev_chance` thread the search's explicit chance-node mode
+    through both self-play and the arena (the backends carry it for `play_agent`),
+    so the search plans past rolls at train and play time.
   - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
     seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
     lower-bound sanity check); the play agent comes from `backend.play_agent`.

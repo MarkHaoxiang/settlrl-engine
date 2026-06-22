@@ -104,6 +104,47 @@ def test_reproducible_from_key() -> None:
     assert a1 == a2
 
 
+@functools.cache
+def _chance_fn(num_simulations: int) -> Any:
+    """A search with explicit dice + dev-card chance nodes."""
+    from settlrl_agents.search import make_search_weights_value
+
+    return jax.jit(
+        make_search_weights_value(
+            heuristic_value,
+            num_simulations=num_simulations,
+            chance_nodes=True,
+            dev_chance=True,
+        )
+    )
+
+
+@pytest.mark.parametrize("seed", [0, 2, 5])
+def test_chance_nodes_weights_are_a_legal_distribution(seed: int) -> None:
+    # The explicit-chance-node descent (dice + dev draws resolved in-tree) still
+    # returns a legal improved-policy distribution and a finite searched root value
+    # -- the contract that the decision/chance state machine never leaks an illegal
+    # action or diverges.
+    layout, view, p, mask = _position(seed, steps=120 + seed * 10)
+    if mask.sum() == 0:
+        pytest.skip("no legal move (stalled lane)")
+    w, q = _chance_fn(16)(
+        jax.random.key(seed), layout, view, jnp.int32(p), jnp.asarray(mask)
+    )
+    w = np.asarray(w)
+    assert np.all(w >= 0.0) and abs(float(w.sum()) - 1.0) < 1e-6
+    assert float(w[mask == 0].sum()) == 0.0  # support is exactly the legal set
+    assert bool(np.isfinite(q)) and -1.0 <= float(q) <= 1.0  # searched root value
+
+
+def test_chance_nodes_reproducible_from_key() -> None:
+    layout, view, p, mask = _position(2, steps=140)
+    args = (jax.random.key(4), layout, view, jnp.int32(p), jnp.asarray(mask))
+    w1, q1 = _chance_fn(16)(*args)
+    w2, q2 = _chance_fn(16)(*args)
+    assert np.array_equal(np.asarray(w1), np.asarray(w2)) and float(q1) == float(q2)
+
+
 def test_visits_concentrate_above_uniform() -> None:
     # A healthy search is neither degenerate (all mass on one action) nor a
     # round-robin: the top action takes clearly more than a uniform share of the

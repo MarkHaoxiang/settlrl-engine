@@ -74,6 +74,8 @@ def make_search_weights_value(
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
     expected_rolls: bool = True,
+    chance_nodes: bool = False,
+    dev_chance: bool = True,
 ) -> PolicyWeightsValue:
     """Re-determinizing SO-ISMCTS, returning ``(improved-policy weights, root
     value)`` — the AlphaZero policy *and* value (``q``) targets. The root value is
@@ -96,6 +98,8 @@ def make_search_weights_value(
         max_considered=max_num_considered_actions,
         value_scale=value_scale,
         expected_rolls=expected_rolls,
+        chance_nodes=chance_nodes,
+        dev_chance=dev_chance,
     )
 
     def root_logits(
@@ -161,9 +165,7 @@ def make_search_weights_value(
         root value is the best legal successor value mapped to [-1, 1]."""
         k_world, k_gate = jax.random.split(key)
         world = sample_world(k_world, view, player)
-        w = jnp.where(
-            mask, root_logits(k_gate, layout, world, player, mask), _ILLEGAL
-        )
+        w = jnp.where(mask, root_logits(k_gate, layout, world, player, mask), _ILLEGAL)
         best = jnp.max(jnp.where(mask, w, -jnp.inf))  # logit = value / prior_scale
         return w, jnp.tanh(best * prior_scale / value_scale)
 
@@ -196,6 +198,8 @@ def make_search_weights(
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
     expected_rolls: bool = True,
+    chance_nodes: bool = False,
+    dev_chance: bool = True,
 ) -> PolicyWeights:
     """The improved-policy weights alone (the AlphaZero policy target;
     :func:`make_search` argmaxes these) — :func:`make_search_weights_value` with
@@ -212,6 +216,8 @@ def make_search_weights(
         propose_rate=propose_rate,
         trade_penalty=trade_penalty,
         expected_rolls=expected_rolls,
+        chance_nodes=chance_nodes,
+        dev_chance=dev_chance,
     )
 
     def weights(
@@ -239,6 +245,8 @@ def make_search(
     propose_rate: float = 0.0,
     trade_penalty: float = 0.25,
     expected_rolls: bool = True,
+    chance_nodes: bool = False,
+    dev_chance: bool = True,
 ) -> BeliefPolicy:
     """Re-determinizing search as a :class:`BeliefPolicy`: the masked argmax of
     the improved policy. Parameters are :func:`make_search_weights`'; tiny noise
@@ -255,6 +263,8 @@ def make_search(
         propose_rate=propose_rate,
         trade_penalty=trade_penalty,
         expected_rolls=expected_rolls,
+        chance_nodes=chance_nodes,
+        dev_chance=dev_chance,
     )
 
     def policy(

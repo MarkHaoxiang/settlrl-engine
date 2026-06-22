@@ -62,6 +62,8 @@ def learn(
     eval_frac: float = 0.0,
     value_blend_max: float = 0.0,
     value_blend_ramp: int = 10,
+    chance_nodes: bool = False,
+    dev_chance: bool = True,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
     arena_games: int = 0,
@@ -123,6 +125,8 @@ def learn(
             teacher_value,
             num_simulations=teacher_sims,
             max_num_considered_actions=max_num_considered_actions,
+            chance_nodes=chance_nodes,
+            dev_chance=dev_chance,
         )
         if teacher_value is not None
         else None
@@ -149,6 +153,7 @@ def learn(
                 v_fn, prior=p_fn, value_scale=2.0,
                 num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
+                chance_nodes=chance_nodes, dev_chance=dev_chance,
             )  # fmt: skip
         fresh = self_play(
             wfn, backend.observe, n_samples=selfplay_samples, setup_fn=setup_fn,

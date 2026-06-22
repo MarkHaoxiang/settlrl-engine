@@ -184,7 +184,17 @@ agents all tied at ~parity — the cleanest one won. The merges, each a falsifie
 strength lever:
 - `smcts`'s explicit dice/dev chance nodes (49.3% h2h, ~2× wall-clock; dev node
   50.5% n=210; 64→128 sims 53.3%→49.5%). Roll-EV leaves + per-simulation
-  resampling subsume them.
+  resampling subsume them — *with the stationary heuristic leaf*. **Re-added as
+  an opt-in flag 2026-06-22** (`chance_nodes`, `dev_chance` in `make_tree` /
+  `make_search[_weights[_value]]`): the descent is now a decision/chance state
+  machine — a stochastic action (roll always; dev-buy under `dev_chance`) defers
+  to a chance node (afterstate) that samples nature at its true probability
+  (`_ROLL_P` / deck composition) and applies the engine's forced-outcome seam
+  (`apply_action` with a forced `idx`), so the search plans *past* a roll. It
+  supersedes `expected_rolls` (mutually exclusive). Default OFF (flag-off is
+  bit-identical, the 13 baseline contracts hold; 4 chance contracts added). The
+  bet: a *learned* value (settlrl-learn q-blend, exp 0004) may convert what the
+  stationary leaf couldn't — pending a gated arena A/B.
 - `mcts` (frozen-world): per-simulation determinization is its principled
   superset, *parity not a win* at 3p (0.352 ± 0.031, n=244; 64 worlds 0.307 —
   more doesn't help; ~ties at 2p where the belief is ~exact).
