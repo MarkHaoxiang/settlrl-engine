@@ -340,57 +340,34 @@ def test_value_blend_alpha_ramp() -> None:
     assert alphas[0] == 0.0  # iteration 0 is always a pure-z no-op
 
 
-def test_prepare_targets_blend_and_holdout() -> None:
-    # Direct test of the extracted step (no full learn run): the loop is just an
-    # orchestrator of `prepare_targets`, so the value-blend formula and the
-    # held-out split are pinned here against the real function.
+def test_prepare_targets_value_blend() -> None:
+    # Direct test of the extracted step (no full learn run): all data trains
+    # (the eval slice is a separate fresh generation), so this pins the
+    # value-blend formula against the real function.
     rng = np.random.default_rng(0)
     n = 20
     fresh: Samples = {
         "value": (rng.random(n) < 0.5).astype(np.float32),  # z in {0, 1}
         "q": np.full(n, 0.3, np.float32),  # searcher frame -> q_prob 0.65
         "policy": rng.random((n, 5)).astype(np.float32),
-        "mask": np.ones((n, 5), np.float32),
     }
 
-    # blend off, no eval: the train slice is `fresh` untouched, alpha 0, ev None.
-    fr, ev, alpha = prepare_targets(
-        fresh, None, eval_frac=0.0, blend=False,
-        blend_max=0.0, blend_ramp=1, iteration=3, perm_seed=0,
-    )  # fmt: skip
-    assert alpha == 0.0 and ev is None
+    # blend off: value untouched, alpha 0.
+    fr, alpha = prepare_targets(
+        fresh, blend=False, blend_max=0.0, blend_ramp=1, iteration=3
+    )
+    assert alpha == 0.0
     assert np.array_equal(fr["value"], fresh["value"])
 
-    # blend on at the ramp midpoint: alpha = 0.5 * min(1, 2/4) = 0.25; 20% held out.
-    fr, ev, alpha = prepare_targets(
-        fresh, None, eval_frac=0.2, blend=True,
-        blend_max=0.5, blend_ramp=4, iteration=2, perm_seed=1,
-    )  # fmt: skip
+    # blend on at the ramp midpoint: alpha = 0.5 * min(1, 2/4) = 0.25.
+    fr, alpha = prepare_targets(
+        fresh, blend=True, blend_max=0.5, blend_ramp=4, iteration=2
+    )
     assert abs(alpha - 0.25) < 1e-12
-    assert ev is not None and ev["value"].shape[0] == 4 and fr["value"].shape[0] == 16
-    # the held-out eval slice keeps raw outcomes; the train slice is the affine
-    # mix (1-a)z + a*0.65, i.e. one of two values, all valid P(win) in [0, 1].
-    assert set(np.unique(ev["value"])).issubset({0.0, 1.0})
+    # value -> affine mix (1-a)z + a*0.65, i.e. one of two values, valid P(win).
     lo, hi = 0.25 * 0.65, 0.75 + 0.25 * 0.65  # blend of z=0 and z=1
     assert np.all(np.isclose(fr["value"], lo) | np.isclose(fr["value"], hi))
     assert np.all(fr["value"] >= 0.0) and np.all(fr["value"] <= 1.0)
-
-
-def test_prepare_targets_holdout_is_reproducible() -> None:
-    # The split is a pure function of `perm_seed`: same seed -> same partition.
-    fresh: Samples = {
-        "value": np.arange(20, dtype=np.float32),
-        "policy": np.zeros((20, 1), np.float32),
-    }
-    a, _, _ = prepare_targets(
-        fresh, None, eval_frac=0.25, blend=False,
-        blend_max=0.0, blend_ramp=1, iteration=0, perm_seed=5,
-    )  # fmt: skip
-    b, _, _ = prepare_targets(
-        fresh, None, eval_frac=0.25, blend=False,
-        blend_max=0.0, blend_ramp=1, iteration=0, perm_seed=5,
-    )  # fmt: skip
-    assert np.array_equal(a["value"], b["value"])
 
 
 def test_train_epochs_is_deterministic_in_key() -> None:
@@ -423,6 +400,27 @@ def test_train_epochs_is_deterministic_in_key() -> None:
     _assert_nets_bit_exact(n1, n2)
     assert m1.keys() == m2.keys()
     assert all(abs(m1[k] - m2[k]) < 1e-9 for k in m1)
+
+
+def test_periodic_eval_emits_val_metrics() -> None:
+    # The held-out slice is gone: eval is a separate fresh generation every
+    # `cfg.eval.every` iters. Assert it fires and produces the val_* metrics.
+    seen: dict[str, float] = {}
+
+    def on_iter(i: int, metrics: dict[str, float], net: Any) -> None:
+        seen.update({k: v for k, v in metrics.items() if k.startswith("val_")})
+
+    cfg = LearnConfig(
+        n_iterations=2, seed=5,
+        search=SearchSettings(num_simulations=2, max_considered=4),
+        selfplay=SelfPlayConfig(samples=8, batch=4),
+        optim=OptimConfig(batch_size=4, train_steps=2),
+        replay=ReplayConfig(buffer_min=4),
+        eval=EvalConfig(every=1, samples=8),
+        arena=ArenaConfig(games=0),
+    )  # fmt: skip
+    learn(MLPBackend((16,)), cfg, on_iter=on_iter)
+    assert "val_value_acc" in seen  # the periodic eval ran and scored a fresh batch
 
 
 def test_make_optimizer_grad_clip() -> None:

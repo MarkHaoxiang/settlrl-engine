@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import Any
 
 import jax
-import numpy as np
 import optax
 from jaxtyping import Array
 
@@ -21,7 +20,7 @@ from settlrl_learn.training.arena import arena
 from settlrl_learn.training.backend import Backend
 from settlrl_learn.training.config import ArenaConfig, OptimConfig
 from settlrl_learn.training.elo import anchored_elo
-from settlrl_learn.training.selfplay import Samples, concat, index
+from settlrl_learn.training.selfplay import Samples
 
 
 def make_optimizer(cfg: OptimConfig) -> optax.GradientTransformation:
@@ -36,40 +35,23 @@ def make_optimizer(cfg: OptimConfig) -> optax.GradientTransformation:
 
 def prepare_targets(
     fresh: Samples,
-    prev_ev: Samples | None,
     *,
-    eval_frac: float,
     blend: bool,
     blend_max: float,
     blend_ramp: int,
     iteration: int,
-    perm_seed: int,
-    eval_cap: int = 8192,
-) -> tuple[Samples, Samples | None, float]:
-    """Split a fresh self-play batch into a (never-trained) held-out eval slice
-    and a training slice, and apply the value-target blend to the latter.
+) -> tuple[Samples, float]:
+    """Apply the value-target blend to a fresh self-play batch (all of it trains;
+    the eval slice is a separate fresh generation, not held out here).
 
-    Returns ``(train_samples, eval_accumulator, alpha)``. ``eval_frac`` > 0 holds
-    out that fraction (reproducible from ``perm_seed``), accumulating into
-    ``prev_ev`` capped at ``eval_cap``. ``blend`` mixes the training slice's value
-    to ``(1-alpha)*z + alpha*(q in [0,1])`` with ``alpha = blend_max *
-    min(1, iteration/max(blend_ramp,1))``; the eval slice keeps raw ``z``."""
-    nf = fresh["value"].shape[0]
-    fr: Samples
-    ev: Samples | None
-    if eval_frac > 0:
-        perm = np.random.default_rng(perm_seed).permutation(nf)
-        n_ev = int(nf * eval_frac)
-        fr = index(fresh, perm[n_ev:])
-        fe = index(fresh, perm[:n_ev])
-        ev = fe if prev_ev is None else concat(prev_ev, fe, eval_cap)
-    else:
-        fr, ev = fresh, prev_ev
+    ``blend`` mixes the value to ``(1-alpha)*z + alpha*(q in [0,1])`` with
+    ``alpha = blend_max * min(1, iteration/max(blend_ramp,1))``; returns
+    ``(train_samples, alpha)``."""
     alpha = blend_max * min(1.0, iteration / max(blend_ramp, 1)) if blend else 0.0
     if blend:
-        q_prob = (fr["q"] + 1.0) / 2.0  # searcher frame [-1,1] -> P(win) [0,1]
-        fr = {**fr, "value": (1.0 - alpha) * fr["value"] + alpha * q_prob}
-    return fr, ev, alpha
+        q_prob = (fresh["q"] + 1.0) / 2.0  # searcher frame [-1,1] -> P(win) [0,1]
+        fresh = {**fresh, "value": (1.0 - alpha) * fresh["value"] + alpha * q_prob}
+    return fresh, alpha
 
 
 def train_epochs(

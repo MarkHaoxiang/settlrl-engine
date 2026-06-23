@@ -1,1 +1,2 @@
-eval_frac: 0.1
+every: 10        # generalization check every N iters (0 disables)
+samples: 2048    # fresh self-play positions per eval (never trained)

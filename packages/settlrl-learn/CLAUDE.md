@@ -96,9 +96,11 @@ deps only because this subpackage uses them.
     units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration
     index, so `resume_from` (a `runstate.eqx`) continues bit-identically (tested
     in `tests/` resume checks for both backends). `cfg.optim.reuse` caps
-    updates/iter at the AZ sample-reuse factor (the value-overfit fix); a held-out
-    `cfg.eval.eval_frac` feeds the backend's `eval_metrics` (the `val_*`
-    generalization metrics); `teacher_value` (with `cfg.teacher.iters` > 0)
+    updates/iter at the AZ sample-reuse factor (the value-overfit fix); every
+    `cfg.eval.every` iters a *fresh* never-trained batch (`cfg.eval.samples`, its
+    own games -> no intra-game leak) generated under the post-train net feeds
+    `eval_metrics` (the `val_*` generalization metrics; training keeps 100% of its
+    data); `teacher_value` (with `cfg.teacher.iters` > 0)
     warm-starts from a fixed strong search at `cfg.teacher.sims` (the cold-start
     fix). `cfg.value_blend.max` > 0 trains value on Canopy's `(1−α)z + α·q`
     (game outcome blended with the searched root `q` from

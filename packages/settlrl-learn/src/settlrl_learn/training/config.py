@@ -81,8 +81,13 @@ class ValueBlendConfig(_Group):
 
 
 class EvalConfig(_Group):
-    eval_frac: float = 0.0
-    """Held-out fraction of each iteration's fresh positions (never trained)."""
+    """Periodic generalization check: every ``every`` iterations a *fresh* batch
+    of ``samples`` self-play positions is generated (its own games, never added to
+    the buffer) and scored for the ``val_*`` metrics -- so training uses 100% of
+    its data and the eval slice is leak-free. ``every`` = 0 disables it."""
+
+    every: int = 0
+    samples: int = 2048
 
 
 class ArenaConfig(_Group):

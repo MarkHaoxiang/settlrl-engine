@@ -145,6 +145,15 @@ def learn(
 
     net_search = jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
 
+    def _play(search: Any, n: int, seed: int) -> Samples:
+        return self_play(
+            search, n_samples=n,
+            observe_of=observe_of, view_of=view_of, setup_search=setup_search,
+            batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
+            seed=seed, record_value=blend, track_ordering=s.ordered,
+            max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
+        )  # fmt: skip
+
     iters: Iterable[int] = range(int(state.iteration), cfg.n_iterations)
     bar = None
     if progress:
@@ -155,23 +164,14 @@ def learn(
         )
         iters = bar
 
-    ev: Samples | None = None
     for i in iters:
         t0 = time.perf_counter()
         teaching = teacher_weights is not None and i < cfg.teacher.iters
-        search: Any
-        if teaching:
-            search = teacher_search
-        else:
-            arrays = eqx.partition(net, eqx.is_array)[0]
-            search = functools.partial(net_search, arrays)
-        fresh = self_play(
-            search, n_samples=cfg.selfplay.samples,
-            observe_of=observe_of, view_of=view_of, setup_search=setup_search,
-            batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
-            seed=cfg.seed + 1 + i, record_value=blend, track_ordering=s.ordered,
-            max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
-        )  # fmt: skip
+        net_arrays = eqx.partition(net, eqx.is_array)[0]
+        search: Any = (
+            teacher_search if teaching else functools.partial(net_search, net_arrays)
+        )
+        fresh = _play(search, cfg.selfplay.samples, cfg.seed + 1 + i)
         t_selfplay = time.perf_counter() - t0
         nf = fresh["value"].shape[0]
         if nf == 0:  # degenerate net dragged every game past the budget; skip
@@ -179,11 +179,10 @@ def learn(
                 on_iter(i, {"samples": 0.0, "teaching": float(teaching)}, net)
             continue
 
-        fr, ev, alpha = prepare_targets(
-            fresh, ev,
-            eval_frac=cfg.eval.eval_frac, blend=blend,
+        fr, alpha = prepare_targets(
+            fresh, blend=blend,
             blend_max=cfg.value_blend.max, blend_ramp=cfg.value_blend.ramp,
-            iteration=i, perm_seed=cfg.seed + 50_000 + i,
+            iteration=i,
         )  # fmt: skip
         buf_state = buffer.add(buf_state, backend.to_item(fr))
         steps = (
@@ -215,8 +214,22 @@ def learn(
             metrics.update(tm)
         metrics["t_train"] = time.perf_counter() - t1
 
-        if ev is not None and ev["value"].shape[0] >= cfg.optim.batch_size:
-            metrics.update(evaluate(backend, net, ev))
+        # Periodic generalization check: a *fresh* never-trained batch (its own
+        # games, so no intra-game leak) under the post-train net, scored for the
+        # val_* metrics. Training keeps 100% of its data. Gated past the warm-up.
+        if (
+            cfg.eval.every
+            and (i + 1) % cfg.eval.every == 0
+            and (i + 1) >= cfg.teacher.iters
+        ):
+            te = time.perf_counter()
+            eval_search = functools.partial(
+                net_search, eqx.partition(net, eqx.is_array)[0]
+            )
+            eval_fresh = _play(eval_search, cfg.eval.samples, cfg.seed + 70_000 + i)
+            if eval_fresh["value"].shape[0] > 0:
+                metrics.update(evaluate(backend, net, eval_fresh))
+            metrics["t_eval"] = time.perf_counter() - te
 
         # Arena only once the net is past the warm-up: a half-trained net drags
         # games out, and the search arena pays full cost per step.

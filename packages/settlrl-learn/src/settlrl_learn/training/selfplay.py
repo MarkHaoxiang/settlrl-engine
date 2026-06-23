@@ -169,11 +169,3 @@ def self_play(
     samples: Samples = {k: np.stack(out[k]) for k in out}
     samples["value"] = np.asarray(vals, np.float32)
     return samples
-
-
-def index(samples: Samples, idx: np.ndarray) -> Samples:
-    return {k: v[idx] for k, v in samples.items()}
-
-
-def concat(a: Samples, b: Samples, cap: int) -> Samples:
-    return {k: np.concatenate([a[k], b[k]])[-cap:] for k in a}
