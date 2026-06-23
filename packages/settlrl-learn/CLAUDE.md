@@ -32,8 +32,11 @@ deps only because this subpackage uses them.
   - `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts
     it onto the search's `value`/`prior` seams). Plain-JAX, root-importable.
   - `nn/graph.py` — the board-as-graph featurization (`board_sample` → a
-    `Sample` of per-node/-edge/global features + the engineered vector, fixed
-    topology as module constants).
+    `Sample` of per-node/-edge/global features + per-hex `tiles` + the engineered
+    vector, fixed topology as module constants). `tiles` (the per-hex node
+    features) and the vertex↔hex incidence (`VT_V`/`VT_T`) feed the *heterogeneous*
+    trunk; `board_sample(with_tiles=False)` skips them (a constant-zero `tiles`)
+    for a non-hetero net, keeping its graph free of tile ops.
   - `nn/architectures.py` — the equinox architectures over it (`mlp_engineered`
     / `mlp_flat` / `deepset` / `gnn`, via `make_model`); experiment 0003
     composes them. `deepset`/`gnn` are invariant under the board's symmetry
@@ -44,7 +47,15 @@ deps only because this subpackage uses them.
     the harbors are only 3-fold symmetric.
   - `nn/graphnet.py::GraphTrunk` — the shared message-passing trunk (encoders +
     layers → per-node embeddings + global + pooled readout); `GraphNet` (single
-    head) and `BoardGNN` build their heads on it.
+    head) and `BoardGNN` build their heads on it. `GraphNetConfig.hetero` (preset
+    `gn_hetero`) adds **hexes as first-class nodes** (19, their own encoder) with
+    vertex↔hex message passing per layer (vertex→hex and hex→vertex aggregates +
+    a hex update), *keeping* the vertex↔vertex road-edge MPNN + global node; the
+    hex pool joins the readout, and the per-tile policy head reads hex embeddings.
+    Equivariant by construction (message passing over the static incidence; the
+    symmetry tests already permute tiles). Off by default and **bit-identical**
+    to before (the non-hetero init is preserved by only consuming the extra RNG
+    keys when hetero).
   - `nn/action_layout.py` — the static map from the flat 662 action space to its
     board structure (per-vertex / -edge / -tile vs. dense "other") + `SCATTER` to
     place a factored head's compact logits back into the flat vector. The

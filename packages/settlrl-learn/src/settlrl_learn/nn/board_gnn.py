@@ -51,11 +51,18 @@ class _FactoredPolicy(eqx.Module):
         self.type_bias = eqx.nn.Linear(ctx_dim, al.N_TYPES, key=ks[4])
 
     def __call__(
-        self, h: Float[Array, "v w"], ctx: Float[Array, "ctx"]
+        self,
+        h: Float[Array, "v w"],
+        ctx: Float[Array, "ctx"],
+        h_t: Float[Array, "t w"] | None = None,
     ) -> Float[Array, f"flat={N_FLAT}"]:
         v = jax.vmap(self.vertex)(h)  # (V, N_VCLASS)
         e = jax.vmap(self.edge)(h[_EDGE_U] + h[_EDGE_W])  # (E, N_ECLASS), symmetric
-        t = jax.vmap(self.tile)(h[_TILE_V].mean(axis=1))  # (T, N_TCLASS)
+        # hetero: tile logits come from the hex embeddings; else pool the corners.
+        if h_t is not None:
+            t = jax.vmap(self.tile)(h_t)  # (T, N_TCLASS)
+        else:
+            t = jax.vmap(self.tile)(h[_TILE_V].mean(axis=1))  # (T, N_TCLASS)
         big = jnp.concatenate(
             [v.reshape(-1), e.reshape(-1), t.reshape(-1), self.other(ctx)]
         )
@@ -80,21 +87,24 @@ class BoardGNN(eqx.Module):
         self.policy = _FactoredPolicy(kp, cfg, ctx_dim)
 
     def __call__(self, s: Sample) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]:
-        h, g, readout = self.trunk(s)
+        h, g, readout, h_t = self.trunk(s)
         ctx = jnp.concatenate([readout, g])
-        return self.value(ctx)[0], self.policy(h, ctx)
+        return self.value(ctx)[0], self.policy(h, ctx, h_t)
 
 
 def gnn_seams(model: BoardGNN) -> tuple[ValueFunction, PolicyPrior]:
     """Adapt the GNN onto the search seams as ``(value, prior)``; both run the
-    board-graph forward. Build the search with ``value_scale=2``."""
+    board-graph forward. Build the search with ``value_scale=2``. Tiles are
+    featurized only for a heterogeneous net (else the trunk ignores them, so we
+    keep them out of the graph)."""
+    het = model.trunk.tile_enc is not None
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
-        return model(board_sample(layout, state, player))[0]
+        return model(board_sample(layout, state, player, with_tiles=het))[0]
 
     def prior(
         layout: BoardLayout, state: BoardState, player: IntScalar
     ) -> Float[Array, f"flat={N_FLAT}"]:
-        return model(board_sample(layout, state, player))[1]
+        return model(board_sample(layout, state, player, with_tiles=het))[1]
 
     return value, prior

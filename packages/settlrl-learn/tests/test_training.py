@@ -79,11 +79,12 @@ def test_gnn_backend_item_and_observe_shapes() -> None:
     assert_expected_inline(
         f"keys={sorted(obs)}\nempty_item:\n{_shapes(backend.empty_item())}",
         """\
-keys=['edges', 'glob', 'nodes']
+keys=['edges', 'glob', 'nodes', 'tiles']
 empty_item:
 (54, 17)
 (144, 3)
 (40,)
+(19, 9)
 (662,)
 (662,)
 ()

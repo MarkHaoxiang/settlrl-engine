@@ -96,7 +96,9 @@ def test_board_symmetry_leaves_structured_models_invariant() -> None:
             assert np.allclose(base_out, out, atol=1e-4)
 
 
-@pytest.mark.parametrize("preset", ["gn_multi", "gn_graphnorm", "gn_gat", "gn_full"])
+@pytest.mark.parametrize(
+    "preset", ["gn_multi", "gn_graphnorm", "gn_gat", "gn_full", "gn_hetero"]
+)
 def test_graphnet_presets_are_invariant(preset: str) -> None:
     # The configurable GraphNet keeps both invariances across every lever
     # (attention, GraphNorm spanning the node axis, the global node, JK) -- it
@@ -130,18 +132,21 @@ def test_flat_mlp_is_not_symmetry_invariant() -> None:
     assert moved > 1e-3
 
 
-def _aznet() -> BoardGNN:
-    cfg = PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
+def _aznet(preset: str = "gn_global") -> BoardGNN:
+    cfg = PRESETS[preset]._replace(width=16, layers=2, head_depth=1)
     return BoardGNN(jax.random.key(0), cfg)
 
 
-def test_aznet_value_invariant_policy_equivariant_under_board_symmetry() -> None:
+@pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
+def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
+    preset: str,
+) -> None:
     # The factored value+policy net: the value is invariant under a board
     # symmetry, and the policy is *equivariant* -- a settlement-at-v action maps
     # to settlement-at-(sigma v), road-at-e to road-at-(sigma e), robber-tile-t
     # to sigma(t) -- so policy(sigma . board)[action_permutation] == policy(board).
     layout, state = _mid_game(4)
-    net = _aznet()
+    net = _aznet(preset)
     p = jnp.int32(0)
     vv, pp = net(board_sample(layout, state, p))
     v0, pol0 = np.asarray(vv), np.asarray(pp)
@@ -153,9 +158,10 @@ def test_aznet_value_invariant_policy_equivariant_under_board_symmetry() -> None
         assert np.allclose(np.asarray(pol)[perm], pol0, atol=1e-3)  # policy equivariant
 
 
-def test_aznet_value_and_policy_invariant_under_player_relabel() -> None:
+@pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
+def test_aznet_value_and_policy_invariant_under_player_relabel(preset: str) -> None:
     layout, state = _mid_game(4)
-    net = _aznet()
+    net = _aznet(preset)
     vv, pp = net(board_sample(layout, state, jnp.int32(0)))
     v0, pol0 = np.asarray(vv), np.asarray(pp)
     perm = np.array([1, 2, 3, 0])

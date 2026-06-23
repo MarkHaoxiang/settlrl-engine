@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import optax
 from jaxtyping import Array, Float
 from settlrl_agents.value import ValueFunction, heuristic_value
-from settlrl_engine.board.layout import N_VERTICES, BoardLayout
+from settlrl_engine.board.layout import N_TILES, N_VERTICES, BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT
 from settlrl_engine.mechanics.action import ActionType
@@ -32,6 +32,7 @@ from settlrl_learn.nn.graph import (
     GLOBAL_DIM,
     N_DIR_EDGES,
     NODE_DIM,
+    TILE_DIM,
     Sample,
     board_sample,
 )
@@ -110,14 +111,16 @@ def make_net_agent(
 
 
 class GNNItem(NamedTuple):
-    """One replay item: the board graph (nodes/edges/glob), the search's improved
-    policy, the legality mask, the acting seat's win (1) / loss (0), and the
-    ``train_policy`` flag (1 = train the policy head here; 0 = value-only, a
-    playout-cap fast-search position)."""
+    """One replay item: the board graph (nodes/edges/glob/tiles), the search's
+    improved policy, the legality mask, the acting seat's win (1) / loss (0), and
+    the ``train_policy`` flag (1 = train the policy head here; 0 = value-only, a
+    playout-cap fast-search position). ``tiles`` is the per-hex node features
+    (consumed only by the heterogeneous trunk)."""
 
     nodes: Array
     edges: Array
     glob: Array
+    tiles: Array
     policy: Array
     mask: Array
     value: Array
@@ -157,7 +160,7 @@ def gnn_loss(
 
 def _sample_of(item: GNNItem) -> Sample:
     """A batched graph-only :class:`Sample` for the GNN forward (no extra)."""
-    return Sample(item.nodes, item.edges, item.glob, None)
+    return Sample(item.nodes, item.edges, item.glob, item.tiles, None)
 
 
 class GNNBackend:
@@ -214,14 +217,17 @@ class GNNBackend:
     def observe(
         self, layout: BoardLayout, state: BoardState, player: IntScalar
     ) -> dict[str, Array]:
-        s = board_sample(layout, state, player)
-        return {"nodes": s.nodes, "edges": s.edges, "glob": s.glob}
+        # Tiles are featurized only for a heterogeneous net; else a constant zero,
+        # so the non-hetero forward graph has no tile ops.
+        s = board_sample(layout, state, player, with_tiles=self.cfg.hetero)
+        return {"nodes": s.nodes, "edges": s.edges, "glob": s.glob, "tiles": s.tiles}
 
     def to_item(self, samples: Samples) -> GNNItem:
         return GNNItem(
             jnp.asarray(samples["nodes"], jnp.float32),
             jnp.asarray(samples["edges"], jnp.float32),
             jnp.asarray(samples["glob"], jnp.float32),
+            jnp.asarray(samples["tiles"], jnp.float32),
             jnp.asarray(samples["policy"], jnp.float32),
             jnp.asarray(samples["mask"], jnp.float32),
             jnp.asarray(samples["value"], jnp.float32),
@@ -233,6 +239,7 @@ class GNNBackend:
             jnp.zeros((N_VERTICES, NODE_DIM), jnp.float32),
             jnp.zeros((N_DIR_EDGES, EDGE_DIM), jnp.float32),
             jnp.zeros((GLOBAL_DIM,), jnp.float32),
+            jnp.zeros((N_TILES, TILE_DIM), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.float32(0.0),

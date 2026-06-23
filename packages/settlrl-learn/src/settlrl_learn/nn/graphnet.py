@@ -36,10 +36,10 @@ import jax
 import jax.numpy as jnp
 import jraph
 from jaxtyping import Array, Float
-from settlrl_engine.board.layout import N_VERTICES
+from settlrl_engine.board.layout import N_TILES, N_VERTICES
 from settlrl_engine.board.state import KeyScalar
 
-from settlrl_learn.nn.graph import RECEIVERS, SENDERS, Sample
+from settlrl_learn.nn.graph import RECEIVERS, SENDERS, VT_T, VT_V, Sample
 
 
 class GraphNetConfig(NamedTuple):
@@ -53,6 +53,7 @@ class GraphNetConfig(NamedTuple):
     global_node: bool = True
     readout: str = "multi"  # "mean" | "sum" | "multi"
     jk: bool = False
+    hetero: bool = False  # add HEX/TILE nodes + vertex<->hex message passing
 
 
 def _aggr(messages: Float[Array, "e w"]) -> Float[Array, "v w"]:
@@ -105,15 +106,22 @@ class _Layer(eqx.Module):
     att_w: eqx.nn.Linear | None  # gat: W over [h_s, h_r, e]
     att_a: Array | None  # gat: attention vector per head
     val_w: eqx.nn.Linear | None  # gat: value projection of the sender
-    node: eqx.nn.MLP  # node update over [h, aggregate, global?]
+    node: eqx.nn.MLP  # node update over [h, aggregate, global?, tile-aggregate?]
     glob: eqx.nn.MLP | None  # virtual global-node update
     norm: _Norm | None
+    msg_vt: eqx.nn.MLP | None  # hetero: vertex->tile message
+    msg_tv: eqx.nn.MLP | None  # hetero: tile->vertex message
+    tile: eqx.nn.MLP | None  # hetero: hex update over [h_t, vertex-aggregate]
+    tile_norm: _Norm | None
     cfg: GraphNetConfig = eqx.field(static=True)
 
     def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
         w = cfg.width
         g_in = w if cfg.global_node else 0
-        keys = jax.random.split(key, 5)
+        t_in = w if cfg.hetero else 0  # extra tile->vertex aggregate into `node`
+        # 5 keys non-hetero (preserves the pre-hetero init exactly), +3 for the
+        # hex message/update params when hetero.
+        keys = jax.random.split(key, 8 if cfg.hetero else 5)
         if cfg.conv == "gat":
             assert w % cfg.heads == 0, "width must divide heads"
             d = w // cfg.heads
@@ -125,9 +133,17 @@ class _Layer(eqx.Module):
             self.msg = eqx.nn.MLP(3 * w + g_in, w, w, 1, key=keys[0])
             self.att_w = self.val_w = None
             self.att_a = None
-        self.node = eqx.nn.MLP(2 * w + g_in, w, w, 1, key=keys[3])
+        self.node = eqx.nn.MLP(2 * w + g_in + t_in, w, w, 1, key=keys[3])
         self.glob = eqx.nn.MLP(3 * w, w, w, 1, key=keys[4]) if cfg.global_node else None
         self.norm = _make_norm(cfg.norm, w)
+        if cfg.hetero:
+            self.msg_vt = eqx.nn.MLP(2 * w, w, w, 1, key=keys[5])
+            self.msg_tv = eqx.nn.MLP(2 * w, w, w, 1, key=keys[6])
+            self.tile = eqx.nn.MLP(2 * w, w, w, 1, key=keys[7])
+            self.tile_norm = _make_norm(cfg.norm, w)
+        else:
+            self.msg_vt = self.msg_tv = self.tile = None
+            self.tile_norm = None
         self.cfg = cfg
 
     def _aggregate(
@@ -153,19 +169,40 @@ class _Layer(eqx.Module):
         return _aggr(msg)
 
     def __call__(
-        self, h: Float[Array, "v w"], e: Float[Array, "e w"], g: Array
-    ) -> tuple[Float[Array, "v w"], Array]:
-        agg = self._aggregate(h, e, g)
-        parts = [h, agg]
+        self,
+        h: Float[Array, "v w"],
+        e: Float[Array, "e w"],
+        g: Array,
+        h_t: Float[Array, "t w"] | None = None,
+    ) -> tuple[Float[Array, "v w"], Array, Float[Array, "t w"] | None]:
+        agg_vv = self._aggregate(h, e, g)
+        parts = [h, agg_vv]
+        if self.cfg.hetero:
+            assert h_t is not None and self.msg_tv is not None
+            m_tv = jax.vmap(self.msg_tv)(jnp.concatenate([h_t[VT_T], h[VT_V]], -1))
+            agg_tv = jraph.segment_sum(m_tv, VT_V, num_segments=N_VERTICES)
+            parts.append(agg_tv)
         if self.cfg.global_node:
             parts.append(jnp.broadcast_to(g, (h.shape[0], g.shape[0])))
         delta = jax.vmap(self.node)(jnp.concatenate(parts, axis=-1))
-        h = h + delta if self.cfg.residual else delta
-        h = _apply_norm(self.norm, h)
+        h_new = h + delta if self.cfg.residual else delta
+        h_new = _apply_norm(self.norm, h_new)
+
+        # tile (hex) update reads the PRE-update vertex states.
+        if self.cfg.hetero:
+            assert h_t is not None and self.msg_vt is not None and self.tile is not None
+            m_vt = jax.vmap(self.msg_vt)(jnp.concatenate([h[VT_V], h_t[VT_T]], -1))
+            agg_vt = jraph.segment_sum(m_vt, VT_T, num_segments=N_TILES)
+            delta_t = jax.vmap(self.tile)(jnp.concatenate([h_t, agg_vt], -1))
+            h_t_upd = h_t + delta_t if self.cfg.residual else delta_t
+            h_t_new: Float[Array, "t w"] | None = _apply_norm(self.tile_norm, h_t_upd)
+        else:
+            h_t_new = h_t
+
         if self.glob is not None:
-            summary = jnp.concatenate([g, h.mean(0), h.max(0)])
+            summary = jnp.concatenate([g, h_new.mean(0), h_new.max(0)])
             g = g + self.glob(summary)
-        return h, g
+        return h_new, g, h_t_new
 
 
 def _pool(readout: str, h: Float[Array, "v w"]) -> Array:
@@ -179,7 +216,10 @@ def _pool(readout: str, h: Float[Array, "v w"]) -> Array:
 def readout_dim(cfg: GraphNetConfig) -> int:
     """Width of ``GraphTrunk``'s pooled readout (before the trailing global g)."""
     per_pool = cfg.width * (3 if cfg.readout == "multi" else 1)
-    return per_pool * (cfg.layers if cfg.jk else 1)
+    dim = per_pool * (cfg.layers if cfg.jk else 1)
+    if cfg.hetero:
+        dim += per_pool  # the tile pool, appended once after the loop
+    return dim
 
 
 class GraphTrunk(eqx.Module):
@@ -191,34 +231,48 @@ class GraphTrunk(eqx.Module):
     node_enc: eqx.nn.Linear
     edge_enc: eqx.nn.Linear
     glob_enc: eqx.nn.Linear
+    tile_enc: eqx.nn.Linear | None
     layers: tuple[_Layer, ...]
     cfg: GraphNetConfig = eqx.field(static=True)
 
     def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
-        from settlrl_learn.nn.graph import EDGE_DIM, GLOBAL_DIM, NODE_DIM
+        from settlrl_learn.nn.graph import EDGE_DIM, GLOBAL_DIM, NODE_DIM, TILE_DIM
 
         w = cfg.width
-        keys = jax.random.split(key, 3 + cfg.layers)
+        # 3 encoder keys non-hetero (preserves the pre-hetero init exactly), +1
+        # for the tile encoder when hetero; the rest seed the layers.
+        keys = jax.random.split(key, (4 if cfg.hetero else 3) + cfg.layers)
         self.node_enc = eqx.nn.Linear(NODE_DIM, w, key=keys[0])
         self.edge_enc = eqx.nn.Linear(EDGE_DIM, w, key=keys[1])
         self.glob_enc = eqx.nn.Linear(GLOBAL_DIM, w, key=keys[2])
-        self.layers = tuple(_Layer(keys[3 + i], cfg) for i in range(cfg.layers))
+        off = 3
+        if cfg.hetero:
+            self.tile_enc = eqx.nn.Linear(TILE_DIM, w, key=keys[3])
+            off = 4
+        else:
+            self.tile_enc = None
+        self.layers = tuple(_Layer(keys[off + i], cfg) for i in range(cfg.layers))
         self.cfg = cfg
 
     def __call__(
         self, s: Sample
-    ) -> tuple[Float[Array, "v w"], Float[Array, "w"], Array]:
+    ) -> tuple[
+        Float[Array, "v w"], Float[Array, "w"], Array, Float[Array, "t w"] | None
+    ]:
         h = jax.vmap(self.node_enc)(s.nodes)
         # undirected edges are mirrored in `s.edges`; encode once, share per layer.
         e = jax.vmap(self.edge_enc)(s.edges)
         g = self.glob_enc(s.glob)
+        h_t = jax.vmap(self.tile_enc)(s.tiles) if self.tile_enc is not None else None
         pools = []
         for layer in self.layers:
-            h, g = layer(h, e, g)
+            h, g, h_t = layer(h, e, g, h_t)
             if self.cfg.jk:
                 pools.append(_pool(self.cfg.readout, h))
         readout = jnp.concatenate(pools) if self.cfg.jk else _pool(self.cfg.readout, h)
-        return h, g, readout
+        if h_t is not None:
+            readout = jnp.concatenate([readout, _pool(self.cfg.readout, h_t)])
+        return h, g, readout, h_t
 
 
 class GraphNet(eqx.Module):
@@ -235,7 +289,7 @@ class GraphNet(eqx.Module):
         self.cfg = cfg
 
     def __call__(self, s: Sample) -> Float[Array, "out"]:
-        _h, g, readout = self.trunk(s)
+        _h, g, readout, _h_t = self.trunk(s)
         return self.head(jnp.concatenate([readout, g]))
 
 
@@ -270,5 +324,8 @@ PRESETS: dict[str, GraphNetConfig] = {
     ),
     "gn_full": GraphNetConfig(
         conv="gat", norm="layer", global_node=True, readout="multi", jk=True
+    ),
+    "gn_hetero": GraphNetConfig(
+        conv="mpnn", norm="layer", global_node=True, readout="multi", hetero=True
     ),
 }
