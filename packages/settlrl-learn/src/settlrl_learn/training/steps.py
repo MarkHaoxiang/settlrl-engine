@@ -14,13 +14,24 @@ from typing import Any
 
 import jax
 import numpy as np
+import optax
 from jaxtyping import Array
 
 from settlrl_learn.training.arena import arena
 from settlrl_learn.training.backend import Backend
-from settlrl_learn.training.config import ArenaConfig
+from settlrl_learn.training.config import ArenaConfig, OptimConfig
 from settlrl_learn.training.elo import anchored_elo
 from settlrl_learn.training.selfplay import Samples, concat, index
+
+
+def make_optimizer(cfg: OptimConfig) -> optax.GradientTransformation:
+    """adamw, optionally preceded by global-norm gradient clipping
+    (``cfg.grad_clip`` > 0). The clip is stateless, so an unclipped checkpoint
+    must be resumed with ``grad_clip=0`` (its opt-state has no clip layer)."""
+    opt = optax.adamw(cfg.lr, weight_decay=cfg.weight_decay)
+    if cfg.grad_clip > 0:
+        opt = optax.chain(optax.clip_by_global_norm(cfg.grad_clip), opt)
+    return opt
 
 
 def prepare_targets(

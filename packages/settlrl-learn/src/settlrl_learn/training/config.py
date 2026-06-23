@@ -52,6 +52,10 @@ class OptimConfig(_Group):
     reuse: float = 0.0
     """> 0 caps updates/iter at ``reuse * fresh / batch_size`` (the AZ sample-reuse
     factor) instead of a fixed ``train_steps``."""
+    grad_clip: float = 1.0
+    """> 0 wraps adamw in ``clip_by_global_norm`` at this cap (0 disables). Stateless,
+    so toggling within a run is fine but a checkpoint's opt-state structure assumes
+    its own setting -- resume an unclipped run with ``grad_clip=0``."""
 
 
 class ReplayConfig(_Group):

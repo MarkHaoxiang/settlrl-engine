@@ -35,6 +35,7 @@ from settlrl_learn.training.loop import learn
 from settlrl_learn.training.mlp_backend import MLPBackend, mlp_loss
 from settlrl_learn.training.steps import (
     evaluate,
+    make_optimizer,
     prepare_targets,
     run_arena,
     train_epochs,
@@ -62,6 +63,7 @@ __all__ = [
     "learn",
     "load_run_state",
     "make_net_agent",
+    "make_optimizer",
     "mlp_loss",
     "prepare_targets",
     "run_arena",

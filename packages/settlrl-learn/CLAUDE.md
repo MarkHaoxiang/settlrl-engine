@@ -126,6 +126,10 @@ deps only because this subpackage uses them.
     stay frozen for a run. The per-iter `val_*` / `policy_*` / `value_*` health
     metrics (from `Backend.eval_metrics`) are the cheap high-frequency proxies
     between arena rounds.
+    The optimiser is `steps.make_optimizer(cfg.optim)` — adamw, optionally
+    preceded by `clip_by_global_norm` (`cfg.optim.grad_clip`, default 1.0; 0
+    disables). The clip is stateless, so an unclipped checkpoint must be resumed
+    with `grad_clip=0` (its opt-state has no clip layer).
   - `training/mlp_backend.py::MLPBackend` — the `AZParams` net over the
     engineered feature vector; **unmasked** policy CE + value-logistic loss,
     optax adamw, the net plays setup itself.

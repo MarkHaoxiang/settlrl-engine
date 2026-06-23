@@ -27,7 +27,6 @@ import equinox as eqx
 import flashbax as fbx
 import jax
 import jax.numpy as jnp
-import optax
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.belief import belief_view
 from settlrl_search import (
@@ -47,6 +46,7 @@ from settlrl_learn.training.config import LearnConfig
 from settlrl_learn.training.selfplay import Samples, self_play
 from settlrl_learn.training.steps import (
     evaluate,
+    make_optimizer,
     prepare_targets,
     run_arena,
     train_epochs,
@@ -75,7 +75,7 @@ def learn(
     bit-exactly. ``on_iter(i, metrics, net)`` runs after each iteration.
     ``progress`` shows a tqdm bar over the iterations."""
     s = cfg.search
-    optimizer = optax.adamw(cfg.optim.lr, weight_decay=cfg.optim.weight_decay)
+    optimizer = make_optimizer(cfg.optim)
     buffer = fbx.make_item_buffer(
         max_length=cfg.replay.buffer_max, min_length=cfg.replay.buffer_min,
         sample_batch_size=cfg.optim.batch_size, add_batches=True,

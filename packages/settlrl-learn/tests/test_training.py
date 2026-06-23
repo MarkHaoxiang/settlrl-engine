@@ -31,6 +31,7 @@ from settlrl_learn.training import (
     SearchSettings,
     SelfPlayConfig,
     ValueBlendConfig,
+    make_optimizer,
     prepare_targets,
     train_epochs,
 )
@@ -422,3 +423,21 @@ def test_train_epochs_is_deterministic_in_key() -> None:
     _assert_nets_bit_exact(n1, n2)
     assert m1.keys() == m2.keys()
     assert all(abs(m1[k] - m2[k]) < 1e-9 for k in m1)
+
+
+def test_make_optimizer_grad_clip() -> None:
+    import optax
+    from settlrl_learn.training.config import OptimConfig
+
+    # grad_clip > 0 caps the raw gradient's global norm before adamw -- verify the
+    # clip layer's semantics directly (adamw then rescales per-coordinate).
+    g = {"w": jnp.array([3.0, 4.0])}  # global norm 5
+    clip = optax.clip_by_global_norm(2.0)
+    out, _ = clip.update(g, clip.init(g))
+    assert abs(float(optax.global_norm(out)) - 2.0) < 1e-5
+    # the clip is stateless, so it adds no opt-state leaves: a clipped and an
+    # unclipped optimiser carry the same adamw moments (only the nesting differs).
+    p = {"w": jnp.zeros(2)}
+    n_clip = len(jax.tree.leaves(make_optimizer(OptimConfig(grad_clip=1.0)).init(p)))
+    n_plain = len(jax.tree.leaves(make_optimizer(OptimConfig(grad_clip=0.0)).init(p)))
+    assert n_clip == n_plain
