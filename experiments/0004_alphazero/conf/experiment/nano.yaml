@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+# nano ~1h: quick diagnostic. ~36 iters (8 teacher + ~28 net); arena fires 3x.
+n_iterations: 36
+checkpoint_every: 10
+replay:
+  buffer_max: 50000
+value_blend:
+  ramp: 12          # warm the q-blend within the short run

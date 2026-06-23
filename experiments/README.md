@@ -43,7 +43,9 @@ uv run python experiments/0004_alphazero/run.py +experiment=<name> [k=v...]  # h
 
 `0001_bench_smoke` is the minimal worked example;
 `0002_linear_value_fitting` a multi-variant framework; `0004_alphazero` composes
-its config with hydra (`conf/` groups + `experiment/` presets; `-m` for sweeps).
+its config with hydra (`conf/` groups + `experiment/` presets; `-m` for sweeps),
+including `nano`/`small`/`medium` wall-clock budget tiers (~1h / ~10h / ~100h of
+the same self-play recipe at increasing iteration counts).
 
 ## Checks
 

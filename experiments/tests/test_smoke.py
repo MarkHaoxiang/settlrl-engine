@@ -61,3 +61,20 @@ def test_0004_alphazero_gnn_smoke(tmp_path: Path) -> None:
     cfg = run.compose_config(["+experiment=gnn_smoke"])
     run.run_experiment(Run(tmp_path), cfg)
     _verdict(tmp_path)
+
+
+def test_0004_scale_presets_compose() -> None:
+    # The nano/small/medium budget tiers share one recipe (gnn + warm-up + Canopy
+    # q-blend, no chance/EV, B256, sims64) and differ only in budget. Fast guard
+    # (compose + validate only, no run) against drift in the shared scale groups.
+    run = load_run("0004_alphazero")
+    for name, n_iters in {"nano": 36, "small": 300, "medium": 3000}.items():
+        cfg = run.compose_config([f"+experiment={name}"])
+        assert cfg.n_iterations == n_iters
+        assert cfg.net.kind == "gnn" and cfg.net.width == 96 and cfg.net.layers == 4
+        assert cfg.teacher.enabled and cfg.teacher.iters == 8
+        assert cfg.search.num_simulations == 64
+        assert not cfg.search.chance_nodes and not cfg.search.expected_rolls
+        assert cfg.selfplay.samples == 16384 and cfg.optim.batch_size == 1024
+        assert cfg.value_blend.max == 0.85 and cfg.optim.grad_clip == 1.0
+        assert cfg.arena.every == 10 and cfg.arena.sims == 24

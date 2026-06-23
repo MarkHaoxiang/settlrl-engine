@@ -1,0 +1,9 @@
+games: 40
+every: 10           # arena ~297s each; every 10 keeps eval < ~25% of wall-clock
+batch: 128
+sims: 24
+considered: 16
+opponents: [lookahead, random]
+anchor_elos:
+  lookahead: 0.0
+  random: -800.0

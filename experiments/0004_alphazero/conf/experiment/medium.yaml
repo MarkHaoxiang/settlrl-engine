@@ -1,0 +1,18 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+# medium ~100h (~4 days): 10x small. ~3000 iters, 300 arena points, larger replay
+# + sparser checkpoints. Pure scale-up (sims/net-size are separate levers).
+n_iterations: 3000
+checkpoint_every: 50
+replay:
+  buffer_max: 500000

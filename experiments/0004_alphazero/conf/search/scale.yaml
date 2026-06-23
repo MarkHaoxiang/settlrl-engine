@@ -1,0 +1,8 @@
+num_simulations: 64
+max_depth: 12
+max_considered: 16
+value_scale: 2.0
+expected_rolls: false   # no expected EV (single sampled roll)
+chance_nodes: false     # no in-tree chance nodes
+dev_chance: true
+ordered: false

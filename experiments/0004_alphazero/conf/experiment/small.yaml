@@ -1,0 +1,18 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+# small ~10h: the standard scale run (supersedes gnn_overnight). ~300 iters,
+# 30 arena points. ~8*50s teacher + 292*91.5s net + 30*297s arena.
+n_iterations: 300
+checkpoint_every: 10
+replay:
+  buffer_max: 200000

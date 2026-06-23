@@ -1,0 +1,2 @@
+max: 0.85   # Canopy q-blend
+ramp: 60    # Canopy ramp (iters to reach max, post warm-up)

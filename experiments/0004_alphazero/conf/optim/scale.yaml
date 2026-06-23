@@ -1,0 +1,6 @@
+lr: 5.0e-4
+weight_decay: 1.0e-4
+batch_size: 1024
+train_steps: 200
+reuse: 2.0
+grad_clip: 1.0
