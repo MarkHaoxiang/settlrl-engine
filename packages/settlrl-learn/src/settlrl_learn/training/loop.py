@@ -14,17 +14,20 @@ A training-side module: not imported by the package root.
 
 from __future__ import annotations
 
+import functools
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
+import equinox as eqx
 import flashbax as fbx
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
 from settlrl_agents.value import ValueFunction
+from settlrl_engine.belief import belief_view
 from settlrl_search import (
     PolicyWeights,
     PolicyWeightsValue,
@@ -119,6 +122,13 @@ def learn(
     ckpt = Path(checkpoint_dir) / "runstate.eqx" if checkpoint_dir else None
 
     step = backend.make_step(optimizer)
+    # Warm up the jitted step (one-off XLA compile) on a zero batch so the recorded
+    # per-iteration `t_train` is the optimiser step, not the compile. The returned
+    # update is discarded -- net/opt_state are untouched.
+    _warm = jax.tree.map(
+        lambda x: jnp.broadcast_to(x, (batch_size, *x.shape)), backend.empty_item()
+    )
+    jax.block_until_ready(step(net, opt_state, _warm))  # type: ignore[no-untyped-call]
     setup_fn = backend.setup_policy()
     blend = value_blend_max > 0
     mk = make_search_weights_value if blend else make_search_weights
@@ -136,6 +146,39 @@ def learn(
         else None
     )
 
+    # Build the jitted+vmapped callables ONCE -- the search closes over the net's
+    # array params via eqx.partition/combine and takes them as a *traced* arg, so
+    # a weight update is a new value of a same-shaped input (no per-iter recompile).
+    view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
+    observe_of = jax.jit(jax.vmap(backend.observe, in_axes=(0, 0, 0)))
+    setup_search = (
+        jax.jit(jax.vmap(setup_fn, in_axes=(0, 0, 0, 0, 0)))
+        if setup_fn is not None
+        else None
+    )
+    teacher_search = (
+        jax.jit(jax.vmap(teacher_weights, in_axes=(0, 0, 0, 0, 0)))
+        if teacher_weights is not None
+        else None
+    )
+    _, net_static = eqx.partition(net, eqx.is_array)
+
+    def _net_weights(
+        arrays: Any, key: Any, layout: Any, view: Any, player: Any, mask: Any
+    ) -> Any:
+        model = eqx.combine(arrays, net_static)
+        v_fn, p_fn = backend.seams(model)
+        wfn = mk(
+            v_fn, prior=p_fn, value_scale=2.0,
+            num_simulations=num_simulations,
+            max_num_considered_actions=max_num_considered_actions,
+            expected_rolls=expected_rolls, chance_nodes=chance_nodes,
+            dev_chance=dev_chance, ordered=ordered,
+        )  # fmt: skip
+        return wfn(key, layout, view, player, mask)
+
+    net_search = jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
+
     iters: Iterable[int] = range(int(state.iteration), n_iterations)
     bar = None
     if progress:
@@ -148,20 +191,15 @@ def learn(
     for i in iters:
         t0 = time.perf_counter()
         teaching = teacher_weights is not None and i < teacher_iters
-        wfn: PolicyWeights | PolicyWeightsValue
+        search: Any
         if teaching:
-            wfn = cast("PolicyWeights | PolicyWeightsValue", teacher_weights)
+            search = teacher_search
         else:
-            v_fn, p_fn = backend.seams(net)
-            wfn = mk(
-                v_fn, prior=p_fn, value_scale=2.0,
-                num_simulations=num_simulations,
-                max_num_considered_actions=max_num_considered_actions,
-                expected_rolls=expected_rolls,
-                chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
-            )  # fmt: skip
+            arrays = eqx.partition(net, eqx.is_array)[0]
+            search = functools.partial(net_search, arrays)
         fresh = self_play(
-            wfn, backend.observe, n_samples=selfplay_samples, setup_fn=setup_fn,
+            search, n_samples=selfplay_samples,
+            observe_of=observe_of, view_of=view_of, setup_search=setup_search,
             batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
             record_value=blend, track_ordering=ordered,
         )  # fmt: skip

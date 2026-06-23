@@ -1,17 +1,23 @@
 """Net-agnostic self-play data generation for the training loop.
 
-Drives batched n-player self-play with a search ``weights_fn`` (the net's, or a
-fixed teacher's) and records, per acting move, the backend's observation of the
-*true* board, the search's improved-policy target, the legality mask, and the
-eventual game outcome. Features are on the true board (no hidden state in the
-net's inputs), so the net learns the belief-averaged value; determinization
-stays inside the search.
+Drives batched n-player self-play with a pre-built jitted+vmapped ``search``
+callable (the net's, or a fixed teacher's) and records, per acting move, the
+backend's observation of the *true* board, the search's improved-policy target,
+the legality mask, and the eventual game outcome. Features are on the true board
+(no hidden state in the net's inputs), so the net learns the belief-averaged
+value; determinization stays inside the search.
 
-``setup_fn`` (when given) plays the **setup phase** (initial placements) with a
-fixed policy instead of the net, and those positions are *not recorded* -- so the
-net's value/policy only ever train on (and act in) the main game loop. The setup
-placements are rare, high-leverage, and structurally distinct; handing them to a
-strong fixed policy keeps a weak net's bad opening from dooming every game.
+The jitted callables (``search``, ``observe_of``, ``view_of``, ``setup_search``)
+are built once by the caller and passed in -- the net's array params are threaded
+into ``search`` as a traced argument (the caller closes them over via
+``equinox.partition``/``combine``), so a weight update is a new *value* of a
+same-shaped input and the search is compiled once and reused across iterations.
+
+``setup_search`` (when given) plays the **setup phase** (initial placements) with
+a fixed policy instead of the net, and those positions are *not recorded* -- so
+the net's value/policy only ever train on (and act in) the main game loop. The
+setup placements are rare, high-leverage, and structurally distinct; handing them
+to a strong fixed policy keeps a weak net's bad opening from dooming every game.
 
 A training-side module: not imported by the package root.
 """
@@ -24,7 +30,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
-from settlrl_engine.belief import belief_view
+from settlrl_engine.belief import BeliefState, BeliefView
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, GamePhase
 from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
@@ -47,11 +53,12 @@ def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -
 
 
 def self_play(
-    weights_fn: PolicyWeights | PolicyWeightsValue,
-    observe: ObserveFn,
+    search: PolicyWeights | PolicyWeightsValue,
     *,
+    observe_of: ObserveFn,
+    view_of: Callable[[BoardState, BeliefState, Array], BeliefView],
+    setup_search: BeliefPolicy | None = None,
     n_samples: int,
-    setup_fn: BeliefPolicy | None = None,
     n_players: int = 2,
     batch_size: int = 16,
     temperature: float = 1.0,
@@ -62,10 +69,15 @@ def self_play(
     track_ordering: bool = False,
 ) -> Samples:
     """Collect >= ``n_samples`` self-play positions, the moves and policy targets
-    drawn from ``weights_fn``. Positions from finished games are credited with the
+    drawn from ``search``. Positions from finished games are credited with the
     acting seat's win (1) / loss (0); unfinished games are discarded.
 
-    ``record_value`` expects ``weights_fn`` to also return the searched root value
+    ``search``, ``observe_of``, ``view_of`` and ``setup_search`` are pre-built
+    jitted+vmapped callables (see the module docstring): the search is compiled
+    once by the caller and reused, with the net's params threaded in as a traced
+    argument so a weight update does not recompile.
+
+    ``record_value`` expects ``search`` to also return the searched root value
     (a :data:`~settlrl_search.PolicyWeightsValue`) and stores it under the
     ``q`` key (searcher frame, [-1, 1]) -- the value-blend target's ``q`` term.
 
@@ -73,15 +85,6 @@ def self_play(
     retained pending positions -- a cold/degenerate net can drag a game out
     indefinitely, so without these the pending buffer grows unbounded. A capped
     lane keeps its most recent positions."""
-    search = jax.jit(jax.vmap(weights_fn, in_axes=(0, 0, 0, 0, 0)))
-    setup_search = (
-        jax.jit(jax.vmap(setup_fn, in_axes=(0, 0, 0, 0, 0)))
-        if setup_fn is not None
-        else None
-    )
-    view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
-    observe_of = jax.jit(jax.vmap(observe, in_axes=(0, 0, 0)))
-
     env = BatchedSettlrlEnv(
         batch_size=batch_size, seed=seed, reward="sparse",
         n_players=n_players, track_beliefs=True, track_ordering=track_ordering,

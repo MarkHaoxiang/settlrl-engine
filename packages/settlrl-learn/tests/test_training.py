@@ -16,6 +16,7 @@ import jax.numpy as jnp
 import numpy as np
 from expecttest import assert_expected_inline
 from jaxtyping import Array
+from settlrl_engine.belief import belief_view
 from settlrl_engine.board import Board, make_board
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.env import N_FLAT
@@ -90,13 +91,23 @@ def _uniform_legal_dist(
     return m / jnp.sum(m)
 
 
+def _jitted(weights_fn: Any, backend: Backend) -> dict[str, Any]:
+    """Build the pre-jitted+vmapped callables `self_play` now expects from a bare
+    `weights_fn` stand-in and a backend (no setup search)."""
+    return {
+        "search": jax.jit(jax.vmap(weights_fn, in_axes=(0, 0, 0, 0, 0))),
+        "observe_of": jax.jit(jax.vmap(backend.observe, in_axes=(0, 0, 0))),
+        "view_of": jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0))),
+    }
+
+
 def test_self_play_samples_shape_under_uniform_policy() -> None:
     # Drives the real generic self-play (env stepping, pending flush, outcome
     # credit) with the MLP observation but a trivial policy -- fast, no search.
     backend = MLPBackend((16,))
     samples = self_play(
-        _uniform_weights, backend.observe,
         n_samples=8, batch_size=4, seed=0,
+        **_jitted(_uniform_weights, backend),
     )  # fmt: skip
     n = samples["value"].shape[0]
     assert n >= 8 and all(v.shape[0] == n for v in samples.values())
@@ -120,8 +131,8 @@ def _uniform_weights_value(
 def test_self_play_records_root_value_when_asked() -> None:
     backend = MLPBackend((16,))
     samples = self_play(
-        _uniform_weights_value, backend.observe,
         n_samples=8, batch_size=4, seed=0, record_value=True,
+        **_jitted(_uniform_weights_value, backend),
     )  # fmt: skip
     assert "q" in samples and samples["q"].shape == samples["value"].shape
     assert bool(np.all(np.abs(samples["q"] - 0.3) < 1e-5))  # the stand-in's q
@@ -224,8 +235,8 @@ def test_self_play_value_is_acting_seat_win_loss() -> None:
     # complementary-per-game property.)
     backend = MLPBackend((16,))
     samples = self_play(
-        _uniform_weights, backend.observe,
         n_samples=16, batch_size=4, seed=0, temperature=0.0,
+        **_jitted(_uniform_weights, backend),
     )  # fmt: skip
     sv = samples["value"]
     assert set(np.unique(sv)).issubset({0.0, 1.0})  # win/loss only, never a VP/seat
@@ -240,8 +251,8 @@ def test_self_play_policy_target_is_legal() -> None:
     # the search may only propose legal moves.
     backend = MLPBackend((16,))
     samples = self_play(
-        _uniform_legal_dist, backend.observe,
         n_samples=16, batch_size=4, seed=3, temperature=0.0,
+        **_jitted(_uniform_legal_dist, backend),
     )  # fmt: skip
     pol, mask = samples["policy"], samples["mask"]
     assert np.all(pol >= 0.0)
@@ -257,10 +268,11 @@ def test_self_play_excludes_setup_gnn() -> None:
     # so we assert it via the mask: a recorded position is in the main loop iff a
     # non-setup action is legal there. Every recorded mask must satisfy that.
     backend = GNNBackend(PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1))
+    setup_search = jax.jit(jax.vmap(backend.setup_policy(), in_axes=(0, 0, 0, 0, 0)))
     samples = self_play(
-        _uniform_weights, backend.observe,
         n_samples=8, batch_size=4, seed=4, temperature=0.0,
-        setup_fn=backend.setup_policy(),
+        setup_search=setup_search,
+        **_jitted(_uniform_weights, backend),
     )  # fmt: skip
     mask = samples["mask"].astype(bool)
     setup_rows = np.asarray(_SETUP_ROWS)
@@ -313,8 +325,8 @@ def test_value_blend_formula_matches_loop() -> None:
     # genuine searcher output.
     backend = MLPBackend((16,))
     samples = self_play(
-        _uniform_weights_value, backend.observe,
         n_samples=12, batch_size=4, seed=13, temperature=0.0, record_value=True,
+        **_jitted(_uniform_weights_value, backend),
     )  # fmt: skip
     z = samples["value"].astype(np.float64)
     q = samples["q"].astype(np.float64)
