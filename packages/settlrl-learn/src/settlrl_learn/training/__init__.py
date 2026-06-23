@@ -24,6 +24,7 @@ from settlrl_learn.training.config import (
     TeacherConfig,
     ValueBlendConfig,
 )
+from settlrl_learn.training.elo import anchored_elo, expected_score
 from settlrl_learn.training.gnn_backend import (
     GNNBackend,
     gnn_loss,
@@ -53,8 +54,10 @@ __all__ = [
     "SelfPlayConfig",
     "TeacherConfig",
     "ValueBlendConfig",
+    "anchored_elo",
     "arena",
     "evaluate",
+    "expected_score",
     "gnn_loss",
     "learn",
     "load_run_state",

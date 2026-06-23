@@ -4,3 +4,7 @@ batch: 128
 sims: 48
 considered: 16
 opponents: [lookahead, random]
+# fixed-Elo anchors for arena_elo (heuristic = the gate at 0). Freeze for a run.
+anchor_elos:
+  lookahead: 0.0
+  random: -800.0

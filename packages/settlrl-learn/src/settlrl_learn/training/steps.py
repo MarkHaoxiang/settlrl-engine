@@ -19,6 +19,7 @@ from jaxtyping import Array
 from settlrl_learn.training.arena import arena
 from settlrl_learn.training.backend import Backend
 from settlrl_learn.training.config import ArenaConfig
+from settlrl_learn.training.elo import anchored_elo
 from settlrl_learn.training.selfplay import Samples, concat, index
 
 
@@ -91,9 +92,12 @@ def run_arena(
     backend: Backend, net: Any, cfg: ArenaConfig, *, seed: int
 ) -> dict[str, float]:
     """Play the net against each configured opponent; ``lookahead`` -> the gate
-    metric ``arena_winrate``, others -> ``arena_vs_<opponent>``. Opponents get
-    well-separated seeds (``seed + j*10_000``)."""
+    metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, plus ``arena_elo``
+    -- the MLE Elo on the fixed ``anchor_elos`` scale. Opponents get well-separated
+    seeds (``seed + j*10_000``); the loop holds ``seed`` fixed across iterations so
+    every checkpoint faces the same games (a paired strength curve)."""
     metrics: dict[str, float] = {}
+    elo_inputs: list[tuple[float, float, int]] = []
     for j, opp in enumerate(cfg.opponents):
         wr = arena(
             backend, net, opponent=opp, n_games=cfg.games,
@@ -101,4 +105,8 @@ def run_arena(
             max_num_considered_actions=cfg.considered, seed=seed + j * 10_000,
         )  # fmt: skip
         metrics["arena_winrate" if opp == "lookahead" else f"arena_vs_{opp}"] = wr
+        if opp in cfg.anchor_elos:
+            elo_inputs.append((cfg.anchor_elos[opp], wr * cfg.games, cfg.games))
+    if elo_inputs:
+        metrics["arena_elo"] = anchored_elo(elo_inputs)
     return metrics

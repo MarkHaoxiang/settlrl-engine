@@ -83,7 +83,12 @@ class EvalConfig(_Group):
 
 class ArenaConfig(_Group):
     """Periodic strength check. The chance/ordering *semantics* come from the
-    backend (it carries them for the play agent); only the *budget* lives here."""
+    backend (it carries them for the play agent); only the *budget* lives here.
+
+    ``anchor_elos`` pins each anchor opponent's Elo on a fixed scale (``lookahead``
+    = the heuristic gate at 0; ``random`` well below); the net's ``arena_elo`` is
+    the MLE on that scale (:mod:`settlrl_learn.training.elo`). Anchors must stay
+    frozen for a run -- changing them silently shifts every historical number."""
 
     games: int = 0
     every: int = 1
@@ -91,6 +96,9 @@ class ArenaConfig(_Group):
     sims: int = 48
     considered: int = 16
     opponents: list[str] = Field(default_factory=lambda: ["lookahead", "random"])
+    anchor_elos: dict[str, float] = Field(
+        default_factory=lambda: {"lookahead": 0.0, "random": -800.0}
+    )
 
 
 class LearnConfig(_Group):

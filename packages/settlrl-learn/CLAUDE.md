@@ -114,6 +114,18 @@ deps only because this subpackage uses them.
   - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
     seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
     lower-bound sanity check); the play agent comes from `backend.play_agent`.
+    `steps.run_arena` plays each `cfg.arena.opponents` entry and reports
+    `arena_winrate` / `arena_vs_<opp>` **plus `arena_elo`** — the MLE Elo
+    (`training/elo.py::anchored_elo`) on the fixed `cfg.arena.anchor_elos` scale
+    (heuristic pinned at 0 = the gate; random well below). The loop holds the
+    arena **seed fixed across iterations** (no `+i`), so every checkpoint faces
+    the same games and the curve is paired (the dice/board luck differences out)
+    — the chosen variance cut, matching canopy/lc0's paired-seed tournaments
+    over a checkpoint round-robin (a within-pool round-robin drifts when the pool
+    changes; the anchored gauntlet stays comparable across runs). Anchors must
+    stay frozen for a run. The per-iter `val_*` / `policy_*` / `value_*` health
+    metrics (from `Backend.eval_metrics`) are the cheap high-frequency proxies
+    between arena rounds.
   - `training/mlp_backend.py::MLPBackend` — the `AZParams` net over the
     engineered feature vector; **unmasked** policy CE + value-logistic loss,
     optax adamw, the net plays setup itself.
