@@ -62,6 +62,7 @@ def learn(
     eval_frac: float = 0.0,
     value_blend_max: float = 0.0,
     value_blend_ramp: int = 10,
+    expected_rolls: bool = True,
     chance_nodes: bool = False,
     dev_chance: bool = True,
     ordered: bool = False,
@@ -126,6 +127,7 @@ def learn(
             teacher_value,
             num_simulations=teacher_sims,
             max_num_considered_actions=max_num_considered_actions,
+            expected_rolls=expected_rolls,
             chance_nodes=chance_nodes,
             dev_chance=dev_chance,
             ordered=ordered,
@@ -155,6 +157,7 @@ def learn(
                 v_fn, prior=p_fn, value_scale=2.0,
                 num_simulations=num_simulations,
                 max_num_considered_actions=max_num_considered_actions,
+                expected_rolls=expected_rolls,
                 chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
             )  # fmt: skip
         fresh = self_play(

@@ -54,6 +54,9 @@ class AlphaZeroConfig(Config):
     # q_weight_ramp iters; q = the searched root value. 0 -> pure outcome z.
     q_weight_max: float = 0.0
     q_weight_ramp: int = 10
+    # roll leaf = the exact 11-roll expectation (expected EV); else a single
+    # sampled roll. Mutually exclusive with chance_nodes (which resolves rolls in-tree).
+    expected_rolls: bool = True
     # explicit chance nodes in the search (dice always; dev-card buys when
     # dev_chance) — nature's move resolved in-tree, both in self-play and the arena.
     chance_nodes: bool = False
@@ -210,6 +213,36 @@ VARIANTS: dict[str, dict[str, object]] = {
         "arena_sims": 24,
         "checkpoint_every": 2,
     },
+    # ~10h overnight run: no chance nodes / no expected-EV leaf (single sampled
+    # roll), self-play batch at the measured throughput sweet spot (256), q-blend +
+    # lr from Canopy, larger replay + samples/iter to amortize the per-iter recompile.
+    # n_iterations is sized at launch from a quick calibration of the net-phase rate.
+    "gnn_overnight": {
+        "net": "gnn",
+        "width": 96,
+        "layers": 4,
+        "n_iterations": 240,
+        "teacher": True,
+        "teacher_iters": 8,
+        "teacher_sims": 32,
+        "selfplay_samples": 16384,
+        "selfplay_batch": 256,
+        "num_simulations": 64,
+        "max_num_considered_actions": 16,
+        "expected_rolls": False,  # no expected EV (single sampled roll)
+        "chance_nodes": False,  # no chance nodes
+        "reuse": 2.0,
+        "batch_size": 1024,
+        "buffer_max": 200_000,
+        "lr": 5e-4,
+        "q_weight_max": 0.85,  # Canopy q-blend
+        "q_weight_ramp": 60,  # Canopy ramp
+        "arena_games": 40,
+        "arena_every": 5,
+        "arena_batch": 128,
+        "arena_sims": 24,
+        "checkpoint_every": 10,
+    },
     "gnn_smoke": {
         "net": "gnn",
         "width": 16,
@@ -322,6 +355,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             eval_frac=cfg.eval_frac,
             value_blend_max=cfg.q_weight_max,
             value_blend_ramp=cfg.q_weight_ramp,
+            expected_rolls=cfg.expected_rolls,
             chance_nodes=cfg.chance_nodes,
             dev_chance=cfg.dev_chance,
             ordered=cfg.ordered,
@@ -412,6 +446,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             train_steps=cfg.train_steps,
             value_blend_max=cfg.q_weight_max,
             value_blend_ramp=cfg.q_weight_ramp,
+            expected_rolls=cfg.expected_rolls,
             chance_nodes=cfg.chance_nodes,
             dev_chance=cfg.dev_chance,
             ordered=cfg.ordered,
