@@ -65,6 +65,7 @@ keys=['features']
 empty_item:
 (118,)
 (662,)
+()
 ()""",
     )
 
@@ -85,6 +86,7 @@ empty_item:
 (40,)
 (662,)
 (662,)
+()
 ()""",
     )
 
@@ -128,7 +130,8 @@ def test_self_play_samples_shape_under_uniform_policy() -> None:
     trailing = {k: tuple(v.shape[1:]) for k, v in sorted(samples.items())}
     assert_expected_inline(
         str(trailing),
-        "{'features': (118,), 'mask': (662,), 'policy': (662,), 'value': ()}",
+        "{'features': (118,), 'mask': (662,), 'policy': (662,), "
+        "'train_policy': (), 'value': ()}",
     )
     # the env mask is binary; the policy target is recorded over the legal set.
     assert set(np.unique(samples["mask"])).issubset({0.0, 1.0})
@@ -439,3 +442,59 @@ def test_make_optimizer_grad_clip() -> None:
     n_clip = len(jax.tree.leaves(make_optimizer(OptimConfig(grad_clip=1.0)).init(p)))
     n_plain = len(jax.tree.leaves(make_optimizer(OptimConfig(grad_clip=0.0)).init(p)))
     assert n_clip == n_plain
+
+
+# --------------------------------------------------------------------------- #
+# Playout-cap randomization (PCR)                                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_self_play_pcr_marks_fast_positions() -> None:
+    # With a fast_search + full_prob < 1, each step is full (train_policy 1) or
+    # fast (0); the data side of PCR. value is recorded for both (fast positions
+    # still train the value head).
+    backend = MLPBackend((16,))
+    j = _jitted(_uniform_legal_dist, backend)
+    samples = self_play(
+        n_samples=64, batch_size=8, seed=1,
+        fast_search=j["search"], full_prob=0.5, **j,
+    )  # fmt: skip
+    tp = samples["train_policy"]
+    assert set(np.unique(tp)).issubset({0.0, 1.0})
+    assert tp.min() == 0.0 and tp.max() == 1.0  # both full and fast steps occurred
+    assert tp.shape == samples["value"].shape  # a flag per recorded position
+
+
+def test_self_play_no_pcr_marks_all_full() -> None:
+    # Default (no fast_search): every position is a full-search position.
+    backend = MLPBackend((16,))
+    samples = self_play(
+        n_samples=8, batch_size=4, seed=0, **_jitted(_uniform_weights, backend)
+    )
+    assert np.all(samples["train_policy"] == 1.0)
+
+
+def test_mlp_loss_masks_policy_by_train_policy() -> None:
+    # The loss side of PCR: the policy CE averages over train_policy=1 positions
+    # only (so it equals the loss on that subset), while value loss spans all.
+    from settlrl_learn.features import FEATURE_DIM
+    from settlrl_learn.training import mlp_loss
+    from settlrl_learn.training.mlp_backend import MLPItem
+
+    rng = np.random.default_rng(0)
+    n = 6
+    net = MLPBackend((8,)).init(jax.random.key(0))
+    feats = jnp.asarray(rng.standard_normal((n, FEATURE_DIM)), jnp.float32)
+    pol = jnp.asarray(rng.random((n, N_FLAT)), jnp.float32)
+    val = jnp.asarray((rng.random(n) < 0.5).astype(np.float32))
+    full = MLPItem(feats, pol, val, jnp.ones(n, jnp.float32))
+    half = full._replace(train_policy=jnp.array([1, 1, 1, 0, 0, 0], jnp.float32))
+    first3 = MLPItem(feats[:3], pol[:3], val[:3], jnp.ones(3, jnp.float32))
+
+    _, a_full = mlp_loss(net, full, 1.0)
+    _, a_half = mlp_loss(net, half, 1.0)
+    _, a_first3 = mlp_loss(net, first3, 1.0)
+    # value loss spans every position -> unchanged by the policy mask.
+    assert abs(float(a_full["value_loss"]) - float(a_half["value_loss"])) < 1e-5
+    # masked policy loss == the policy loss over the unmasked subset alone.
+    assert abs(float(a_half["policy_loss"]) - float(a_first3["policy_loss"])) < 1e-4

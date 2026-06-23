@@ -198,6 +198,6 @@ def test_gnn_loss_masked_is_finite() -> None:
     mask = jnp.asarray(env.flat_mask(), jnp.float32)  # (4, N_FLAT)
     samples = jax.vmap(board_sample)(lo, st, env.agent_selection)
     target = mask / jnp.clip(mask.sum(-1, keepdims=True), 1.0)  # uniform over legal
-    loss, aux = gnn_loss(net, samples, target, jnp.zeros(4), mask)
+    loss, aux = gnn_loss(net, samples, target, jnp.zeros(4), mask, jnp.ones(4))
     assert bool(jnp.isfinite(loss))
     assert all(bool(jnp.isfinite(v)) for v in aux.values())

@@ -29,21 +29,28 @@ from settlrl_learn.training.selfplay import Samples
 
 class MLPItem(NamedTuple):
     """One replay item: the engineered features, the search's improved-policy
-    target, and the game-outcome value label (a leading sample axis when batched)."""
+    target, the game-outcome value label, and the ``train_policy`` flag (1 =
+    train the policy head here; 0 = value-only playout-cap position). A leading
+    sample axis when batched."""
 
     features: Float[Array, "*b feat"]
     policy: Float[Array, "*b flat"]
     value: Float[Array, "*b"]
+    train_policy: Float[Array, "*b"]
 
 
 def mlp_loss(
     params: AZParams, item: MLPItem, value_weight: float
 ) -> tuple[Float[Array, ""], Metrics]:
     """Policy cross-entropy (against the search target) + ``value_weight`` x the
-    value logistic loss (win/loss)."""
+    value logistic loss (win/loss). The policy CE is averaged over
+    ``train_policy`` = 1 positions only (value trains on all); all 1 is the plain
+    mean."""
     vs, logits = jax.vmap(az_forward, in_axes=(None, 0))(params, item.features)
     logp = jax.nn.log_softmax(logits, axis=-1)
-    policy_loss = -jnp.mean(jnp.sum(item.policy * logp, axis=-1))
+    ce = -jnp.sum(item.policy * logp, axis=-1)  # per position
+    tp = item.train_policy
+    policy_loss = jnp.sum(tp * ce) / jnp.maximum(jnp.sum(tp), 1.0)
     value_loss = jnp.mean(jax.nn.softplus(vs) - item.value * vs)
     total = policy_loss + value_weight * value_loss
     return total, {"policy_loss": policy_loss, "value_loss": value_loss}
@@ -98,6 +105,7 @@ class MLPBackend:
             jnp.asarray(samples["features"], jnp.float32),
             jnp.asarray(samples["policy"], jnp.float32),
             jnp.asarray(samples["value"], jnp.float32),
+            jnp.asarray(samples["train_policy"], jnp.float32),
         )
 
     def empty_item(self) -> MLPItem:
@@ -105,6 +113,7 @@ class MLPBackend:
             jnp.zeros((FEATURE_DIM,), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.float32(0.0),
+            jnp.float32(1.0),
         )
 
     def init_opt(

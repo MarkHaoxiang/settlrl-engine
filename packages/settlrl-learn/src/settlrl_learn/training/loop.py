@@ -132,22 +132,35 @@ def learn(
     )
     _, net_static = eqx.partition(net, eqx.is_array)
 
-    def _net_weights(
-        arrays: Any, key: Any, layout: Any, view: Any, player: Any, mask: Any
-    ) -> Any:
-        model = eqx.combine(arrays, net_static)
-        v_fn, p_fn = backend.seams(model)
-        wfn = mk(
-            v_fn, prior=p_fn, value_scale=s.value_scale,
-            num_simulations=s.num_simulations, **search_kwargs,
-        )  # fmt: skip
-        return wfn(key, layout, view, player, mask)
+    def _make_net_search(num_simulations: int) -> Any:
+        def _net_weights(
+            arrays: Any, key: Any, layout: Any, view: Any, player: Any, mask: Any
+        ) -> Any:
+            model = eqx.combine(arrays, net_static)
+            v_fn, p_fn = backend.seams(model)
+            wfn = mk(
+                v_fn, prior=p_fn, value_scale=s.value_scale,
+                num_simulations=num_simulations, **search_kwargs,
+            )  # fmt: skip
+            return wfn(key, layout, view, player, mask)
 
-    net_search = jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
+        return jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
 
-    def _play(search: Any, n: int, seed: int) -> Samples:
+    net_search = _make_net_search(s.num_simulations)
+    # Playout-cap randomization: a cheaper search for the value-only (fast) steps.
+    pcr = cfg.selfplay.pcr_full_prob < 1.0 and cfg.selfplay.pcr_fast_sims > 0
+    net_search_fast: Any = _make_net_search(cfg.selfplay.pcr_fast_sims) if pcr else None
+
+    def _play(
+        search: Any,
+        n: int,
+        seed: int,
+        *,
+        fast_search: Any = None,
+        full_prob: float = 1.0,
+    ) -> Samples:
         return self_play(
-            search, n_samples=n,
+            search, fast_search=fast_search, full_prob=full_prob, n_samples=n,
             observe_of=observe_of, view_of=view_of, setup_search=setup_search,
             batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
             seed=seed, record_value=blend, track_ordering=s.ordered,
@@ -168,10 +181,20 @@ def learn(
         t0 = time.perf_counter()
         teaching = teacher_weights is not None and i < cfg.teacher.iters
         net_arrays = eqx.partition(net, eqx.is_array)[0]
-        search: Any = (
-            teacher_search if teaching else functools.partial(net_search, net_arrays)
-        )
-        fresh = _play(search, cfg.selfplay.samples, cfg.seed + 1 + i)
+        search: Any
+        fast: Any = None
+        full_prob = 1.0
+        if teaching:
+            search = teacher_search  # warm-up: always full, no PCR
+        else:
+            search = functools.partial(net_search, net_arrays)
+            if pcr:
+                fast = functools.partial(net_search_fast, net_arrays)
+                full_prob = cfg.selfplay.pcr_full_prob
+        fresh = _play(
+            search, cfg.selfplay.samples, cfg.seed + 1 + i,
+            fast_search=fast, full_prob=full_prob,
+        )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
         nf = fresh["value"].shape[0]
         if nf == 0:  # degenerate net dragged every game past the budget; skip

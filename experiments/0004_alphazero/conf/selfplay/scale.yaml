@@ -3,3 +3,7 @@ batch: 256          # measured GPU throughput sweet spot
 temperature: 1.0
 max_steps: 100000
 max_game_len: 800
+# playout-cap randomization (off by default). To enable canopy-style deep policy
+# targets: pcr_full_prob: 0.25 + a larger search.num_simulations, pcr_fast_sims: 64
+pcr_full_prob: 1.0
+pcr_fast_sims: 16

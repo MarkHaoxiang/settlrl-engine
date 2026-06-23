@@ -58,6 +58,8 @@ def self_play(
     observe_of: ObserveFn,
     view_of: Callable[[BoardState, BeliefState, Array], BeliefView],
     setup_search: BeliefPolicy | None = None,
+    fast_search: PolicyWeights | PolicyWeightsValue | None = None,
+    full_prob: float = 1.0,
     n_samples: int,
     n_players: int = 2,
     batch_size: int = 16,
@@ -81,6 +83,13 @@ def self_play(
     (a :data:`~settlrl_search.PolicyWeightsValue`) and stores it under the
     ``q`` key (searcher frame, [-1, 1]) -- the value-blend target's ``q`` term.
 
+    Playout-cap randomization (when ``fast_search`` is given and ``full_prob`` <
+    1): each step is *full* (the deep ``search``) with probability ``full_prob``,
+    else *fast* (the cheap ``fast_search``). Every position records its outcome
+    value, but the ``train_policy`` flag is 1 only on full-search positions (0 on
+    fast) so the policy loss trains on deep targets only. ``full_prob`` = 1
+    disables it (every position ``train_policy`` = 1).
+
     ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's
     retained pending positions -- a cold/degenerate net can drag a game out
     indefinitely, so without these the pending buffer grows unbounded. A capped
@@ -89,8 +98,9 @@ def self_play(
         batch_size=batch_size, seed=seed, reward="sparse",
         n_players=n_players, track_beliefs=True, track_ordering=track_ordering,
     )  # fmt: skip
+    pcr = fast_search is not None and full_prob < 1.0
     pending: list[
-        list[tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float]]
+        list[tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float, float]]
     ] = [[] for _ in range(batch_size)]
     out: dict[str, list[np.ndarray]] = {}
     trailing: dict[str, tuple[int, ...]] = {}
@@ -106,8 +116,20 @@ def self_play(
         sel = jnp.asarray(env.agent_selection)
         mask = env.flat_mask()
         view = view_of(state, beliefs, sel)
+        # Playout-cap: pick full (deep, policy-training) vs fast (cheap, value-only)
+        # for this step. The extra key split is taken only when PCR is on, so the
+        # off path's RNG stream is unchanged (bit-exact resume).
+        if pcr:
+            key, k_pcr = jax.random.split(key)
+            full = bool(jax.random.uniform(k_pcr) < full_prob)
+        else:
+            full = True
+        step_search = search if full else fast_search
+        assert step_search is not None
         key, k_search, k_move, k_setup = jax.random.split(key, 4)
-        result = search(jax.random.split(k_search, batch_size), layout, view, sel, mask)
+        result = step_search(
+            jax.random.split(k_search, batch_size), layout, view, sel, mask
+        )
         q_np = np.zeros(batch_size, np.float32)  # overwritten when recording value
         if record_value:
             weights, qv = result
@@ -132,9 +154,11 @@ def self_play(
         if not trailing:  # capture per-key trailing shapes once, for the empty case
             trailing = {k: v.shape[1:] for k, v in obs.items()}
             trailing["policy"], trailing["mask"] = w_np.shape[1:], m_np.shape[1:]
+            trailing["train_policy"] = ()
             if record_value:
                 trailing["q"] = ()
             out = {k: [] for k in (*trailing,)}
+        tp_val = 1.0 if full else 0.0  # 1 = full-search position (trains policy)
         for lane in range(batch_size):
             if is_setup[lane]:  # the net does not train on setup positions
                 continue
@@ -144,6 +168,7 @@ def self_play(
                 m_np[lane],
                 int(sel_np[lane]),
                 float(q_np[lane]),
+                tp_val,
             )
             pending[lane].append(row)
             if len(pending[lane]) > max_game_len:
@@ -152,11 +177,12 @@ def self_play(
         env.step(*flat_to_action(move))
         rewards = np.asarray(env.rewards)
         for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)).tolist():
-            for obs_l, pol_l, mask_l, seat, q_l in pending[lane]:
+            for obs_l, pol_l, mask_l, seat, q_l, tp_l in pending[lane]:
                 for k, v in obs_l.items():
                     out[k].append(v)
                 out["policy"].append(pol_l)
                 out["mask"].append(mask_l)
+                out["train_policy"].append(np.asarray(tp_l, np.float32))
                 if record_value:
                     out["q"].append(np.asarray(q_l, np.float32))
                 vals.append(float(rewards[lane, seat] > 0))

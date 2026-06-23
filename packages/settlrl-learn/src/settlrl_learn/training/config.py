@@ -42,6 +42,12 @@ class SelfPlayConfig(_Group):
     temperature: float = 1.0
     max_steps: int = 100_000
     max_game_len: int = 800
+    pcr_full_prob: float = 1.0
+    """Playout-cap randomization (KataGo): probability a self-play step runs the
+    full ``num_simulations`` search and trains policy on its positions; the rest
+    run ``pcr_fast_sims`` (value-only). 1.0 disables it (every position trains
+    policy)."""
+    pcr_fast_sims: int = 16
 
 
 class OptimConfig(_Group):

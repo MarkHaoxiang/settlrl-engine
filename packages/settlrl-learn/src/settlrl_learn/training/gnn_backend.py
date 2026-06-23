@@ -111,7 +111,9 @@ def make_net_agent(
 
 class GNNItem(NamedTuple):
     """One replay item: the board graph (nodes/edges/glob), the search's improved
-    policy, the legality mask, and the acting seat's win (1) / loss (0)."""
+    policy, the legality mask, the acting seat's win (1) / loss (0), and the
+    ``train_policy`` flag (1 = train the policy head here; 0 = value-only, a
+    playout-cap fast-search position)."""
 
     nodes: Array
     edges: Array
@@ -119,6 +121,7 @@ class GNNItem(NamedTuple):
     policy: Array
     mask: Array
     value: Array
+    train_policy: Array
 
 
 def _masked_logp(logits: Array, mask: Array) -> Array:
@@ -127,16 +130,24 @@ def _masked_logp(logits: Array, mask: Array) -> Array:
 
 
 def gnn_loss(
-    model: BoardGNN, sample: Sample, policy: Array, value: Array, mask: Array
+    model: BoardGNN,
+    sample: Sample,
+    policy: Array,
+    value: Array,
+    mask: Array,
+    train_policy: Array,
 ) -> tuple[Float[Array, ""], Metrics]:
     """Masked policy cross-entropy (against the search target, over *legal*
     actions) + value logistic loss. The softmax is masked to the legal set so the
     net never spends capacity on per-position illegality (the search masks at play
-    time)."""
+    time). The policy CE is averaged over ``train_policy`` = 1 positions only
+    (value-only playout-cap positions don't train the policy); value trains on
+    all. With ``train_policy`` all 1 this is the plain mean."""
     vs, logits = jax.vmap(model)(sample)
     logp = _masked_logp(logits, mask)
     # guard 0 * -inf on illegal slots (target is 0 there anyway).
-    policy_loss = -jnp.mean(jnp.sum(jnp.where(mask > 0, policy * logp, 0.0), axis=-1))
+    ce = -jnp.sum(jnp.where(mask > 0, policy * logp, 0.0), axis=-1)  # per position
+    policy_loss = jnp.sum(train_policy * ce) / jnp.maximum(jnp.sum(train_policy), 1.0)
     value_loss = jnp.mean(jax.nn.softplus(vs) - value * vs)
     return policy_loss + value_loss, {
         "policy_loss": policy_loss,
@@ -214,6 +225,7 @@ class GNNBackend:
             jnp.asarray(samples["policy"], jnp.float32),
             jnp.asarray(samples["mask"], jnp.float32),
             jnp.asarray(samples["value"], jnp.float32),
+            jnp.asarray(samples["train_policy"], jnp.float32),
         )
 
     def empty_item(self) -> GNNItem:
@@ -224,6 +236,7 @@ class GNNBackend:
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.float32(0.0),
+            jnp.float32(1.0),
         )
 
     def init_opt(
@@ -255,7 +268,9 @@ class GNNBackend:
 
 
 def _loss_item(net: BoardGNN, item: GNNItem) -> tuple[Float[Array, ""], Metrics]:
-    return gnn_loss(net, _sample_of(item), item.policy, item.value, item.mask)
+    return gnn_loss(
+        net, _sample_of(item), item.policy, item.value, item.mask, item.train_policy
+    )
 
 
 @eqx.filter_jit

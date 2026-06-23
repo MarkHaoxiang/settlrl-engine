@@ -90,7 +90,12 @@ deps only because this subpackage uses them.
     belief-averaged value); values are the acting seat's eventual win/loss.
     `setup_fn` (when given) plays the setup phase with a fixed policy and those
     positions are *not* recorded (the GNN path; the MLP path passes `None` and
-    the net plays setup too).
+    the net plays setup too). **Playout-cap randomization** (KataGo): with a
+    `fast_search` and `full_prob` < 1, each *step* (not per-move — the
+    vmap-lockstep constraint) is full (deep `search`) with prob `full_prob` else
+    fast (cheap `fast_search`); every position records its outcome value, but the
+    `train_policy` flag is 1 only on full-search positions, so the policy loss
+    trains on deep targets only (value on all). `full_prob` = 1 disables it.
   - `training/loop.py::learn(backend, cfg: LearnConfig, *, teacher_value=…,
     checkpoint_dir=…, resume_from=…, …)` — the orchestrator over the `steps`
     units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration
@@ -141,6 +146,9 @@ deps only because this subpackage uses them.
     opener) plays the setup phase in both self-play and the arena;
     `make_net_agent` composes setup + the net's search; `gnn_loss` is the masked
     loss (its finiteness is contract-tested).
+  - Both losses average the policy CE over the item's `train_policy` = 1
+    positions only (value-only playout-cap positions are skipped; value trains on
+    all); with `train_policy` all 1 it is the plain mean (bit-exact-preserving).
 
 The gates (June 11 plan; value-tuning evidence in settlrl-agents/CLAUDE.md,
 search/leaf evidence in settlrl-search/CLAUDE.md): Stage 1 ships a
@@ -175,6 +183,11 @@ Techniques aimed at Catan's dice variance (the variance-starved-depth problem):
 - **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]`), trained on
   `ema = α·Q[t] + (1−α)·ema`, sharing the trunk — *not yet*.
 - **Playout-cap randomization** (KataGo): most moves a small search, a fraction
-  the full budget; only full-search positions contribute policy targets — *not yet*.
+  the full budget; only full-search positions contribute policy targets —
+  **done** (opt-in `selfplay.pcr_full_prob` < 1 + `pcr_fast_sims`; per-*step*
+  full/fast rather than per-move, the vmap-lockstep constraint; the policy CE is
+  masked to full-search positions via the item's `train_policy` flag). Pairs with
+  a larger `search.num_simulations` for the full steps — the affordable way to add
+  the search depth the policy diagnostic wants.
 
 Repo + METHODS.md + examples/catan/OPTIMIZATIONS.md; see [[canopy-reference]].
