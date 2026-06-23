@@ -1,7 +1,11 @@
 # Training config refactor: grouped configs + decomposed loop + hydra
 
 Date: 2026-06-23
-Status: design, pending implementation
+Status: implemented (commit 339b2fb). One change from the design below: per the
+user, the hydra integration uses `@hydra.main` (CLI entry, native `-m` multirun)
+rather than the Compose API, with the cwd takeover disabled
+(`hydra.job.chdir:false`, `output_subdir:null`, run dir into the gitignored
+`runs/`); `run.compose_config()` is the programmatic seam for the smokes.
 
 ## Problem
 
