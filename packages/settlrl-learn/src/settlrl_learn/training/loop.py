@@ -102,19 +102,15 @@ def learn(
     setup_fn = backend.setup_policy()
     blend = cfg.value_blend.max > 0
     mk = make_search_weights_value if blend else make_search_weights
+    search_kwargs: dict[str, Any] = {
+        "max_depth": s.max_depth, "max_num_considered_actions": s.max_considered,
+        "expected_rolls": s.expected_rolls, "chance_nodes": s.chance_nodes,
+        "dev_chance": s.dev_chance, "ordered": s.ordered,
+    }  # fmt: skip
     # The teacher search uses the heuristic value at its own (factory) value_scale,
     # not the net's `s.value_scale`; the net's leaf is a win-probability logit.
     teacher_weights: PolicyWeights | PolicyWeightsValue | None = (
-        mk(
-            teacher_value,
-            num_simulations=cfg.teacher.sims,
-            max_depth=s.max_depth,
-            max_num_considered_actions=s.max_considered,
-            expected_rolls=s.expected_rolls,
-            chance_nodes=s.chance_nodes,
-            dev_chance=s.dev_chance,
-            ordered=s.ordered,
-        )
+        mk(teacher_value, num_simulations=cfg.teacher.sims, **search_kwargs)
         if teacher_value is not None
         else None
     )
@@ -143,10 +139,7 @@ def learn(
         v_fn, p_fn = backend.seams(model)
         wfn = mk(
             v_fn, prior=p_fn, value_scale=s.value_scale,
-            num_simulations=s.num_simulations, max_depth=s.max_depth,
-            max_num_considered_actions=s.max_considered,
-            expected_rolls=s.expected_rolls, chance_nodes=s.chance_nodes,
-            dev_chance=s.dev_chance, ordered=s.ordered,
+            num_simulations=s.num_simulations, **search_kwargs,
         )  # fmt: skip
         return wfn(key, layout, view, player, mask)
 
