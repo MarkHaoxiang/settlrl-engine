@@ -1,0 +1,23 @@
+# @package _global_
+# Trivial-budget MLP smoke.
+net:
+  width: 16
+  depth: 1
+n_iterations: 1
+checkpoint_every: 1
+search:
+  num_simulations: 4
+  max_considered: 4
+selfplay:
+  samples: 8
+  batch: 4
+optim:
+  train_steps: 2
+  batch_size: 4
+replay:
+  buffer_min: 4
+arena:
+  games: 4
+  every: 1
+wandb:
+  mode: disabled

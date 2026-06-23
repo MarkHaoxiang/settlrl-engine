@@ -20,10 +20,18 @@ No shared libraries live under `experiments/` (only per-framework scripts +
   work.
 - `Config`: the pydantic base + `resolve(base, variant, overrides)` (OmegaConf
   merge of schema-defaults ◁ variant-delta ◁ CLI dotlist, then validate). The
-  pydra seam, kept beside `start_run` rather than under `@hydra.main` (hydra's
-  cwd takeover would fight the run-dir management). `extra="forbid"`, so a
+  pydra seam: pydantic is always the validation boundary; `extra="forbid"`, so a
   typo'd knob fails loudly. Heavier frameworks validate at the boundary and pass
   `cfg.dump()` (a plain dict) inward so their internals stay dict-threaded.
+  - **Composition: `resolve` (dict variants) vs hydra config groups.** 0001–0003
+    use `resolve` over an in-`run.py` `VARIANTS` dict. **0004 is the hydra pilot**:
+    its `conf/` holds config groups + an `experiment/` preset dir (the former
+    `VARIANTS`), composed by `@hydra.main` and validated into the nested
+    `AlphaZeroConfig`. hydra's cwd takeover (the reason it was first kept at
+    arm's length) is disabled in `conf/config.yaml` (`hydra.job.chdir: false`,
+    `output_subdir: null`, run dir pointed into the gitignored `runs/`), so
+    `start_run` keeps owning the run dir + manifest. `run.compose_config(overrides)`
+    is the programmatic seam (smoke tests) that `@hydra.main` can't serve.
 
 The subpackage is not imported by the agents runtime, so `import settlrl_agents`
 does not pull `pydantic`/`omegaconf`. A framework's *same-dir* helpers (e.g.

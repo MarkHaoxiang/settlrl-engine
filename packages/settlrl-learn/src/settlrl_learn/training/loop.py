@@ -6,8 +6,11 @@ once past the warm-up -- scores the net vs. ``lookahead(heuristic)``. The
 :class:`~settlrl_learn.training.backend.Backend` supplies everything net-specific;
 this loop is shared by the flat-MLP and board-GNN paths.
 
-Per-iteration RNG derives from ``seed`` and the iteration index, so ``resume_from``
-(a prior ``runstate.eqx``) continues a run bit-exactly.
+:func:`learn` takes a single :class:`~settlrl_learn.training.config.LearnConfig`
+(the grouped, validated knob surface) and orchestrates the per-iteration steps
+(:mod:`settlrl_learn.training.steps`). Per-iteration RNG derives from
+``cfg.seed`` and the iteration index, so ``resume_from`` (a prior ``runstate.eqx``)
+continues a run bit-exactly.
 
 A training-side module: not imported by the package root.
 """
@@ -24,7 +27,6 @@ import equinox as eqx
 import flashbax as fbx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.belief import belief_view
@@ -35,83 +37,50 @@ from settlrl_search import (
     make_search_weights_value,
 )
 
-from settlrl_learn.training.arena import arena
 from settlrl_learn.training.backend import (
     Backend,
     RunState,
     load_run_state,
     save_run_state,
 )
-from settlrl_learn.training.selfplay import Samples, concat, index, self_play
+from settlrl_learn.training.config import LearnConfig
+from settlrl_learn.training.selfplay import Samples, self_play
+from settlrl_learn.training.steps import (
+    evaluate,
+    prepare_targets,
+    run_arena,
+    train_epochs,
+)
 
 
 def learn(
     backend: Backend,
+    cfg: LearnConfig,
     *,
-    n_iterations: int,
-    selfplay_samples: int,
-    selfplay_batch: int = 16,
-    num_simulations: int = 64,
-    max_num_considered_actions: int = 16,
-    temperature: float = 1.0,
     teacher_value: ValueFunction | None = None,
-    teacher_iters: int = 0,
-    teacher_sims: int = 32,
-    buffer_max: int = 50_000,
-    buffer_min: int = 256,
-    batch_size: int = 256,
-    train_steps: int = 200,
-    reuse: float = 0.0,
-    eval_frac: float = 0.0,
-    value_blend_max: float = 0.0,
-    value_blend_ramp: int = 10,
-    expected_rolls: bool = True,
-    chance_nodes: bool = False,
-    dev_chance: bool = True,
-    ordered: bool = False,
-    lr: float = 1e-3,
-    weight_decay: float = 1e-4,
-    arena_games: int = 0,
-    arena_every: int = 1,
-    arena_batch: int = 16,
-    arena_sims: int = 48,
-    seed: int = 0,
     checkpoint_dir: str | Path | None = None,
-    checkpoint_every: int = 1,
     resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], Any], None] | None = None,
     progress: bool = False,
 ) -> Any:
-    """One training loop over ``backend``; returns the final net.
+    """One training loop over ``backend`` under ``cfg``; returns the final net.
 
-    ``reuse`` > 0 caps the updates per iteration at ``reuse * fresh / batch_size``
-    (the AlphaZero sample-reuse factor) instead of a fixed ``train_steps`` -- the
-    fix for value-head overfitting on a small early replay. ``eval_frac`` > 0 holds
-    out that fraction of each iteration's fresh positions (never trained, not
-    checkpointed) for the ``val_*`` metrics.
-
-    ``teacher_value`` (with ``teacher_iters`` > 0) warm-starts the loop: the first
-    ``teacher_iters`` iterations draw their moves and policy targets from a fixed
-    strong search over ``teacher_value`` (``teacher_sims`` simulations) instead of
-    the cold net, so the heads learn from strong play before self-play takes over.
-
-    ``value_blend_max`` > 0 trains the value head on ``(1-a)*z + a*q`` (Canopy's
-    blend): the game outcome ``z`` blended with the searched root value ``q``, with
-    ``a`` ramped linearly 0 -> ``value_blend_max`` over ``value_blend_ramp``
-    iterations. Pure ``z`` is high-variance for a dice game; ``q`` averages over
-    sims once the value head is decent. Only the *training* slice is blended -- the
-    held-out eval slice keeps the raw outcome.
+    ``teacher_value`` (with ``cfg.teacher.iters`` > 0) warm-starts the loop: the
+    first ``cfg.teacher.iters`` iterations draw their moves and policy targets from
+    a fixed strong search (``cfg.teacher.sims`` simulations) over ``teacher_value``
+    instead of the cold net.
 
     The full :class:`RunState` is checkpointed to ``checkpoint_dir/runstate.eqx``
-    every ``checkpoint_every`` iterations; ``resume_from`` continues it bit-exactly.
-    ``on_iter(i, metrics, net)`` runs after each iteration. ``progress`` shows a
-    tqdm bar over the iterations, its postfix tracking loss / arena win rate."""
-    optimizer = optax.adamw(lr, weight_decay=weight_decay)
+    every ``cfg.checkpoint_every`` iterations; ``resume_from`` continues it
+    bit-exactly. ``on_iter(i, metrics, net)`` runs after each iteration.
+    ``progress`` shows a tqdm bar over the iterations."""
+    s = cfg.search
+    optimizer = optax.adamw(cfg.optim.lr, weight_decay=cfg.optim.weight_decay)
     buffer = fbx.make_item_buffer(
-        max_length=buffer_max, min_length=buffer_min,
-        sample_batch_size=batch_size, add_batches=True,
+        max_length=cfg.replay.buffer_max, min_length=cfg.replay.buffer_min,
+        sample_batch_size=cfg.optim.batch_size, add_batches=True,
     )  # fmt: skip
-    net0 = backend.init(jax.random.key(seed))
+    net0 = backend.init(jax.random.key(cfg.seed))
     fresh_state = RunState(
         net0, backend.init_opt(optimizer, net0),
         buffer.init(backend.empty_item()), jnp.int32(0), jnp.float32(-1.0),
@@ -126,21 +95,25 @@ def learn(
     # per-iteration `t_train` is the optimiser step, not the compile. The returned
     # update is discarded -- net/opt_state are untouched.
     _warm = jax.tree.map(
-        lambda x: jnp.broadcast_to(x, (batch_size, *x.shape)), backend.empty_item()
+        lambda x: jnp.broadcast_to(x, (cfg.optim.batch_size, *x.shape)),
+        backend.empty_item(),
     )
     jax.block_until_ready(step(net, opt_state, _warm))  # type: ignore[no-untyped-call]
     setup_fn = backend.setup_policy()
-    blend = value_blend_max > 0
+    blend = cfg.value_blend.max > 0
     mk = make_search_weights_value if blend else make_search_weights
+    # The teacher search uses the heuristic value at its own (factory) value_scale,
+    # not the net's `s.value_scale`; the net's leaf is a win-probability logit.
     teacher_weights: PolicyWeights | PolicyWeightsValue | None = (
         mk(
             teacher_value,
-            num_simulations=teacher_sims,
-            max_num_considered_actions=max_num_considered_actions,
-            expected_rolls=expected_rolls,
-            chance_nodes=chance_nodes,
-            dev_chance=dev_chance,
-            ordered=ordered,
+            num_simulations=cfg.teacher.sims,
+            max_depth=s.max_depth,
+            max_num_considered_actions=s.max_considered,
+            expected_rolls=s.expected_rolls,
+            chance_nodes=s.chance_nodes,
+            dev_chance=s.dev_chance,
+            ordered=s.ordered,
         )
         if teacher_value is not None
         else None
@@ -169,28 +142,30 @@ def learn(
         model = eqx.combine(arrays, net_static)
         v_fn, p_fn = backend.seams(model)
         wfn = mk(
-            v_fn, prior=p_fn, value_scale=2.0,
-            num_simulations=num_simulations,
-            max_num_considered_actions=max_num_considered_actions,
-            expected_rolls=expected_rolls, chance_nodes=chance_nodes,
-            dev_chance=dev_chance, ordered=ordered,
+            v_fn, prior=p_fn, value_scale=s.value_scale,
+            num_simulations=s.num_simulations, max_depth=s.max_depth,
+            max_num_considered_actions=s.max_considered,
+            expected_rolls=s.expected_rolls, chance_nodes=s.chance_nodes,
+            dev_chance=s.dev_chance, ordered=s.ordered,
         )  # fmt: skip
         return wfn(key, layout, view, player, mask)
 
     net_search = jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
 
-    iters: Iterable[int] = range(int(state.iteration), n_iterations)
+    iters: Iterable[int] = range(int(state.iteration), cfg.n_iterations)
     bar = None
     if progress:
         from tqdm.auto import tqdm
 
-        bar = tqdm(iters, initial=int(state.iteration), total=n_iterations, unit="iter")
+        bar = tqdm(
+            iters, initial=int(state.iteration), total=cfg.n_iterations, unit="iter"
+        )
         iters = bar
 
     ev: Samples | None = None
     for i in iters:
         t0 = time.perf_counter()
-        teaching = teacher_weights is not None and i < teacher_iters
+        teaching = teacher_weights is not None and i < cfg.teacher.iters
         search: Any
         if teaching:
             search = teacher_search
@@ -198,10 +173,11 @@ def learn(
             arrays = eqx.partition(net, eqx.is_array)[0]
             search = functools.partial(net_search, arrays)
         fresh = self_play(
-            search, n_samples=selfplay_samples,
+            search, n_samples=cfg.selfplay.samples,
             observe_of=observe_of, view_of=view_of, setup_search=setup_search,
-            batch_size=selfplay_batch, temperature=temperature, seed=seed + 1 + i,
-            record_value=blend, track_ordering=ordered,
+            batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
+            seed=cfg.seed + 1 + i, record_value=blend, track_ordering=s.ordered,
+            max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
         )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
         nf = fresh["value"].shape[0]
@@ -210,26 +186,19 @@ def learn(
                 on_iter(i, {"samples": 0.0, "teaching": float(teaching)}, net)
             continue
 
-        # hold out a never-trained eval slice (reproducible per iteration).
-        if eval_frac > 0:
-            perm = np.random.default_rng(seed + 50_000 + i).permutation(nf)
-            n_ev = int(nf * eval_frac)
-            fr, fe = index(fresh, perm[n_ev:]), index(fresh, perm[:n_ev])
-            ev = fe if ev is None else concat(ev, fe, 8192)
-        else:
-            fr = fresh
-        # value-target blend (training slice only): (1-a)*z + a*(q in [0,1]).
-        alpha = (
-            value_blend_max * min(1.0, i / max(value_blend_ramp, 1)) if blend else 0.0
-        )
-        if blend:
-            q_prob = (fr["q"] + 1.0) / 2.0  # searcher frame [-1,1] -> P(win) [0,1]
-            fr["value"] = (1.0 - alpha) * fr["value"] + alpha * q_prob
+        fr, ev, alpha = prepare_targets(
+            fresh, ev,
+            eval_frac=cfg.eval.eval_frac, blend=blend,
+            blend_max=cfg.value_blend.max, blend_ramp=cfg.value_blend.ramp,
+            iteration=i, perm_seed=cfg.seed + 50_000 + i,
+        )  # fmt: skip
         buf_state = buffer.add(buf_state, backend.to_item(fr))
         steps = (
-            train_steps
-            if reuse <= 0
-            else max(1, int(reuse * fr["value"].shape[0] / batch_size))
+            cfg.optim.train_steps
+            if cfg.optim.reuse <= 0
+            else max(
+                1, int(cfg.optim.reuse * fr["value"].shape[0] / cfg.optim.batch_size)
+            )
         )
         # entropy of the search policy *targets* (degenerate targets -> the net
         # learns a degenerate policy).
@@ -239,49 +208,38 @@ def learn(
         )
         metrics: dict[str, float] = {
             "samples": float(nf), "train_steps": float(steps),
-            "lr": lr, "target_entropy": target_entropy,
+            "lr": cfg.optim.lr, "target_entropy": target_entropy,
             "value_blend_alpha": alpha,
             "t_selfplay": t_selfplay, "teaching": float(teaching),
         }  # fmt: skip
 
-        key = jax.random.key(seed + 10_000 + i)
         t1 = time.perf_counter()
         if bool(buffer.can_sample(buf_state)):
-            sums: dict[str, float] = {}
-            for _ in range(steps):
-                key, k = jax.random.split(key)
-                item = buffer.sample(buf_state, k).experience
-                net, opt_state, m = step(net, opt_state, item)
-                for kk, vv in m.items():
-                    sums[kk] = sums.get(kk, 0.0) + float(vv)
-            metrics.update({kk: vv / steps for kk, vv in sums.items()})
+            net, opt_state, tm = train_epochs(
+                net, opt_state, buffer, buf_state, step, steps,
+                jax.random.key(cfg.seed + 10_000 + i),
+            )  # fmt: skip
+            metrics.update(tm)
         metrics["t_train"] = time.perf_counter() - t1
 
-        if ev is not None and ev["value"].shape[0] >= batch_size:
-            vm = backend.eval_metrics(net, backend.to_item(ev))
-            metrics.update({kk: float(vv) for kk, vv in vm.items()})
+        if ev is not None and ev["value"].shape[0] >= cfg.optim.batch_size:
+            metrics.update(evaluate(backend, net, ev))
 
         # Arena only once the net is past the warm-up: a half-trained net drags
         # games out, and the search arena pays full cost per step.
-        if arena_games and (i + 1) % arena_every == 0 and (i + 1) >= teacher_iters:
+        if (
+            cfg.arena.games
+            and (i + 1) % cfg.arena.every == 0
+            and (i + 1) >= cfg.teacher.iters
+        ):
             t2 = time.perf_counter()
-            winrate = arena(
-                backend, net, opponent="lookahead", n_games=arena_games,
-                num_simulations=arena_sims, batch_size=arena_batch,
-                max_num_considered_actions=max_num_considered_actions,
-                seed=seed + 20_000 + i,
-            )  # fmt: skip
-            metrics["arena_winrate"] = winrate
-            metrics["arena_vs_random"] = arena(
-                backend, net, opponent="random", n_games=arena_games,
-                num_simulations=arena_sims, batch_size=arena_batch,
-                max_num_considered_actions=max_num_considered_actions,
-                seed=seed + 30_000 + i,
-            )  # fmt: skip
+            am = run_arena(backend, net, cfg.arena, seed=cfg.seed + 20_000 + i)
+            metrics.update(am)
             metrics["t_arena"] = time.perf_counter() - t2
-            best = max(best, winrate)
+            if "arena_winrate" in am:
+                best = max(best, am["arena_winrate"])
 
-        if ckpt is not None and (i + 1) % checkpoint_every == 0:
+        if ckpt is not None and (i + 1) % cfg.checkpoint_every == 0:
             save_run_state(
                 ckpt,
                 RunState(

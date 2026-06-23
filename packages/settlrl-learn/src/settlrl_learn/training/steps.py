@@ -1,0 +1,104 @@
+"""The per-iteration training steps, extracted from ``learn`` as pure units.
+
+Each is a function of its inputs (no loop state, no hidden RNG): the loop derives
+every key from ``seed`` + iteration index and threads it in, so the steps stay
+testable in isolation and bit-exact resume is preserved. ``learn`` orchestrates
+them; this module holds the bodies.
+
+A training-side module: not imported by the package root.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import jax
+import numpy as np
+from jaxtyping import Array
+
+from settlrl_learn.training.arena import arena
+from settlrl_learn.training.backend import Backend
+from settlrl_learn.training.config import ArenaConfig
+from settlrl_learn.training.selfplay import Samples, concat, index
+
+
+def prepare_targets(
+    fresh: Samples,
+    prev_ev: Samples | None,
+    *,
+    eval_frac: float,
+    blend: bool,
+    blend_max: float,
+    blend_ramp: int,
+    iteration: int,
+    perm_seed: int,
+    eval_cap: int = 8192,
+) -> tuple[Samples, Samples | None, float]:
+    """Split a fresh self-play batch into a (never-trained) held-out eval slice
+    and a training slice, and apply the value-target blend to the latter.
+
+    Returns ``(train_samples, eval_accumulator, alpha)``. ``eval_frac`` > 0 holds
+    out that fraction (reproducible from ``perm_seed``), accumulating into
+    ``prev_ev`` capped at ``eval_cap``. ``blend`` mixes the training slice's value
+    to ``(1-alpha)*z + alpha*(q in [0,1])`` with ``alpha = blend_max *
+    min(1, iteration/max(blend_ramp,1))``; the eval slice keeps raw ``z``."""
+    nf = fresh["value"].shape[0]
+    fr: Samples
+    ev: Samples | None
+    if eval_frac > 0:
+        perm = np.random.default_rng(perm_seed).permutation(nf)
+        n_ev = int(nf * eval_frac)
+        fr = index(fresh, perm[n_ev:])
+        fe = index(fresh, perm[:n_ev])
+        ev = fe if prev_ev is None else concat(prev_ev, fe, eval_cap)
+    else:
+        fr, ev = fresh, prev_ev
+    alpha = blend_max * min(1.0, iteration / max(blend_ramp, 1)) if blend else 0.0
+    if blend:
+        q_prob = (fr["q"] + 1.0) / 2.0  # searcher frame [-1,1] -> P(win) [0,1]
+        fr = {**fr, "value": (1.0 - alpha) * fr["value"] + alpha * q_prob}
+    return fr, ev, alpha
+
+
+def train_epochs(
+    net: Any,
+    opt_state: Any,
+    buffer: Any,
+    buf_state: Any,
+    step: Any,
+    steps: int,
+    key: Array,
+) -> tuple[Any, Any, dict[str, float]]:
+    """Run ``steps`` minibatch updates, sampling from ``buffer``; return the
+    updated ``(net, opt_state)`` and the per-step-averaged metrics."""
+    sums: dict[str, float] = {}
+    for _ in range(steps):
+        key, k = jax.random.split(key)
+        item = buffer.sample(buf_state, k).experience
+        net, opt_state, m = step(net, opt_state, item)
+        for kk, vv in m.items():
+            sums[kk] = sums.get(kk, 0.0) + float(vv)
+    return net, opt_state, {kk: vv / steps for kk, vv in sums.items()}
+
+
+def evaluate(backend: Backend, net: Any, ev: Samples) -> dict[str, float]:
+    """Held-out diagnostics over the eval accumulator (``val_*`` metrics)."""
+    vm = backend.eval_metrics(net, backend.to_item(ev))
+    return {kk: float(vv) for kk, vv in vm.items()}
+
+
+def run_arena(
+    backend: Backend, net: Any, cfg: ArenaConfig, *, seed: int
+) -> dict[str, float]:
+    """Play the net against each configured opponent; ``lookahead`` -> the gate
+    metric ``arena_winrate``, others -> ``arena_vs_<opponent>``. Opponents get
+    well-separated seeds (``seed + j*10_000``)."""
+    metrics: dict[str, float] = {}
+    for j, opp in enumerate(cfg.opponents):
+        wr = arena(
+            backend, net, opponent=opp, n_games=cfg.games,
+            num_simulations=cfg.sims, batch_size=cfg.batch,
+            max_num_considered_actions=cfg.considered, seed=seed + j * 10_000,
+        )  # fmt: skip
+        metrics["arena_winrate" if opp == "lookahead" else f"arena_vs_{opp}"] = wr
+    return metrics

@@ -1,0 +1,6 @@
+games: 80
+every: 5
+batch: 128
+sims: 48
+considered: 16
+opponents: [lookahead, random]

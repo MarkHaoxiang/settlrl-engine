@@ -1,0 +1,33 @@
+# AlphaZero 2p Catan — composed config groups, validated into AlphaZeroConfig.
+# Defaults reproduce the former flat "default" variant; conf/experiment/*.yaml
+# reproduce the former VARIANTS (select with +experiment=<name>).
+defaults:
+  - net: mlp
+  - search: default
+  - selfplay: default
+  - optim: default
+  - replay: default
+  - teacher: "off"
+  - value_blend: "off"
+  - eval: default
+  - arena: default
+  - _self_
+
+seed: 0
+n_iterations: 20
+checkpoint_every: 5
+resume_from: ""
+gate_winrate: 0.55
+
+wandb:
+  mode: online
+  project: settlrl-0004-alphazero
+
+hydra:
+  job:
+    chdir: false        # keep cwd at the invocation dir; start_run owns the run dir
+  output_subdir: null   # no .hydra/ config dump beside the run
+  run:
+    dir: runs/_hydra/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: runs/_hydra/multirun/${now:%Y-%m-%d_%H-%M-%S}

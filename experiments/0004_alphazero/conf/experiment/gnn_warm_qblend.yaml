@@ -1,0 +1,25 @@
+# @package _global_
+# gnn_warm + Canopy value-target blend (train value on (1-a)z + a*q).
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /value_blend: canopy
+net:
+  width: 96
+  layers: 4
+n_iterations: 30
+checkpoint_every: 2
+selfplay:
+  samples: 4096
+  batch: 256
+search:
+  num_simulations: 32
+  max_considered: 16
+optim:
+  batch_size: 512
+  reuse: 2.0
+arena:
+  games: 40
+  every: 4
+  batch: 64
+  sims: 24

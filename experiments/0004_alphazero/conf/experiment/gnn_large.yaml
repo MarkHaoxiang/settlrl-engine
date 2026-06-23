@@ -1,0 +1,19 @@
+# @package _global_
+# A larger run: more iterations + deeper search (sharper policy targets).
+defaults:
+  - override /net: gnn
+net:
+  width: 64
+  layers: 3
+n_iterations: 24
+checkpoint_every: 2
+selfplay:
+  samples: 1536
+  batch: 96
+search:
+  num_simulations: 48
+optim:
+  reuse: 2.5
+arena:
+  games: 48
+  every: 4

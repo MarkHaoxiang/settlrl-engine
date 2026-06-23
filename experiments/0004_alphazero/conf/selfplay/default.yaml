@@ -1,0 +1,5 @@
+samples: 2048
+batch: 64
+temperature: 1.0
+max_steps: 100000
+max_game_len: 800

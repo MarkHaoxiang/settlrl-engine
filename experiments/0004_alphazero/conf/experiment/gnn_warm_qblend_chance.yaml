@@ -1,0 +1,27 @@
+# @package _global_
+# Full stack: warm-up + q-blend + explicit dice/dev chance nodes.
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /value_blend: canopy
+net:
+  width: 96
+  layers: 4
+n_iterations: 30
+checkpoint_every: 2
+selfplay:
+  samples: 4096
+  batch: 256
+search:
+  num_simulations: 32
+  max_considered: 16
+  chance_nodes: true
+  dev_chance: true
+optim:
+  batch_size: 512
+  reuse: 2.0
+arena:
+  games: 40
+  every: 4
+  batch: 64
+  sims: 24

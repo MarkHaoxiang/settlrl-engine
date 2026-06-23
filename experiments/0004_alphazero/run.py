@@ -5,285 +5,96 @@ own teacher) beats ``lookahead(heuristic)`` at 2p — the settlrl-learn Stage-1
 gate. The loop itself lives in ``settlrl_learn.training``; this only composes it
 with a config, per-iteration logging, and the gate verdict.
 
-    uv run python experiments/0004_alphazero/run.py [variant] [key=value ...]
+Config is composed by **hydra** from ``conf/`` (config groups + an ``experiment``
+preset directory) and validated into the nested :class:`AlphaZeroConfig`
+(pydantic). hydra's cwd takeover is disabled (``conf/config.yaml``'s ``hydra``
+block) so ``start_run`` keeps owning the run dir + manifest.
+
+    uv run python experiments/0004_alphazero/run.py [+experiment=<name>] [key=value ...]
+    uv run python experiments/0004_alphazero/run.py -m +experiment=gnn,gnn_warm   # sweep
 """
 
-import sys
 from pathlib import Path
 from typing import Literal
 
+import hydra
 import jax
 import wandb
+from omegaconf import DictConfig, OmegaConf
+from pydantic import BaseModel, ConfigDict, Field
 from settlrl_learn import save_az_params
 from settlrl_learn.experiment import Config, Run, start_run
-from settlrl_learn.training import GNNBackend, MLPBackend, arena, learn
+from settlrl_learn.training import (
+    ArenaConfig,
+    EvalConfig,
+    GNNBackend,
+    LearnConfig,
+    MLPBackend,
+    OptimConfig,
+    ReplayConfig,
+    SearchSettings,
+    SelfPlayConfig,
+    TeacherConfig,
+    ValueBlendConfig,
+    arena,
+    learn,
+)
 
 
-class AlphaZeroConfig(Config):
-    seed: int = 0
-    # net
-    net: Literal["mlp", "gnn"] = "mlp"  # flat engineered MLP, or the board GNN
+class _Sub(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class NetConfig(_Sub):
+    """The architecture + setup-opener knobs (experiment-side, not the loop's)."""
+
+    kind: Literal["mlp", "gnn"] = "mlp"
     width: int = 64
     depth: int = 2  # trunk hidden layers (GNN: readout-head hidden layers)
     layers: int = 3  # GNN message-passing layers (ignored by mlp)
-    gnn_preset: str = "gn_global"  # settlrl_learn.nn.graphnet.PRESETS key
-    # search
-    num_simulations: int = 64
-    max_num_considered_actions: int = 16
-    temperature: float = 1.0
-    # warm-up: the first `teacher_iters` iterations draw data from a fixed strong
-    # heuristic search (GNN path only), the cold-start fix.
-    teacher: bool = False
-    teacher_iters: int = 0
-    teacher_sims: int = 32
-    # the setup phase is played by a fixed policy (GNN path); the net trains/acts
-    # only on the main loop. setup_depth<=1 = lookahead opener (default, as strong
-    # as deeper at 2p); >=2 = the probabilistic-expectimax search (>=3p / better
-    # value), `setup_temperature` its opponent suboptimality.
+    preset: str = "gn_global"  # settlrl_learn.nn.graphnet.PRESETS key
+    value_weight: float = 1.0  # mlp value-loss weight
+    # the setup phase is played by a fixed policy (GNN path). setup_depth<=1 =
+    # lookahead opener; >=2 = probabilistic-expectimax (>=3p / better value).
     setup_depth: int = 1
     setup_temperature: float = 2.0
     setup_beam: int = 4
-    # loop
+
+
+class WandbConfig(_Sub):
+    mode: Literal["online", "offline", "disabled"] = "online"
+    project: str = "settlrl-0004-alphazero"
+
+
+class AlphaZeroConfig(Config):
+    """The experiment schema: the loop's grouped config plus experiment-only
+    sections (net architecture, wandb, the gate)."""
+
+    seed: int = 0
     n_iterations: int = 20
-    selfplay_samples: int = 2048
-    selfplay_batch: int = 64
-    train_steps: int = 200
-    reuse: float = 0.0  # GNN: updates/iter = reuse*fresh/batch (0 -> fixed train_steps)
-    eval_frac: float = 0.1  # GNN: held-out fraction for the val_* metrics
-    # value-target blend (1-a)z + a*q (Canopy): a ramps 0 -> q_weight_max over
-    # q_weight_ramp iters; q = the searched root value. 0 -> pure outcome z.
-    q_weight_max: float = 0.0
-    q_weight_ramp: int = 10
-    # roll leaf = the exact 11-roll expectation (expected EV); else a single
-    # sampled roll. Mutually exclusive with chance_nodes (which resolves rolls in-tree).
-    expected_rolls: bool = True
-    # explicit chance nodes in the search (dice always; dev-card buys when
-    # dev_chance) — nature's move resolved in-tree, both in self-play and the arena.
-    chance_nodes: bool = False
-    dev_chance: bool = True
-    # action-ordering lock-out (canonical order over a turn's builds/buys/trades)
-    # to cut search-space transpositions; applied in self-play (env + search) and
-    # the arena agent.
-    ordered: bool = False
-    batch_size: int = 256
-    buffer_max: int = 50_000
-    buffer_min: int = 512
-    lr: float = 1e-3
-    weight_decay: float = 1e-4
-    value_weight: float = 1.0
-    # gate
-    arena_games: int = 80
-    arena_every: int = 5
-    arena_batch: int = 128  # GNN arena: many parallel lanes (fast) ...
-    arena_sims: int = 48  # ... at a modest sim budget (decoupled from training)
-    gate_winrate: float = 0.55  # pass iff the final net clears this vs lookahead
-    # logging / checkpointing
-    wandb_mode: Literal["online", "offline", "disabled"] = "online"
-    wandb_project: str = "settlrl-0004-alphazero"
-    checkpoint_every: int = 5  # iterations between full-state checkpoints
+    checkpoint_every: int = 5
     resume_from: str = ""  # prior run dir to continue bit-exactly (its runstate.eqx)
+    gate_winrate: float = 0.55  # pass iff the final net clears this vs lookahead
+    net: NetConfig = Field(default_factory=NetConfig)
+    wandb: WandbConfig = Field(default_factory=WandbConfig)
+    search: SearchSettings = Field(default_factory=SearchSettings)
+    selfplay: SelfPlayConfig = Field(default_factory=SelfPlayConfig)
+    optim: OptimConfig = Field(default_factory=OptimConfig)
+    replay: ReplayConfig = Field(default_factory=ReplayConfig)
+    teacher: TeacherConfig = Field(default_factory=TeacherConfig)
+    value_blend: ValueBlendConfig = Field(default_factory=ValueBlendConfig)
+    eval: EvalConfig = Field(default_factory=EvalConfig)
+    arena: ArenaConfig = Field(default_factory=ArenaConfig)
 
-
-VARIANTS: dict[str, dict[str, object]] = {
-    "default": {},
-    # The experiment-0003 GNN (gn_global) as the value+policy trunk, small budget.
-    "gnn": {
-        "net": "gnn",
-        "width": 64,
-        "layers": 3,
-        "n_iterations": 12,
-        "selfplay_samples": 1024,
-        "selfplay_batch": 64,
-        "reuse": 3.0,  # ~12 updates/iter, not 150 -> the value head can't memorize
-        "num_simulations": 32,
-        "arena_games": 40,
-        "arena_every": 3,
-    },
-    # A genuinely larger run: more iterations + deeper search (sharper policy
-    # targets) to test whether the loop bootstraps past 0 arena. Checkpointed
-    # every 2 iters (resume via resume_from=<run dir>).
-    "gnn_large": {
-        "net": "gnn",
-        "width": 64,
-        "layers": 3,
-        "n_iterations": 24,
-        "selfplay_samples": 1536,
-        "selfplay_batch": 96,
-        "num_simulations": 48,
-        "reuse": 2.5,
-        "arena_games": 48,
-        "arena_every": 4,
-        "checkpoint_every": 2,
-    },
-    # The real run: shallow-but-wide self-play. The search is the per-move
-    # *latency* (sequential sim expansions) and the batch is *throughput*
-    # (vmapped lanes), so we cut sims + considered actions and push the batch
-    # far up to saturate the GPU -- noisier per-position targets, but many more
-    # diverse games per iteration to average over.
-    "gnn_run": {
-        "net": "gnn",
-        "width": 96,
-        "layers": 4,
-        "n_iterations": 40,
-        "selfplay_samples": 4096,
-        "selfplay_batch": 256,
-        "num_simulations": 24,
-        "max_num_considered_actions": 8,
-        "reuse": 2.0,
-        "batch_size": 512,
-        "arena_games": 64,
-        "arena_every": 4,
-        "arena_batch": 256,
-        "arena_sims": 24,
-        "checkpoint_every": 2,
-    },
-    # Warm-started run: the first `teacher_iters` iterations learn from a fixed
-    # strong heuristic search (the cold-start fix), then self-play takes over.
-    "gnn_warm": {
-        "net": "gnn",
-        "width": 96,
-        "layers": 4,
-        "n_iterations": 30,
-        "teacher": True,
-        "teacher_iters": 8,
-        "teacher_sims": 32,
-        "selfplay_samples": 4096,
-        "selfplay_batch": 256,
-        "num_simulations": 32,
-        "max_num_considered_actions": 16,
-        "reuse": 2.0,
-        "batch_size": 512,
-        # Cheap arena (GNN search is costly), gated to fire first at the end of the
-        # 8-iter warm-up (i=7) -- the capacity probe -- then every 4 iters.
-        "arena_games": 40,
-        "arena_every": 4,
-        "arena_batch": 64,
-        "arena_sims": 24,
-        "checkpoint_every": 2,
-    },
-    # gnn_warm + Canopy value-target blend: train value on (1-a)z + a*q, a ramping
-    # to 0.5 over 12 iters once past the warm-up -- the audit's #1 lever for the
-    # dice-variance-starved value head (the search now exposes its root q).
-    "gnn_warm_qblend": {
-        "net": "gnn",
-        "width": 96,
-        "layers": 4,
-        "n_iterations": 30,
-        "teacher": True,
-        "teacher_iters": 8,
-        "teacher_sims": 32,
-        "selfplay_samples": 4096,
-        "selfplay_batch": 256,
-        "num_simulations": 32,
-        "max_num_considered_actions": 16,
-        "reuse": 2.0,
-        "batch_size": 512,
-        "q_weight_max": 0.5,
-        "q_weight_ramp": 12,
-        "arena_games": 40,
-        "arena_every": 4,
-        "arena_batch": 64,
-        "arena_sims": 24,
-        "checkpoint_every": 2,
-    },
-    # The full stack: warm-up + q-blend + explicit dice/dev chance nodes (search
-    # plans past rolls, both in self-play and the arena). The combined bet that
-    # the learned value finally converts what the stationary heuristic couldn't.
-    "gnn_warm_qblend_chance": {
-        "net": "gnn",
-        "width": 96,
-        "layers": 4,
-        "n_iterations": 30,
-        "teacher": True,
-        "teacher_iters": 8,
-        "teacher_sims": 32,
-        "selfplay_samples": 4096,
-        "selfplay_batch": 256,
-        "num_simulations": 32,
-        "max_num_considered_actions": 16,
-        "reuse": 2.0,
-        "batch_size": 512,
-        "q_weight_max": 0.5,
-        "q_weight_ramp": 12,
-        "chance_nodes": True,
-        "dev_chance": True,
-        "arena_games": 40,
-        "arena_every": 4,
-        "arena_batch": 64,
-        "arena_sims": 24,
-        "checkpoint_every": 2,
-    },
-    # ~10h overnight run: no chance nodes / no expected-EV leaf (single sampled
-    # roll), self-play batch at the measured throughput sweet spot (256), q-blend +
-    # lr from Canopy, larger replay + samples/iter to amortize the per-iter recompile.
-    # n_iterations is sized at launch from a quick calibration of the net-phase rate.
-    "gnn_overnight": {
-        "net": "gnn",
-        "width": 96,
-        "layers": 4,
-        "n_iterations": 240,
-        "teacher": True,
-        "teacher_iters": 8,
-        "teacher_sims": 32,
-        "selfplay_samples": 16384,
-        "selfplay_batch": 256,
-        "num_simulations": 64,
-        "max_num_considered_actions": 16,
-        "expected_rolls": False,  # no expected EV (single sampled roll)
-        "chance_nodes": False,  # no chance nodes
-        "reuse": 2.0,
-        "batch_size": 1024,
-        "buffer_max": 200_000,
-        "lr": 5e-4,
-        "q_weight_max": 0.85,  # Canopy q-blend
-        "q_weight_ramp": 60,  # Canopy ramp
-        "arena_games": 40,
-        "arena_every": 5,
-        "arena_batch": 128,
-        "arena_sims": 24,
-        "checkpoint_every": 10,
-    },
-    "gnn_smoke": {
-        "net": "gnn",
-        "width": 16,
-        "layers": 2,
-        "num_simulations": 4,
-        "max_num_considered_actions": 4,
-        "n_iterations": 2,
-        "teacher": True,
-        "teacher_iters": 1,
-        "teacher_sims": 4,
-        "setup_depth": 2,
-        "setup_beam": 4,
-        "selfplay_samples": 8,
-        "selfplay_batch": 4,
-        "train_steps": 2,
-        "batch_size": 4,
-        "q_weight_max": 0.5,  # exercise the value-blend path in the smoke
-        "q_weight_ramp": 1,
-        "chance_nodes": True,  # exercise the dice+dev chance-node path in the smoke
-        "ordered": True,  # exercise the action-ordering lock-out in the smoke
-        "arena_games": 4,
-        "arena_every": 1,
-        "wandb_mode": "disabled",
-    },
-    "smoke": {
-        "width": 16,
-        "depth": 1,
-        "num_simulations": 4,
-        "max_num_considered_actions": 4,
-        "n_iterations": 1,
-        "selfplay_samples": 8,
-        "selfplay_batch": 4,
-        "train_steps": 2,
-        "batch_size": 4,
-        "buffer_min": 4,
-        "arena_games": 4,
-        "arena_every": 1,
-        "wandb_mode": "disabled",
-        "checkpoint_every": 1,
-    },
-}
+    def to_learn_config(self) -> LearnConfig:
+        """Pack the loop groups into the net-agnostic ``LearnConfig``."""
+        return LearnConfig(
+            n_iterations=self.n_iterations, seed=self.seed,
+            checkpoint_every=self.checkpoint_every,
+            search=self.search, selfplay=self.selfplay, optim=self.optim,
+            replay=self.replay, teacher=self.teacher, value_blend=self.value_blend,
+            eval=self.eval, arena=self.arena,
+        )  # fmt: skip
 
 
 def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
@@ -295,19 +106,22 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     from settlrl_learn.nn.board_gnn import BoardGNN
     from settlrl_learn.nn.graphnet import PRESETS
 
-    base = PRESETS.get(cfg.gnn_preset, PRESETS["gn_global"])
-    netcfg = base._replace(width=cfg.width, layers=cfg.layers, head_depth=cfg.depth)
+    s = cfg.search
+    base = PRESETS.get(cfg.net.preset, PRESETS["gn_global"])
+    netcfg = base._replace(
+        width=cfg.net.width, layers=cfg.net.layers, head_depth=cfg.net.depth
+    )
     backend = GNNBackend(
-        netcfg, setup_depth=cfg.setup_depth,
-        setup_temperature=cfg.setup_temperature, setup_beam=cfg.setup_beam,
-        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance, ordered=cfg.ordered,
+        netcfg, setup_depth=cfg.net.setup_depth,
+        setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
+        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip
     resume = None
     if cfg.resume_from:
         prior = Path(cfg.resume_from) / "runstate.eqx"
         resume = prior if prior.exists() else None
     wb = wandb.init(
-        project=cfg.wandb_project, mode=cfg.wandb_mode, config=cfg.dump(),
+        project=cfg.wandb.project, mode=cfg.wandb.mode, config=cfg.dump(),
         reinit=True, dir=str(run.dir),
     )  # fmt: skip
     best = -1.0
@@ -338,36 +152,9 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     try:
         model = learn(
             backend,
-            n_iterations=cfg.n_iterations,
-            selfplay_samples=cfg.selfplay_samples,
-            selfplay_batch=cfg.selfplay_batch,
-            num_simulations=cfg.num_simulations,
-            max_num_considered_actions=cfg.max_num_considered_actions,
-            temperature=cfg.temperature,
-            teacher_value=heuristic_value if cfg.teacher else None,
-            teacher_iters=cfg.teacher_iters,
-            teacher_sims=cfg.teacher_sims,
-            buffer_max=cfg.buffer_max,
-            buffer_min=cfg.batch_size,
-            batch_size=cfg.batch_size,
-            train_steps=cfg.train_steps,
-            reuse=cfg.reuse,
-            eval_frac=cfg.eval_frac,
-            value_blend_max=cfg.q_weight_max,
-            value_blend_ramp=cfg.q_weight_ramp,
-            expected_rolls=cfg.expected_rolls,
-            chance_nodes=cfg.chance_nodes,
-            dev_chance=cfg.dev_chance,
-            ordered=cfg.ordered,
-            lr=cfg.lr,
-            weight_decay=cfg.weight_decay,
-            arena_games=cfg.arena_games,
-            arena_every=cfg.arena_every,
-            arena_batch=cfg.arena_batch,
-            arena_sims=cfg.arena_sims,
-            seed=cfg.seed,
+            cfg.to_learn_config(),
+            teacher_value=heuristic_value if cfg.teacher.enabled else None,
             checkpoint_dir=run.dir,
-            checkpoint_every=cfg.checkpoint_every,
             resume_from=resume,
             on_iter=on_iter,
             progress=True,
@@ -376,9 +163,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         wb.finish()
 
     winrate = arena(
-        backend, model, n_games=cfg.arena_games, num_simulations=cfg.arena_sims,
-        batch_size=cfg.arena_batch,
-        max_num_considered_actions=cfg.max_num_considered_actions,
+        backend, model, n_games=cfg.arena.games, num_simulations=cfg.arena.sims,
+        batch_size=cfg.arena.batch, max_num_considered_actions=cfg.arena.considered,
         seed=cfg.seed + 99,
     )  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
@@ -388,12 +174,13 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
 
 def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
-    if cfg.net == "gnn":
+    if cfg.net.kind == "gnn":
         run_gnn_experiment(run, cfg)
         return
+    s = cfg.search
     backend = MLPBackend(
-        (cfg.width,) * cfg.depth, value_weight=cfg.value_weight,
-        chance_nodes=cfg.chance_nodes, dev_chance=cfg.dev_chance, ordered=cfg.ordered,
+        (cfg.net.width,) * cfg.net.depth, value_weight=cfg.net.value_weight,
+        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip
 
     # Resume: restore the prior run's RunState and continue its wandb run so the
@@ -408,8 +195,8 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         wandb_id = id_file.read_text().strip() if id_file.exists() else None
 
     wb = wandb.init(
-        project=cfg.wandb_project,
-        mode=cfg.wandb_mode,
+        project=cfg.wandb.project,
+        mode=cfg.wandb.mode,
         config=cfg.dump(),
         reinit=True,
         dir=str(run.dir),
@@ -434,29 +221,8 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         # bit-exact resume; resume_from continues a prior run's checkpoint.
         final = learn(
             backend,
-            n_iterations=cfg.n_iterations,
-            selfplay_samples=cfg.selfplay_samples,
-            selfplay_batch=cfg.selfplay_batch,
-            num_simulations=cfg.num_simulations,
-            max_num_considered_actions=cfg.max_num_considered_actions,
-            temperature=cfg.temperature,
-            buffer_max=cfg.buffer_max,
-            buffer_min=cfg.buffer_min,
-            batch_size=cfg.batch_size,
-            train_steps=cfg.train_steps,
-            value_blend_max=cfg.q_weight_max,
-            value_blend_ramp=cfg.q_weight_ramp,
-            expected_rolls=cfg.expected_rolls,
-            chance_nodes=cfg.chance_nodes,
-            dev_chance=cfg.dev_chance,
-            ordered=cfg.ordered,
-            lr=cfg.lr,
-            weight_decay=cfg.weight_decay,
-            arena_games=cfg.arena_games,
-            arena_every=cfg.arena_every,
-            seed=cfg.seed,
+            cfg.to_learn_config(),
             checkpoint_dir=run.dir,
-            checkpoint_every=cfg.checkpoint_every,
             resume_from=resume_from,
             on_iter=on_iter,
             progress=True,
@@ -466,24 +232,28 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
     save_az_params(run.dir / "params.npz", final)  # final net
     winrate = arena(
-        backend,
-        final,
-        n_games=cfg.arena_games,
-        num_simulations=cfg.num_simulations,
-        max_num_considered_actions=cfg.max_num_considered_actions,
+        backend, final, n_games=cfg.arena.games, num_simulations=cfg.arena.sims,
+        batch_size=cfg.arena.batch, max_num_considered_actions=cfg.arena.considered,
         seed=cfg.seed + 99,
-    )
+    )  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
     run.finish(
         verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
     )
 
 
-def main() -> None:
-    variant = sys.argv[1] if len(sys.argv) > 1 else "default"
-    if variant not in VARIANTS:
-        raise SystemExit(f"usage: run.py [{'|'.join(VARIANTS)}] [key=value ...]")
-    cfg = AlphaZeroConfig.resolve(VARIANTS[variant], overrides=sys.argv[2:])
+def compose_config(overrides: list[str]) -> AlphaZeroConfig:
+    """Hydra-compose ``conf/`` and validate into :class:`AlphaZeroConfig` -- the
+    programmatic seam (smoke tests) that ``@hydra.main`` can't serve."""
+    conf_dir = str(Path(__file__).parent / "conf")
+    with hydra.initialize_config_dir(version_base=None, config_dir=conf_dir):
+        dcfg = hydra.compose(config_name="config", overrides=overrides)
+    return AlphaZeroConfig.model_validate(OmegaConf.to_container(dcfg, resolve=True))
+
+
+@hydra.main(version_base=None, config_path="conf", config_name="config")
+def main(dcfg: DictConfig) -> None:
+    cfg = AlphaZeroConfig.model_validate(OmegaConf.to_container(dcfg, resolve=True))
     run_experiment(start_run(Path(__file__).parent, cfg.dump()), cfg)
 
 

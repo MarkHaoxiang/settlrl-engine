@@ -50,7 +50,7 @@ def test_0003_neural_board_architectures_smoke(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_0004_alphazero_smoke(tmp_path: Path) -> None:
     run = load_run("0004_alphazero")
-    cfg = run.AlphaZeroConfig.resolve(run.VARIANTS["smoke"])
+    cfg = run.compose_config(["+experiment=smoke"])
     run.run_experiment(Run(tmp_path), cfg)
     _verdict(tmp_path)
 
@@ -58,6 +58,6 @@ def test_0004_alphazero_smoke(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_0004_alphazero_gnn_smoke(tmp_path: Path) -> None:
     run = load_run("0004_alphazero")
-    cfg = run.AlphaZeroConfig.resolve(run.VARIANTS["gnn_smoke"])
+    cfg = run.compose_config(["+experiment=gnn_smoke"])
     run.run_experiment(Run(tmp_path), cfg)
     _verdict(tmp_path)

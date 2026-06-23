@@ -6,11 +6,13 @@ class of related experiments sharing machinery — committed; everything a run
 
 ## Contract
 
-- `NNNN_slug/` — one framework. `run.py` exposes its named variants
-  (`run.py [variant]`); helpers specific to the framework live beside it in
-  the same directory. A framework accumulates configs and runs over time —
-  the *conclusions* in its report are what stays immutable, and `runs/`
-  collects many logs per framework.
+- `NNNN_slug/` — one framework. `run.py` exposes its named configs — either as
+  `VARIANTS` deltas (`run.py [variant]`) or, for hydra-based frameworks, as
+  `conf/` config groups + an `experiment/` preset dir (`run.py +experiment=<name>`,
+  the 0004 pilot); helpers specific to the framework live beside it in the same
+  directory. A framework accumulates configs and runs over time — the
+  *conclusions* in its report are what stays immutable, and `runs/` collects many
+  logs per framework.
 - Each run is deterministic given its config (seeds included); it writes only
   under its run directory, which `start_run` creates with a manifest
   (git commit + uncommitted-diff digest, the merged config, environment).
@@ -34,12 +36,14 @@ under `experiments/` — these directories hold only per-framework scripts and
 `new.py`.
 
 ```
-uv run python experiments/new.py "<title>"                    # scaffold a framework
-uv run python experiments/NNNN_slug/run.py [variant] [k=v...]  # run a config of it
+uv run python experiments/new.py "<title>"                       # scaffold a framework
+uv run python experiments/NNNN_slug/run.py [variant] [k=v...]     # resolve-based framework
+uv run python experiments/0004_alphazero/run.py +experiment=<name> [k=v...]  # hydra-based
 ```
 
 `0001_bench_smoke` is the minimal worked example;
-`0002_linear_value_fitting` a multi-variant framework.
+`0002_linear_value_fitting` a multi-variant framework; `0004_alphazero` composes
+its config with hydra (`conf/` groups + `experiment/` presets; `-m` for sweeps).
 
 ## Checks
 

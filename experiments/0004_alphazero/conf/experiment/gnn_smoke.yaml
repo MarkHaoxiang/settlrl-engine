@@ -1,0 +1,33 @@
+# @package _global_
+# Trivial-budget GNN smoke exercising warm-up, q-blend, chance nodes, ordering.
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /value_blend: canopy
+net:
+  width: 16
+  layers: 2
+  setup_depth: 2
+  setup_beam: 4
+n_iterations: 2
+teacher:
+  iters: 1
+  sims: 4
+search:
+  num_simulations: 4
+  max_considered: 4
+  chance_nodes: true   # exercise the dice+dev chance-node path
+  ordered: true        # exercise the action-ordering lock-out
+selfplay:
+  samples: 8
+  batch: 4
+optim:
+  train_steps: 2
+  batch_size: 4
+value_blend:
+  ramp: 1
+arena:
+  games: 4
+  every: 1
+wandb:
+  mode: disabled

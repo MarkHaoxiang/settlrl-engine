@@ -1,0 +1,109 @@
+"""Typed, grouped configuration for the training loop.
+
+The flat ``learn()`` keyword surface grouped into independently-constructible,
+independently-validatable pydantic units (``extra="forbid"`` -- a typo'd knob
+fails loudly). :class:`LearnConfig` is the whole loop contract; ``learn`` takes
+one. :class:`SearchSettings` subclasses settlrl-search's ``SearchConfig`` to add
+training defaults while inheriting its exclusive-rolls validator.
+
+A training-side module: not imported by the package root.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field
+from settlrl_search.ismcts import SearchConfig
+
+
+class _Group(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SearchSettings(SearchConfig):
+    """settlrl-search's ``SearchConfig`` with training defaults. ``value_scale``
+    is the *net* leaf's logit scale (``tanh(logit/2) = 2P-1``); the heuristic
+    teacher search keeps the factory default (its own calibration)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    num_simulations: int = 64
+    max_depth: int = 12
+    max_considered: int = 16
+    value_scale: float = 2.0
+    expected_rolls: bool = True
+    chance_nodes: bool = False
+    dev_chance: bool = True
+    ordered: bool = False
+
+
+class SelfPlayConfig(_Group):
+    samples: int = 2048
+    batch: int = 64
+    temperature: float = 1.0
+    max_steps: int = 100_000
+    max_game_len: int = 800
+
+
+class OptimConfig(_Group):
+    lr: float = 1e-3
+    weight_decay: float = 1e-4
+    batch_size: int = 256
+    train_steps: int = 200
+    reuse: float = 0.0
+    """> 0 caps updates/iter at ``reuse * fresh / batch_size`` (the AZ sample-reuse
+    factor) instead of a fixed ``train_steps``."""
+
+
+class ReplayConfig(_Group):
+    buffer_max: int = 50_000
+    buffer_min: int = 256
+
+
+class TeacherConfig(_Group):
+    """Warm-start: the first ``iters`` iterations draw moves + policy targets from
+    a fixed strong search (``sims`` simulations) over the code-supplied teacher
+    value. ``enabled`` is the experiment-layer switch for passing that value."""
+
+    enabled: bool = False
+    iters: int = 0
+    sims: int = 32
+
+
+class ValueBlendConfig(_Group):
+    """Canopy ``(1-a)z + a*q``: ``a`` ramps 0 -> ``max`` over ``ramp`` iters."""
+
+    max: float = 0.0
+    ramp: int = 10
+
+
+class EvalConfig(_Group):
+    eval_frac: float = 0.0
+    """Held-out fraction of each iteration's fresh positions (never trained)."""
+
+
+class ArenaConfig(_Group):
+    """Periodic strength check. The chance/ordering *semantics* come from the
+    backend (it carries them for the play agent); only the *budget* lives here."""
+
+    games: int = 0
+    every: int = 1
+    batch: int = 16
+    sims: int = 48
+    considered: int = 16
+    opponents: list[str] = Field(default_factory=lambda: ["lookahead", "random"])
+
+
+class LearnConfig(_Group):
+    """The complete net-agnostic ``learn`` configuration (one nested object)."""
+
+    n_iterations: int
+    seed: int = 0
+    checkpoint_every: int = 1
+    search: SearchSettings = Field(default_factory=SearchSettings)
+    selfplay: SelfPlayConfig = Field(default_factory=SelfPlayConfig)
+    optim: OptimConfig = Field(default_factory=OptimConfig)
+    replay: ReplayConfig = Field(default_factory=ReplayConfig)
+    teacher: TeacherConfig = Field(default_factory=TeacherConfig)
+    value_blend: ValueBlendConfig = Field(default_factory=ValueBlendConfig)
+    eval: EvalConfig = Field(default_factory=EvalConfig)
+    arena: ArenaConfig = Field(default_factory=ArenaConfig)

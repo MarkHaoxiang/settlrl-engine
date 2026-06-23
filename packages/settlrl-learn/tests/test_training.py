@@ -21,11 +21,24 @@ from settlrl_engine.board import Board, make_board
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.env import N_FLAT
 from settlrl_learn.nn.graphnet import PRESETS
-from settlrl_learn.training import GNNBackend, MLPBackend, RunState
+from settlrl_learn.training import (
+    GNNBackend,
+    LearnConfig,
+    MLPBackend,
+    OptimConfig,
+    ReplayConfig,
+    RunState,
+    SearchSettings,
+    SelfPlayConfig,
+    ValueBlendConfig,
+    prepare_targets,
+    train_epochs,
+)
 from settlrl_learn.training.backend import Backend, load_run_state, save_run_state
+from settlrl_learn.training.config import ArenaConfig, EvalConfig
 from settlrl_learn.training.gnn_backend import _SETUP_ROWS
 from settlrl_learn.training.loop import learn
-from settlrl_learn.training.selfplay import self_play
+from settlrl_learn.training.selfplay import Samples, self_play
 
 
 def _shapes(tree: object) -> str:
@@ -182,36 +195,45 @@ def _assert_nets_bit_exact(a: Any, b: Any) -> None:
         assert np.array_equal(x, y)
 
 
-def _learn_kwargs() -> dict[str, Any]:
-    """Tiny, arena-free budgets -- the resume property holds regardless of arena,
-    so we skip it (arena_games=0) to keep the run seconds-fast."""
-    return {
-        "selfplay_samples": 8, "selfplay_batch": 4, "num_simulations": 2,
-        "max_num_considered_actions": 4, "buffer_min": 4, "batch_size": 4,
-        "train_steps": 3, "arena_games": 0, "seed": 7,
-    }  # fmt: skip
+def _learn_cfg(
+    n_iterations: int,
+    *,
+    seed: int = 7,
+    train_steps: int = 3,
+    value_blend: ValueBlendConfig | None = None,
+) -> LearnConfig:
+    """Tiny, arena-free LearnConfig -- the resume property holds regardless of
+    arena, so we skip it (games=0) to keep the run seconds-fast."""
+    return LearnConfig(
+        n_iterations=n_iterations, seed=seed,
+        search=SearchSettings(num_simulations=2, max_considered=4),
+        selfplay=SelfPlayConfig(samples=8, batch=4),
+        optim=OptimConfig(batch_size=4, train_steps=train_steps),
+        replay=ReplayConfig(buffer_min=4),
+        eval=EvalConfig(),
+        arena=ArenaConfig(games=0),
+        value_blend=value_blend or ValueBlendConfig(),
+    )  # fmt: skip
 
 
 def test_learn_resume_bit_exact_mlp(tmp_path: Path) -> None:
     # Headline durability: a straight 3-iteration run must equal a 1-iter
     # checkpoint + resume to 3, leaf-for-leaf. Resume RNG is seed+iter, so the
     # split run must reproduce the contiguous one bit-for-bit.
-    kw = _learn_kwargs()
-    straight = learn(MLPBackend((16,)), n_iterations=3, **kw)
-    learn(MLPBackend((16,)), n_iterations=1, checkpoint_dir=tmp_path, **kw)
+    straight = learn(MLPBackend((16,)), _learn_cfg(3))
+    learn(MLPBackend((16,)), _learn_cfg(1), checkpoint_dir=tmp_path)
     resumed = learn(
-        MLPBackend((16,)), n_iterations=3, resume_from=tmp_path / "runstate.eqx", **kw
+        MLPBackend((16,)), _learn_cfg(3), resume_from=tmp_path / "runstate.eqx"
     )
     _assert_nets_bit_exact(straight, resumed)
 
 
 def test_learn_resume_bit_exact_gnn(tmp_path: Path) -> None:
     cfg = PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
-    kw = _learn_kwargs()
-    straight = learn(GNNBackend(cfg), n_iterations=3, **kw)
-    learn(GNNBackend(cfg), n_iterations=1, checkpoint_dir=tmp_path, **kw)
+    straight = learn(GNNBackend(cfg), _learn_cfg(3))
+    learn(GNNBackend(cfg), _learn_cfg(1), checkpoint_dir=tmp_path)
     resumed = learn(
-        GNNBackend(cfg), n_iterations=3, resume_from=tmp_path / "runstate.eqx", **kw
+        GNNBackend(cfg), _learn_cfg(3), resume_from=tmp_path / "runstate.eqx"
     )
     _assert_nets_bit_exact(straight, resumed)
 
@@ -267,7 +289,9 @@ def test_self_play_excludes_setup_gnn() -> None:
     # position leaks into training data. The observation carries no phase field,
     # so we assert it via the mask: a recorded position is in the main loop iff a
     # non-setup action is legal there. Every recorded mask must satisfy that.
-    backend = GNNBackend(PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1))
+    backend = GNNBackend(
+        PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
+    )
     setup_search = jax.jit(jax.vmap(backend.setup_policy(), in_axes=(0, 0, 0, 0, 0)))
     samples = self_play(
         n_samples=8, batch_size=4, seed=4, temperature=0.0,
@@ -303,11 +327,11 @@ def test_value_blend_alpha_ramp() -> None:
 
     learn(
         MLPBackend((16,)),
-        n_iterations=4, selfplay_samples=8, selfplay_batch=4, num_simulations=2,
-        max_num_considered_actions=4, buffer_min=4, batch_size=4, train_steps=2,
-        arena_games=0, seed=11,
-        value_blend_max=0.5, value_blend_ramp=4, on_iter=on_iter,
-    )  # fmt: skip
+        _learn_cfg(
+            4, seed=11, train_steps=2, value_blend=ValueBlendConfig(max=0.5, ramp=4)
+        ),
+        on_iter=on_iter,
+    )
     # alpha[i] = value_blend_max * min(1, i / max(ramp, 1)); ramp=4, max=0.5.
     schedule = {0: 0.0, 1: 0.5 * (1 / 4), 2: 0.5 * (2 / 4), 3: 0.5 * (3 / 4)}
     assert alphas, "no iteration produced samples"
@@ -315,34 +339,86 @@ def test_value_blend_alpha_ramp() -> None:
     assert alphas[0] == 0.0  # iteration 0 is always a pure-z no-op
 
 
-def test_value_blend_formula_matches_loop() -> None:
-    # The blended training label the loop computes (loop.py:185-186) is
-    # (1-a)*z + a*((q+1)/2). We reproduce the loop's exact step against a real
-    # self-play batch (real z and q, not a fixture) and assert: (a) the blended
-    # value stays in the valid [0,1] win-probability range for a >= 0, and
-    # (b) alpha=0 leaves z untouched while alpha>0 strictly moves any sample
-    # whose q-prob differs from z. This pins the formula's two endpoints to
-    # genuine searcher output.
+def test_prepare_targets_blend_and_holdout() -> None:
+    # Direct test of the extracted step (no full learn run): the loop is just an
+    # orchestrator of `prepare_targets`, so the value-blend formula and the
+    # held-out split are pinned here against the real function.
+    rng = np.random.default_rng(0)
+    n = 20
+    fresh: Samples = {
+        "value": (rng.random(n) < 0.5).astype(np.float32),  # z in {0, 1}
+        "q": np.full(n, 0.3, np.float32),  # searcher frame -> q_prob 0.65
+        "policy": rng.random((n, 5)).astype(np.float32),
+        "mask": np.ones((n, 5), np.float32),
+    }
+
+    # blend off, no eval: the train slice is `fresh` untouched, alpha 0, ev None.
+    fr, ev, alpha = prepare_targets(
+        fresh, None, eval_frac=0.0, blend=False,
+        blend_max=0.0, blend_ramp=1, iteration=3, perm_seed=0,
+    )  # fmt: skip
+    assert alpha == 0.0 and ev is None
+    assert np.array_equal(fr["value"], fresh["value"])
+
+    # blend on at the ramp midpoint: alpha = 0.5 * min(1, 2/4) = 0.25; 20% held out.
+    fr, ev, alpha = prepare_targets(
+        fresh, None, eval_frac=0.2, blend=True,
+        blend_max=0.5, blend_ramp=4, iteration=2, perm_seed=1,
+    )  # fmt: skip
+    assert abs(alpha - 0.25) < 1e-12
+    assert ev is not None and ev["value"].shape[0] == 4 and fr["value"].shape[0] == 16
+    # the held-out eval slice keeps raw outcomes; the train slice is the affine
+    # mix (1-a)z + a*0.65, i.e. one of two values, all valid P(win) in [0, 1].
+    assert set(np.unique(ev["value"])).issubset({0.0, 1.0})
+    lo, hi = 0.25 * 0.65, 0.75 + 0.25 * 0.65  # blend of z=0 and z=1
+    assert np.all(np.isclose(fr["value"], lo) | np.isclose(fr["value"], hi))
+    assert np.all(fr["value"] >= 0.0) and np.all(fr["value"] <= 1.0)
+
+
+def test_prepare_targets_holdout_is_reproducible() -> None:
+    # The split is a pure function of `perm_seed`: same seed -> same partition.
+    fresh: Samples = {
+        "value": np.arange(20, dtype=np.float32),
+        "policy": np.zeros((20, 1), np.float32),
+    }
+    a, _, _ = prepare_targets(
+        fresh, None, eval_frac=0.25, blend=False,
+        blend_max=0.0, blend_ramp=1, iteration=0, perm_seed=5,
+    )  # fmt: skip
+    b, _, _ = prepare_targets(
+        fresh, None, eval_frac=0.25, blend=False,
+        blend_max=0.0, blend_ramp=1, iteration=0, perm_seed=5,
+    )  # fmt: skip
+    assert np.array_equal(a["value"], b["value"])
+
+
+def test_train_epochs_is_deterministic_in_key() -> None:
+    # The inner update loop is a pure function of (net, opt_state, key): the same
+    # key replays the same minibatch draws and yields a bit-identical net -- the
+    # property bit-exact resume rests on, isolated from the rest of the loop.
+    import flashbax as fbx
+    import optax
+
     backend = MLPBackend((16,))
     samples = self_play(
-        n_samples=12, batch_size=4, seed=13, temperature=0.0, record_value=True,
-        **_jitted(_uniform_weights_value, backend),
+        n_samples=16, batch_size=4, seed=0, **_jitted(_uniform_legal_dist, backend)
+    )
+    optimizer = optax.adamw(1e-3)
+    net = backend.init(jax.random.key(0))
+    # a finished game flushes all its positions at once, so the batch can be large.
+    buffer = fbx.make_item_buffer(
+        max_length=max(64, samples["value"].shape[0]),
+        min_length=4, sample_batch_size=4, add_batches=True,
     )  # fmt: skip
-    z = samples["value"].astype(np.float64)
-    q = samples["q"].astype(np.float64)
-    assert np.all((z == 0.0) | (z == 1.0))
-    # the stand-in returns a constant q=0.3 (searcher frame) -> q_prob=0.65.
-    q_prob = (q + 1.0) / 2.0
-    assert np.allclose(q_prob, 0.65)
-
-    def blend(alpha: float) -> np.ndarray:
-        return (1.0 - alpha) * z + alpha * q_prob  # loop.py:185-186
-
-    assert np.array_equal(blend(0.0), z)  # alpha 0 is a pure-z no-op
-    b = blend(0.5)
-    assert np.all(b >= 0.0) and np.all(b <= 1.0)  # valid P(win)
-    # alpha>0 pulls every label toward q_prob; since q_prob (0.65) differs from
-    # both 0 and 1, no blended label equals its raw outcome.
-    assert np.all(b != z)
-    # blend is the affine interpolation: halfway between z and q_prob at a=0.5.
-    assert np.allclose(b, 0.5 * z + 0.5 * q_prob)
+    buf = buffer.add(buffer.init(backend.empty_item()), backend.to_item(samples))
+    step = backend.make_step(optimizer)
+    key = jax.random.key(123)
+    n1, _, m1 = train_epochs(
+        net, backend.init_opt(optimizer, net), buffer, buf, step, 3, key
+    )
+    n2, _, m2 = train_epochs(
+        net, backend.init_opt(optimizer, net), buffer, buf, step, 3, key
+    )
+    _assert_nets_bit_exact(n1, n2)
+    assert m1.keys() == m2.keys()
+    assert all(abs(m1[k] - m2[k]) < 1e-9 for k in m1)

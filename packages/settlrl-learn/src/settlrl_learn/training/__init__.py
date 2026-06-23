@@ -13,6 +13,17 @@ from settlrl_learn.training.backend import (
     load_run_state,
     save_run_state,
 )
+from settlrl_learn.training.config import (
+    ArenaConfig,
+    EvalConfig,
+    LearnConfig,
+    OptimConfig,
+    ReplayConfig,
+    SearchSettings,
+    SelfPlayConfig,
+    TeacherConfig,
+    ValueBlendConfig,
+)
 from settlrl_learn.training.gnn_backend import (
     GNNBackend,
     gnn_loss,
@@ -21,18 +32,37 @@ from settlrl_learn.training.gnn_backend import (
 )
 from settlrl_learn.training.loop import learn
 from settlrl_learn.training.mlp_backend import MLPBackend, mlp_loss
+from settlrl_learn.training.steps import (
+    evaluate,
+    prepare_targets,
+    run_arena,
+    train_epochs,
+)
 
 __all__ = [
+    "ArenaConfig",
     "Backend",
+    "EvalConfig",
     "GNNBackend",
+    "LearnConfig",
     "MLPBackend",
+    "OptimConfig",
+    "ReplayConfig",
     "RunState",
+    "SearchSettings",
+    "SelfPlayConfig",
+    "TeacherConfig",
+    "ValueBlendConfig",
     "arena",
+    "evaluate",
     "gnn_loss",
     "learn",
     "load_run_state",
     "make_net_agent",
     "mlp_loss",
+    "prepare_targets",
+    "run_arena",
     "save_run_state",
     "setup_policy",
+    "train_epochs",
 ]

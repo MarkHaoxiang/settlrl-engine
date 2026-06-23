@@ -1,0 +1,24 @@
+# @package _global_
+# Shallow-but-wide self-play: cut sims + considered, push the batch up to
+# saturate the GPU -- noisier targets, many more diverse games per iteration.
+defaults:
+  - override /net: gnn
+net:
+  width: 96
+  layers: 4
+n_iterations: 40
+checkpoint_every: 2
+selfplay:
+  samples: 4096
+  batch: 256
+search:
+  num_simulations: 24
+  max_considered: 8
+optim:
+  batch_size: 512
+  reuse: 2.0
+arena:
+  games: 64
+  every: 4
+  batch: 256
+  sims: 24

@@ -64,6 +64,19 @@ deps only because this subpackage uses them.
   package root): one net-agnostic self-play → replay → train → arena loop behind
   a `Backend` seam, so the flat-MLP and board-GNN paths share it. Experiment
   0004 composes it (`net=mlp|gnn`).
+  - `training/config.py` — the grouped, validated knob surface (`LearnConfig`
+    and its sub-configs: `SelfPlayConfig` / `OptimConfig` / `ReplayConfig` /
+    `TeacherConfig` / `ValueBlendConfig` / `EvalConfig` / `ArenaConfig`, plus
+    `SearchSettings` — a subclass of settlrl-search's pydantic `SearchConfig`
+    that adds training defaults). `learn` takes one `LearnConfig`; each group is
+    `extra="forbid"` so a typo'd knob fails loudly. `SearchSettings.value_scale`
+    is the *net* leaf's logit scale (2); the heuristic teacher search keeps the
+    factory default (its own calibration).
+  - `training/steps.py` — the per-iteration body as pure, separately-testable
+    units (`prepare_targets` = held-out split + value-blend; `train_epochs` =
+    the inner minibatch loop; `evaluate`; `run_arena`). The loop derives every
+    RNG key from `seed` + iteration index and threads it in, so the steps stay
+    pure and bit-exact resume is preserved.
   - `training/backend.py` — the `Backend` protocol (the net-specific surface:
     `init` / `seams` / `play_agent` / `setup_policy` / `observe` / `to_item` /
     `empty_item` / `init_opt` / `make_step` / `eval_metrics`) and `RunState`
@@ -78,23 +91,26 @@ deps only because this subpackage uses them.
     `setup_fn` (when given) plays the setup phase with a fixed policy and those
     positions are *not* recorded (the GNN path; the MLP path passes `None` and
     the net plays setup too).
-  - `training/loop.py::learn` — the loop: per-iteration RNG is a pure function of
-    `seed` and the iteration index, so `resume_from` (a `runstate.eqx`) continues
-    bit-identically (tested in `tests/`-adjacent resume checks for both
-    backends). `reuse` caps updates/iter at the AZ sample-reuse factor (the
-    value-overfit fix); a held-out `eval_frac` feeds the backend's `eval_metrics`
-    (the `val_*` generalization metrics); `teacher_value`/`teacher_iters`
-    warm-start from a fixed strong search (the cold-start fix). `value_blend_max`
-    > 0 trains value on Canopy's `(1−α)z + α·q` (game outcome blended with the
-    searched root `q` from `make_search_weights_value`, α ramped 0→max over
-    `value_blend_ramp` iters) — the dice-variance fix; only the training slice is
-    blended, the eval slice keeps raw `z` (see the Canopy reference below).
-    `chance_nodes`/`dev_chance` thread the search's explicit chance-node mode
-    through both self-play and the arena (the backends carry it for `play_agent`),
-    so the search plans past rolls at train and play time. `ordered` turns on the
+  - `training/loop.py::learn(backend, cfg: LearnConfig, *, teacher_value=…,
+    checkpoint_dir=…, resume_from=…, …)` — the orchestrator over the `steps`
+    units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration
+    index, so `resume_from` (a `runstate.eqx`) continues bit-identically (tested
+    in `tests/` resume checks for both backends). `cfg.optim.reuse` caps
+    updates/iter at the AZ sample-reuse factor (the value-overfit fix); a held-out
+    `cfg.eval.eval_frac` feeds the backend's `eval_metrics` (the `val_*`
+    generalization metrics); `teacher_value` (with `cfg.teacher.iters` > 0)
+    warm-starts from a fixed strong search at `cfg.teacher.sims` (the cold-start
+    fix). `cfg.value_blend.max` > 0 trains value on Canopy's `(1−α)z + α·q`
+    (game outcome blended with the searched root `q` from
+    `make_search_weights_value`, α ramped 0→max over `cfg.value_blend.ramp`
+    iters) — the dice-variance fix; only the training slice is blended, the eval
+    slice keeps raw `z` (see the Canopy reference below). `cfg.search.chance_nodes`
+    /`dev_chance` thread the search's explicit chance-node mode through self-play
+    (the backends carry the same flags for the arena `play_agent`), so the search
+    plans past rolls at train and play time. `cfg.search.ordered` turns on the
     action-ordering lock-out (`settlrl_engine.ordering`): self-play's env runs
-    `track_ordering` (constrains the real move set across a turn) and the search
-    threads the lock-out deeper; the backends carry it for the arena agent too.
+    `track_ordering` and the search threads the lock-out deeper; the backends
+    carry it for the arena agent too.
   - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
     seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
     lower-bound sanity check); the play agent comes from `backend.play_agent`.

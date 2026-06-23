@@ -1,0 +1,18 @@
+# @package _global_
+# The exp-0003 GNN (gn_global) as the value+policy trunk, small budget.
+defaults:
+  - override /net: gnn
+net:
+  width: 64
+  layers: 3
+n_iterations: 12
+selfplay:
+  samples: 1024
+  batch: 64
+search:
+  num_simulations: 32
+optim:
+  reuse: 3.0   # ~12 updates/iter, not 150 -> the value head can't memorize
+arena:
+  games: 40
+  every: 3
