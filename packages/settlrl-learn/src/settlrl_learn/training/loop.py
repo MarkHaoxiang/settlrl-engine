@@ -199,8 +199,23 @@ def learn(
         nf = fresh["value"].shape[0]
         if nf == 0:  # degenerate net dragged every game past the budget; skip
             if on_iter is not None:
-                on_iter(i, {"samples": 0.0, "teaching": float(teaching)}, net)
+                on_iter(i, {"samples": 0.0}, net)
             continue
+
+        # Periodic generalization check: score val_* on this iter's fresh batch
+        # under the *pre-train* net -- the net generated these positions but has
+        # not trained on them yet, so it is a valid held-out-in-time signal; the
+        # batch then trains as normal (no data wasted). Gated past the warm-up.
+        eval_d: dict[str, float] = {}
+        if (
+            cfg.eval.every
+            and (i + 1) % cfg.eval.every == 0
+            and (i + 1) >= cfg.teacher.iters
+        ):
+            te = time.perf_counter()
+            sl = {k: v[: cfg.eval.samples] for k, v in fresh.items()}
+            eval_d = evaluate(backend, net, sl)
+            eval_d["t_eval"] = time.perf_counter() - te
 
         fr, alpha = prepare_targets(
             fresh, blend=blend,
@@ -224,8 +239,7 @@ def learn(
         metrics: dict[str, float] = {
             "samples": float(nf), "train_steps": float(steps),
             "lr": cfg.optim.lr, "target_entropy": target_entropy,
-            "value_blend_alpha": alpha,
-            "t_selfplay": t_selfplay, "teaching": float(teaching),
+            "value_blend_alpha": alpha, "t_selfplay": t_selfplay,
         }  # fmt: skip
 
         t1 = time.perf_counter()
@@ -236,23 +250,7 @@ def learn(
             )  # fmt: skip
             metrics.update(tm)
         metrics["t_train"] = time.perf_counter() - t1
-
-        # Periodic generalization check: a *fresh* never-trained batch (its own
-        # games, so no intra-game leak) under the post-train net, scored for the
-        # val_* metrics. Training keeps 100% of its data. Gated past the warm-up.
-        if (
-            cfg.eval.every
-            and (i + 1) % cfg.eval.every == 0
-            and (i + 1) >= cfg.teacher.iters
-        ):
-            te = time.perf_counter()
-            eval_search = functools.partial(
-                net_search, eqx.partition(net, eqx.is_array)[0]
-            )
-            eval_fresh = _play(eval_search, cfg.eval.samples, cfg.seed + 70_000 + i)
-            if eval_fresh["value"].shape[0] > 0:
-                metrics.update(evaluate(backend, net, eval_fresh))
-            metrics["t_eval"] = time.perf_counter() - te
+        metrics.update(eval_d)  # val_* from the pre-train eval above (eval iters)
 
         # Arena only once the net is past the warm-up: a half-trained net drags
         # games out, and the search arena pays full cost per step.

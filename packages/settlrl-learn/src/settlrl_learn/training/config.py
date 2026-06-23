@@ -87,10 +87,12 @@ class ValueBlendConfig(_Group):
 
 
 class EvalConfig(_Group):
-    """Periodic generalization check: every ``every`` iterations a *fresh* batch
-    of ``samples`` self-play positions is generated (its own games, never added to
-    the buffer) and scored for the ``val_*`` metrics -- so training uses 100% of
-    its data and the eval slice is leak-free. ``every`` = 0 disables it."""
+    """Periodic generalization check: every ``every`` iterations the first
+    ``samples`` positions of that iteration's fresh self-play batch are scored for
+    the ``val_*`` metrics *before* the net trains on them (a valid
+    held-out-in-time signal -- the net generated them but hasn't fit them yet),
+    then the whole batch trains as normal (100% of data used). ``every`` = 0
+    disables it (no ``val_*``)."""
 
     every: int = 0
     samples: int = 2048
